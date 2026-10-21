@@ -95,7 +95,8 @@ export class Files extends EventEmitter {
   #store: ConfigStore
   #spawn: typeof nodeSpawn | undefined
   #now: () => number
-  #tickets = new Map<string, { real: string; type: string; expires: number }>()
+  /** A file ticket serves one file; a folder ticket serves an HTML report and the files next to it. */
+  #tickets = new Map<string, { kind: 'file'; real: string; type: string; expires: number } | { kind: 'folder'; dir: string; expires: number }>()
   /** Real folder -> the `~` paths it was listed as. */
   #listed = new Map<string, Set<string>>()
   #timers = new Map<string, NodeJS.Timeout>()
@@ -172,27 +173,50 @@ export class Files extends EventEmitter {
   /**
    * A short-lived URL for an image, PDF, video or audio file. Media elements
    * cannot send the X-Workbench header, so the app asks for this with it.
+   * With `folder`, an HTML report gets a URL whose folder serves the files next
+   * to it (its CSS, scripts and images), and nothing outside that folder.
    */
-  async ticket(id: string, raw: string): Promise<{ url: string }> {
+  async ticket(id: string, raw: string, opts: { folder?: boolean } = {}): Promise<{ url: string }> {
     const { real, display } = await this.#resolve(id, raw)
     const type = MEDIA_TYPES[path.extname(real).toLowerCase()]
-    if (!type) throw new StoreError('No preview for this type of file', 415)
+    if (opts.folder ? !/\.html?$/i.test(real) : !type) {
+      throw new StoreError(opts.folder ? 'Only an HTML report opens with its folder' : 'No preview for this type of file', 415)
+    }
     if (!(await fsp.stat(real).catch(() => null))?.isFile()) throw new StoreError('Not found', 404)
     const now = this.#now()
     for (const [token, t] of this.#tickets) if (t.expires <= now) this.#tickets.delete(token)
     const token = randomBytes(24).toString('base64url')
-    this.#tickets.set(token, { real, type, expires: now + TICKET_MS })
-    return { url: `/raw/${token}/${encodeURIComponent(path.basename(display))}` }
+    const expires = now + TICKET_MS
+    this.#tickets.set(token, opts.folder ? { kind: 'folder', dir: path.dirname(real), expires } : { kind: 'file', real, type, expires })
+    return { url: `/raw/${token}/${encodeURIComponent(path.basename(opts.folder ? real : display))}` }
   }
 
+  /** The file a single-file ticket serves. */
   raw(token: string): { real: string; type: string } | null {
+    const t = this.#live(token)
+    return t?.kind === 'file' ? { real: t.real, type: t.type } : null
+  }
+
+  /** What `/raw/<token>/<rel>` serves: a file ticket's file, or a file inside a folder ticket's folder. */
+  async rawFile(token: string, rel: string): Promise<{ real: string; type?: string } | null> {
+    const t = this.#live(token)
+    if (!t) return null
+    if (t.kind === 'file') return { real: t.real, type: t.type }
+    const target = path.resolve(t.dir, rel)
+    if (!within(target, t.dir)) return null
+    const real = await fsp.realpath(target).catch(() => null)
+    if (!real || !within(real, t.dir)) return null
+    return (await fsp.stat(real)).isFile() ? { real } : null
+  }
+
+  #live(token: string) {
     const t = this.#tickets.get(token)
     if (!t) return null
     if (t.expires <= this.#now()) {
       this.#tickets.delete(token)
       return null
     }
-    return { real: t.real, type: t.type }
+    return t
   }
 
   /** Open with the desktop's default app; launchers and executables are refused. */

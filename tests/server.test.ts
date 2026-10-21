@@ -117,7 +117,7 @@ sections:
     items:
       - { label: Proj, type: folder, path: ~/proj }
       - { label: Shell, type: launch, command: echo, args: [hi] }
-      - { label: Card, type: project, project: p1 }
+      - { label: Today, type: daily }
 `,
     )
     spawn = fakeSpawn()

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseDocument } from 'yaml'
 import { applyOps, OpError } from '../server/config-ops.ts'
 import { buildServer } from '../server/main.ts'
-import { folderRoots, Profile, stepEntry, stepPath, stepsOf, type Op } from '../shared/config-schema.ts'
+import { categoryColor, folderRoots, Profile, stepEntry, stepPath, stepsOf, type Op } from '../shared/config-schema.ts'
 
 const SOURCE = `# Personal
 name: Personal
@@ -55,8 +55,8 @@ describe('steps in the schema', () => {
     expect(labels(p, 1)).toEqual([])
   })
 
-  it('refuses step types other than folder, note and launch', () => {
-    const bad = SOURCE.replace('type: note, path: docs/rules.md', 'type: link, url: "https://x.test"')
+  it('refuses entry types that are not steps', () => {
+    const bad = SOURCE.replace('type: note, path: docs/rules.md', 'type: daily')
     expect(Profile.safeParse(parseDocument(bad).toJS()).success).toBe(false)
   })
 
@@ -78,6 +78,51 @@ describe('steps in the schema', () => {
   it('lets the browser open folder steps, also outside the project', () => {
     const p = Profile.parse(parseDocument(SOURCE.replace('path: assets }', 'path: ~/Shared/assets }')).toJS())
     expect(folderRoots(p).map((r) => r.path)).toEqual(['~', '~/Projects/tuohi', '~/Shared/assets', '~/wargame'])
+  })
+})
+
+describe('report, file and link steps', () => {
+  const withSteps = SOURCE.replace(
+    '          - { label: rules, type: note, path: docs/rules.md }\n',
+    `          - { label: rules, type: note, path: docs/rules.md }
+          - { label: report, type: report, path: out/report/index.html }
+          - { label: render, type: file, path: ~/Renders/latest.png }
+          - { label: board, type: link, url: "https://example.com/board" }
+`,
+  )
+
+  it('are valid steps', () => {
+    const p = Profile.parse(parseDocument(withSteps).toJS())
+    expect(labels(p, 1)).toEqual(['rules', 'report', 'render', 'board'])
+  })
+
+  it("make their folders browsable, inside the project or not", () => {
+    const p = Profile.parse(parseDocument(withSteps).toJS())
+    const roots = folderRoots(p).map((r) => r.path)
+    expect(roots).toContain('~/wargame/out/report')
+    expect(roots).toContain('~/Renders')
+  })
+
+  it('a link step opens as a link entry', () => {
+    expect(stepEntry('~/p', { label: 'b', type: 'link', url: 'https://example.com' })).toEqual({ label: 'b', type: 'link', url: 'https://example.com' })
+  })
+
+  it('can be added through the step ops', () => {
+    const { profile } = run([{ op: 'addStep', at: wargame, step: { label: 'report', type: 'report', path: 'out/index.html' } }])
+    expect(labels(profile, 1)).toEqual(['rules', 'report'])
+  })
+})
+
+describe('category colours', () => {
+  it('uses the profile colour, or a steady one from the palette', () => {
+    const p = Profile.parse({ name: 'P', categories: { game: '#123456' }, sections: [] })
+    expect(categoryColor(p, 'game')).toBe('#123456')
+    expect(categoryColor(p, 'client')).toMatch(/^#[0-9a-f]{6}$/)
+    expect(categoryColor(p, 'client')).toBe(categoryColor(p, 'client'))
+  })
+
+  it('refuses a colour that is not #rrggbb', () => {
+    expect(Profile.safeParse({ name: 'P', categories: { game: 'green' }, sections: [] }).success).toBe(false)
   })
 })
 
@@ -140,7 +185,7 @@ describe('step ops', () => {
 
   it('refuses steps on other entries and other step types', () => {
     expect(() => run([{ op: 'addStep', at: { section: 0, index: 2 }, step: { label: 'a', type: 'folder', path: 'a' } }])).toThrow(OpError)
-    expect(() => run([{ op: 'addStep', at: tuohi, step: { label: 'a', type: 'link', url: 'https://x.test' } }])).toThrow(/folder, note or launcher/)
+    expect(() => run([{ op: 'addStep', at: tuohi, step: { label: 'a', type: 'daily' } }])).toThrow(/A step is a folder, note, report, file, launcher or link/)
     expect(() => run([{ op: 'deleteStep', at: tuohi, index: 5 }])).toThrow(/Step 5 does not exist/)
   })
 
@@ -180,6 +225,8 @@ workflow:
   - { label: assets, type: folder, path: ~/Shared/assets }
   - { label: brief, type: note, path: ~/briefs/brief.txt }
   - { label: modeling, type: launch, command: blender, args: [models/main.blend] }
+  - { label: board, type: link, url: "https://example.com/board" }
+  - { label: report, type: report, path: out/index.html }
 sections:
   - title: P
     items:
@@ -199,6 +246,15 @@ sections:
     const rev = (await server.app.inject({ method: 'GET', url: '/api/state', headers })).json().profiles[0].rev
     return server.app.inject({ method: 'POST', url: '/api/open', headers, payload: { profile: 'work', rev, at: { section: 0, index: 0 }, step } })
   }
+
+  it('opens a link step in the browser, by address', async () => {
+    expect((await open(3)).statusCode).toBe(200)
+    expect(spawned).toEqual([{ command: 'xdg-open', args: ['https://example.com/board'], cwd: undefined }])
+  })
+
+  it('does not open report or file steps outside the app', async () => {
+    expect((await open(4)).statusCode).toBe(422)
+  })
 
   it('starts a launcher step in the project folder, by address', async () => {
     expect((await open(2)).statusCode).toBe(200)

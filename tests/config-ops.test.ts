@@ -233,3 +233,50 @@ describe('setProfileField', () => {
     expect(() => run([{ op: 'setProfileField', key: 'name', value: '' }])).toThrow(OpError)
   })
 })
+
+describe('project cards', () => {
+  const at = { section: 0, index: 0 }
+
+  it('sets card fields on a folder entry, keeping comments', () => {
+    const { data, text } = run([
+      { op: 'setCard', at, field: 'description', value: 'Checks IFC models' },
+      { op: 'setCard', at, field: 'status', value: 'paused' },
+      { op: 'setCard', at, field: 'category', value: 'client' },
+      { op: 'setCard', at, field: 'pinned', value: true },
+    ])
+    expect(data.sections[0].items[0]).toMatchObject({ description: 'Checks IFC models', status: 'paused', category: 'client', pinned: true })
+    expect(text).toContain('# The checker, keep first')
+    expect(text).toContain('# custom key the app does not manage')
+  })
+
+  it('removes a field with null, and an empty description', () => {
+    const source = SOURCE.replace('owner: me', 'status: done\n        description: old\n        owner: me')
+    const { data } = run(
+      [
+        { op: 'setCard', at, field: 'status', value: null },
+        { op: 'setCard', at, field: 'description', value: '  ' },
+      ],
+      source,
+    )
+    expect(data.sections[0].items[0].status).toBeUndefined()
+    expect(data.sections[0].items[0].description).toBeUndefined()
+  })
+
+  it('validates the value and the entry', () => {
+    expect(() => run([{ op: 'setCard', at, field: 'status', value: 'someday' }])).toThrow(/status/)
+    expect(() => run([{ op: 'setCard', at, field: 'pinned', value: 'yes' }])).toThrow(OpError)
+    expect(() => run([{ op: 'setCard', at: { section: 0, index: 1 }, field: 'status', value: 'done' }])).toThrow(/folder/)
+  })
+
+  it('keeps card fields when the entry is edited in the dialog', () => {
+    const { data } = run([
+      { op: 'setCard', at, field: 'category', value: 'client' },
+      { op: 'updateItem', at, item: { label: 'IFC', type: 'folder', path: '~/ifc' } },
+    ])
+    expect(data.sections[0].items[0]).toMatchObject({ label: 'IFC', category: 'client' })
+  })
+
+  it('no longer knows project entries', () => {
+    expect(() => run([{ op: 'addItem', to: { section: 1 }, item: { label: 'Card', type: 'project', project: 'x' } as never }])).toThrow(OpError)
+  })
+})

@@ -6,6 +6,7 @@ import {
   NavItem,
   Profile,
   PROFILE_FIELDS,
+  StepItem,
   STEP_TYPES,
   TYPE_FIELDS,
   type ItemAddr,
@@ -64,8 +65,9 @@ function listAt(doc: Document, addr: ListAddr): YAMLSeq {
   return itemsOf(doc, group)
 }
 
-function parseItem(input: ItemInput) {
-  const parsed = NavItem.safeParse(input)
+/** A nav entry, or with `StepItem`, a workflow step. */
+function parseItem(input: ItemInput, schema: typeof NavItem | typeof StepItem = NavItem) {
+  const parsed = schema.safeParse(input)
   if (!parsed.success) throw new OpError(describeIssue(parsed.error))
   return parsed.data
 }
@@ -77,8 +79,8 @@ function title(value: string): string {
 }
 
 /** Plain object for a new item, in a readable key order, without empty fields. */
-function newItemData(input: ItemInput): Record<string, unknown> {
-  const item = parseItem(input)
+function newItemData(input: ItemInput, schema: typeof NavItem | typeof StepItem = NavItem): Record<string, unknown> {
+  const item = parseItem(input, schema)
   const out: Record<string, unknown> = { label: item.label, type: item.type }
   if (item.type === 'group') out.items = []
   for (const key of TYPE_FIELDS[item.type]) {
@@ -92,8 +94,8 @@ function newItemData(input: ItemInput): Record<string, unknown> {
   return out
 }
 
-function updateItemNode(doc: Document, node: YAMLMap, input: ItemInput) {
-  const item = parseItem(input)
+function updateItemNode(doc: Document, node: YAMLMap, input: ItemInput, schema: typeof NavItem | typeof StepItem = NavItem) {
+  const item = parseItem(input, schema)
   const oldType = node.get('type')
   if (oldType === 'group' && item.type !== 'group') {
     const children = node.get('items', true)
@@ -121,10 +123,10 @@ function updateItemNode(doc: Document, node: YAMLMap, input: ItemInput) {
   else node.delete('icon')
 }
 
-/** The folder entry at `at`; steps belong to folder entries. */
+/** The folder entry at `at`: projects, with cards and steps, are folder entries. */
 function folderAt(doc: Document, at: ItemAddr): YAMLMap {
   const node = nth(listAt(doc, at), at.index, 'Entry')
-  if (!isMap(node) || node.get('type') !== 'folder') throw new OpError('Only folder entries have workflow steps')
+  if (!isMap(node) || node.get('type') !== 'folder') throw new OpError('Only folder entries are projects')
   return node
 }
 
@@ -142,7 +144,22 @@ function ownSteps(doc: Document, at: ItemAddr): YAMLSeq {
 }
 
 function checkStep(input: ItemInput) {
-  if (!(STEP_TYPES as readonly string[]).includes(input.type)) throw new OpError('A step is a folder, note or launcher')
+  if (!(STEP_TYPES as readonly string[]).includes(input.type)) throw new OpError('A step is a folder, note, report, file, launcher or link')
+}
+
+/** Set a card field; a new one goes before `steps:`, so the card reads first. Null or an empty string removes it. */
+function setCard(doc: Document, node: YAMLMap, field: string, raw: string | boolean | null) {
+  const value = typeof raw === 'string' ? raw.trim() : raw
+  if (value === null || value === '') {
+    node.delete(field)
+    return
+  }
+  if (node.has(field) || !node.has('steps')) {
+    node.set(field, value)
+    return
+  }
+  const at = node.items.findIndex((pair) => (isScalar(pair.key) ? pair.key.value : pair.key) === 'steps')
+  node.items.splice(at, 0, doc.createPair(field, value))
 }
 
 /** Set a top-level key, adding it just before `sections` when it is new. */
@@ -236,7 +253,7 @@ function applyOp(doc: Document, op: Op) {
     case 'addStep': {
       checkStep(op.step)
       const seq = ownSteps(doc, op.at)
-      const node = doc.createNode(newItemData(op.step)) as YAMLMap
+      const node = doc.createNode(newItemData(op.step, StepItem)) as YAMLMap
       // Match the list: steps written as one-line { … } maps get a new one the same way.
       node.flow = seq.items.length > 0 && seq.items.every((i) => isMap(i) && i.flow)
       seq.items.splice(clamp(op.index, seq.items.length), 0, node)
@@ -246,7 +263,7 @@ function applyOp(doc: Document, op: Op) {
       checkStep(op.step)
       const node = nth(ownSteps(doc, op.at), op.index, 'Step')
       if (!isMap(node)) throw new OpError(`Step ${op.index} is not a mapping`)
-      updateItemNode(doc, node, op.step)
+      updateItemNode(doc, node, op.step, StepItem)
       return
     }
     case 'deleteStep': {
@@ -271,6 +288,9 @@ function applyOp(doc: Document, op: Op) {
       node.delete('steps')
       return
     }
+    case 'setCard':
+      setCard(doc, folderAt(doc, op.at), op.field, op.value)
+      return
   }
 }
 

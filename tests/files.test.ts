@@ -266,6 +266,31 @@ describe('operations', () => {
   })
 })
 
+describe('report tickets', () => {
+  beforeEach(async () => {
+    await write('proj/reports/index.html', '<link rel="stylesheet" href="style.css"><h1>Report</h1>')
+    await write('proj/reports/style.css', 'h1 { color: red }')
+    await write('proj/reports/img/chart.svg', '<svg/>')
+    await fsp.symlink(path.join(home, 'secret/key.txt'), path.join(home, 'proj/reports/leak.txt'))
+  })
+
+  it("serves an HTML report and the files next to it, nothing outside its folder", async () => {
+    const { url } = await files.ticket('work', '~/proj/reports/index.html', { folder: true })
+    expect(url).toMatch(/^\/raw\/[A-Za-z0-9_-]{32}\/index\.html$/)
+    const token = url.split('/')[2]
+    const real = fs.realpathSync(home)
+    expect(await files.rawFile(token, 'index.html')).toMatchObject({ real: `${real}/proj/reports/index.html` })
+    expect(await files.rawFile(token, 'img/chart.svg')).toMatchObject({ real: `${real}/proj/reports/img/chart.svg` })
+    expect(await files.rawFile(token, '../README.md')).toBeNull()
+    expect(await files.rawFile(token, 'leak.txt')).toBeNull()
+    expect(await files.rawFile(token, 'missing.css')).toBeNull()
+  })
+
+  it('gives folder tickets only for HTML', async () => {
+    expect(await status(files.ticket('work', '~/proj/README.md', { folder: true }))).toBe(415)
+  })
+})
+
 describe('opening in the default app', () => {
   it('opens files and folders with xdg-open', async () => {
     await files.open('work', '~/proj/logo.png')
@@ -366,6 +391,24 @@ describe('HTTP routes', () => {
     expect(part.rawPayload.length).toBe(100)
     expect((await server.app.inject({ method: 'GET', url, headers: { host: 'evil.test:7420' } })).statusCode).toBe(403)
     expect((await server.app.inject({ method: 'GET', url: '/raw/nope/x.mp3', headers: host })).statusCode).toBe(404)
+  })
+
+  it('serves a report folder with scripts sandboxed away from the app', async () => {
+    await write('proj/reports/index.html', '<h1>Report</h1>')
+    await write('proj/reports/style.css', 'h1 {}')
+    const { url } = (
+      await server.app.inject({ method: 'POST', url: '/api/files/ticket', headers, payload: { profile: 'work', path: '~/proj/reports/index.html', folder: true } })
+    ).json()
+    const host = { host: '127.0.0.1:7420' }
+    const page = await server.app.inject({ method: 'GET', url, headers: host })
+    expect(page.statusCode).toBe(200)
+    expect(page.headers['content-type']).toMatch(/^text\/html/)
+    expect(page.headers['content-security-policy']).toBe('sandbox allow-scripts allow-popups allow-forms')
+    const css = await server.app.inject({ method: 'GET', url: url.replace('index.html', 'style.css'), headers: host })
+    expect(css.statusCode).toBe(200)
+    expect(css.body).toBe('h1 {}')
+    const out = await server.app.inject({ method: 'GET', url: url.replace('index.html', '..%2FREADME.md'), headers: host })
+    expect(out.statusCode).toBe(404)
   })
 
   it('sandboxes SVG', async () => {

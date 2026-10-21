@@ -19,30 +19,47 @@ export const LaunchItem = z.object({
   args: list(z.string()),
   cwd: z.string().optional(),
 })
+export const LinkItem = z.object({ ...base, type: z.literal('link'), url: z.url('Not a valid URL') })
+
+// Only as workflow steps: an HTML report shown in its tab, and one file shown large.
+const ReportStep = z.object({ ...base, type: z.literal('report'), path: z.string().trim().min(1, 'Path is required') })
+const FileStep = z.object({ ...base, type: z.literal('file'), path: z.string().trim().min(1, 'Path is required') })
 
 /**
  * A step in a project's workflow ("assets", "modeling", "design"): a folder, a
- * note or a launcher, with the same fields as a nav entry. Relative paths are
- * inside the project folder, which is also a launcher's working folder.
+ * note, an HTML report or a single file shown in its tab, or a launcher or web
+ * link that opens outside. The fields are those of a nav entry. Relative paths
+ * are inside the project folder, which is also a launcher's working folder.
  */
-export const StepItem = z.discriminatedUnion('type', [z.object(folderFields), NoteItem, LaunchItem])
-export const STEP_TYPES = ['folder', 'note', 'launch'] as const
+export const StepItem = z.discriminatedUnion('type', [z.object(folderFields), NoteItem, ReportStep, FileStep, LaunchItem, LinkItem])
+export const STEP_TYPES = ['folder', 'note', 'report', 'file', 'launch', 'link'] as const
 
-/** A project folder. Without `steps:` it uses the profile's `workflow:`; an empty `steps:` means none. */
+export const STATUSES = ['active', 'paused', 'done', 'archived'] as const
+export type Status = (typeof STATUSES)[number]
+
+/** The card fields of a project; set from the project header and the nav menu. */
+export const CARD_FIELDS = ['description', 'status', 'category', 'pinned'] as const
+
+/**
+ * A project folder, with its card (description, status, category, pinned).
+ * Without `steps:` it uses the profile's `workflow:`; an empty `steps:` means none.
+ */
 export const FolderItem = z.object({
   ...folderFields,
+  description: z.string().optional(),
+  status: z.enum(STATUSES, 'Status must be active, paused, done or archived').optional(),
+  category: z.string().trim().min(1).optional(),
+  pinned: z.boolean().optional(),
   steps: z
     .array(StepItem)
     .nullable()
     .transform((v) => v ?? [])
     .optional(),
 })
-export const ProjectItem = z.object({ ...base, type: z.literal('project'), project: z.string().trim().min(1, 'Project id is required') })
-export const LinkItem = z.object({ ...base, type: z.literal('link'), url: z.url('Not a valid URL') })
 /** Today's note in the profile's notes folder: `<notes>/<folder>/YYYY-MM-DD.md`. */
 export const DailyItem = z.object({ ...base, type: z.literal('daily'), folder: z.string().optional(), template: z.string().optional() })
 
-export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ProjectItem, LinkItem, LaunchItem])
+export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, LinkItem, LaunchItem])
 
 /** One level of sub-groups under a heading; a group cannot contain another group. */
 export const GroupItem = z.object({
@@ -52,7 +69,7 @@ export const GroupItem = z.object({
   items: list(LeafItem),
 })
 
-export const NavItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ProjectItem, LinkItem, LaunchItem, GroupItem])
+export const NavItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, LinkItem, LaunchItem, GroupItem])
 
 export const Section = z.object({
   id: z.string().optional(),
@@ -69,6 +86,8 @@ export const Profile = z.object({
   notes: z.string().trim().regex(/^(~|\/)/, 'Notes folder must start with ~ or /').optional(),
   /** The steps every project starts with. */
   workflow: list(StepItem),
+  /** Colours for project categories; others get one from a palette. */
+  categories: z.record(z.string(), z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb')).optional(),
   sections: list(Section),
 })
 
@@ -85,16 +104,20 @@ export type Section = z.output<typeof Section>
 export type Profile = z.output<typeof Profile>
 export type Settings = z.output<typeof Settings>
 export type ItemType = NavItem['type']
-export type ItemInput = z.input<typeof NavItem>
+export type StepType = StepItem['type']
+/** Nav entry types plus the step-only ones. */
+export type AnyType = ItemType | StepType
+export type ItemInput = z.input<typeof NavItem> | z.input<typeof StepItem>
 
-export const ITEM_TYPES: ItemType[] = ['folder', 'note', 'daily', 'project', 'link', 'launch', 'group']
+export const ITEM_TYPES: ItemType[] = ['folder', 'note', 'daily', 'link', 'launch', 'group']
 
 /** The fields each item type owns; editing an item replaces these and keeps any others. */
-export const TYPE_FIELDS: Record<ItemType, string[]> = {
+export const TYPE_FIELDS: Record<AnyType, string[]> = {
   folder: ['path'],
   note: ['path'],
+  report: ['path'],
+  file: ['path'],
   daily: ['folder', 'template'],
-  project: ['project'],
   link: ['url'],
   launch: ['command', 'args', 'cwd'],
   group: ['collapsed', 'items'],
@@ -135,6 +158,8 @@ export const Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('resetSteps'), at: ItemAddr }),
   // Make this project's steps the profile's workflow, and use it here too.
   z.object({ op: z.literal('setWorkflow'), at: ItemAddr }),
+  // A card field of the project at `at`; null (or an empty description) removes it.
+  z.object({ op: z.literal('setCard'), at: ItemAddr, field: z.enum(CARD_FIELDS), value: z.union([z.string(), z.boolean()]).nullable() }),
 ])
 export type Op = z.output<typeof Op>
 
@@ -274,10 +299,35 @@ export function stepPath(project: string, p: string): string {
   return normalizePath(/^(~|\/)/.test(p) ? p : `${project}/${p}`)
 }
 
-/** A step as an entry of its own: paths resolved, and a launcher running in the project folder by default. */
-export function stepEntry(project: string, step: StepItem): LeafItem {
+/** A step with its paths resolved; a launcher runs in the project folder unless it says otherwise. */
+export function stepEntry(project: string, step: StepItem): StepItem {
   if (step.type === 'launch') return { ...step, cwd: stepPath(project, step.cwd ?? '.') }
-  return { ...step, path: stepPath(project, step.path) } as LeafItem
+  if (step.type === 'link') return step
+  return { ...step, path: stepPath(project, step.path) }
+}
+
+const parentPath = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) || '/' : '.')
+
+// Tame colours for categories without their own, picked steadily by name.
+const CATEGORY_PALETTE = ['#7d93ab', '#8fa58a', '#b39b78', '#a38aa8', '#7fa3a0', '#b58a86', '#9a9fb0']
+
+export function categoryColor(profile: Profile, name: string): string {
+  const own = profile.categories?.[name]
+  if (own) return own
+  let h = 0
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return CATEGORY_PALETTE[h % CATEGORY_PALETTE.length]
+}
+
+/** Categories in use by the profile's projects, plus those with a colour, sorted. */
+export function categoriesOf(profile: Profile): string[] {
+  const out = new Set(Object.keys(profile.categories ?? {}))
+  const visit = (item: NavItem) => {
+    if (item.type === 'folder' && item.category) out.add(item.category)
+    if (item.type === 'group') item.items.forEach(visit)
+  }
+  for (const s of profile.sections) s.items.forEach(visit)
+  return [...out].sort((a, b) => a.localeCompare(b))
 }
 
 // File browser (part 3)
@@ -294,9 +344,12 @@ export function folderRoots(profile: Profile): { label: string; path: string }[]
   const project = (item: NavItem) => {
     if (item.type !== 'folder') return
     out.push({ label: item.label, path: item.path })
-    // A folder step can sit outside its project, e.g. a shared assets folder.
+    // A step can sit outside its project, e.g. a shared assets folder; a report
+    // or a file needs its own folder (a report loads the files next to it).
     for (const step of stepsOf(profile, item)) {
-      if (step.type === 'folder') out.push({ label: `${item.label} › ${step.label}`, path: stepPath(item.path, step.path) })
+      const label = `${item.label} › ${step.label}`
+      if (step.type === 'folder') out.push({ label, path: stepPath(item.path, step.path) })
+      if (step.type === 'report' || step.type === 'file') out.push({ label, path: stepPath(item.path, parentPath(step.path)) })
     }
   }
   for (const section of profile.sections) {

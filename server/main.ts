@@ -38,6 +38,7 @@ const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string
 const ProfileQuery = z.object({ profile: z.string() })
 const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
 const FileOpBody = z.object({ profile: z.string(), op: FileOp })
+const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.boolean().optional() })
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body)
@@ -115,7 +116,9 @@ export async function buildServer(opts: ServerOptions) {
     }
     const s = stepsOf(p.profile, item)[step]
     if (!s || item.type !== 'folder') throw new StoreError('No such step', 404)
-    await openItem(stepEntry(item.path, s), home, opts.spawn)
+    const entry = stepEntry(item.path, s)
+    if (entry.type !== 'launch' && entry.type !== 'link') throw new StoreError('This step opens in its tab', 422)
+    await openItem(entry, home, opts.spawn)
     return { ok: true }
   })
 
@@ -169,8 +172,8 @@ export async function buildServer(opts: ServerOptions) {
   })
 
   app.post('/api/files/ticket', async (req) => {
-    const { profile, path: p } = parse(PathQuery, req.body)
-    return files.ticket(profile, p)
+    const { profile, path: p, folder } = parse(TicketBody, req.body)
+    return files.ticket(profile, p, { folder })
   })
 
   app.post('/api/files/op', async (req) => {
@@ -184,13 +187,18 @@ export async function buildServer(opts: ServerOptions) {
     return { ok: true }
   })
 
-  // Media for previews. <video>, <audio> and the PDF viewer cannot send X-Workbench,
-  // so they use a ticket the app asked for with it; the Host and Origin checks still apply.
-  app.get<{ Params: { token: string } }>('/raw/:token/:name', (req, reply) => {
-    const file = files.raw(req.params.token)
+  // Media and HTML reports for previews. <video>, <audio>, the PDF viewer and iframes
+  // cannot send X-Workbench, so they use a ticket the app asked for with it; the Host
+  // and Origin checks still apply. A report's scripts run in a sandbox without our
+  // origin, so they cannot reach the app or the API.
+  app.get<{ Params: { token: string; '*': string } }>('/raw/:token/*', async (req, reply) => {
+    const file = await files.rawFile(req.params.token, req.params['*'])
     if (!file) return reply.code(404).send({ error: 'Not found' })
-    reply.header('content-type', file.type).header('x-content-type-options', 'nosniff').header('cache-control', 'no-store')
-    if (file.type === 'image/svg+xml') reply.header('content-security-policy', 'sandbox')
+    if (file.type) reply.header('content-type', file.type)
+    reply.header('x-content-type-options', 'nosniff').header('cache-control', 'no-store')
+    const ext = path.extname(file.real).toLowerCase()
+    if (ext === '.svg') reply.header('content-security-policy', 'sandbox')
+    if (ext === '.html' || ext === '.htm') reply.header('content-security-policy', 'sandbox allow-scripts allow-popups allow-forms')
     return reply.sendFile(path.basename(file.real), path.dirname(file.real), { dotfiles: 'allow', acceptRanges: true })
   })
 
