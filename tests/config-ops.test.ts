@@ -185,3 +185,51 @@ describe('moveItem', () => {
     ).toThrow(/cannot contain another group/)
   })
 })
+
+describe('daily entries', () => {
+  it('adds a daily entry with only the fields given', () => {
+    const { data } = run([{ op: 'addItem', to: { section: 1 }, item: { label: 'Today', type: 'daily', folder: '', template: '' } }])
+    expect(data.sections[1].items[0]).toEqual({ label: 'Today', type: 'daily' })
+  })
+
+  it('keeps folder and template when set', () => {
+    const { data } = run([{ op: 'addItem', to: { section: 1 }, item: { label: 'Log', type: 'daily', folder: 'journal' } }])
+    expect(data.sections[1].items[0]).toEqual({ label: 'Log', type: 'daily', folder: 'journal' })
+  })
+})
+
+describe('setProfileField', () => {
+  it('adds notes after accent, keeping comments, and leaves sections last', () => {
+    const { data, text } = run([{ op: 'setProfileField', key: 'notes', value: '~/Documents/work/notes' }])
+    expect(data.notes).toBe('~/Documents/work/notes')
+    expect(text).toContain('# Work profile')
+    expect(text).toContain('# The checker, keep first')
+    expect(text.indexOf('notes: ~/Documents/work/notes')).toBeGreaterThan(text.indexOf('accent:'))
+    expect(text.indexOf('notes: ~/Documents/work/notes')).toBeLessThan(text.indexOf('sections:'))
+  })
+
+  it('places a new key after home when home is set', () => {
+    const { text } = run([{ op: 'setProfileField', key: 'notes', value: '~/n' }], SOURCE.replace('accent: "#7d93ab"\n', 'accent: "#7d93ab"\nhome: ~/w # where I work\n'))
+    expect(text).toMatch(/home: ~\/w # where I work\nnotes: ~\/n\nsections:/)
+  })
+
+  it('replaces an existing value in place', () => {
+    const { text } = run([{ op: 'setProfileField', key: 'notes', value: '~/b' }], SOURCE.replace('name: Work\n', 'name: Work\nnotes: ~/a # mine\n'))
+    expect(text).toContain('notes: ~/b # mine')
+  })
+
+  it('removes an optional key when the value is empty', () => {
+    const { data } = run([{ op: 'setProfileField', key: 'notes', value: '  ' }], SOURCE.replace('name: Work\n', 'name: Work\nnotes: ~/a\n'))
+    expect(data.notes).toBeUndefined()
+  })
+
+  it('quotes a bare ~ so it does not become null', () => {
+    const { data } = run([{ op: 'setProfileField', key: 'home', value: '~' }])
+    expect(data.home).toBe('~')
+  })
+
+  it('validates the result', () => {
+    expect(() => run([{ op: 'setProfileField', key: 'accent', value: 'teal' }])).toThrow(/accent/)
+    expect(() => run([{ op: 'setProfileField', key: 'name', value: '' }])).toThrow(OpError)
+  })
+})

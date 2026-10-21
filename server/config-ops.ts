@@ -1,10 +1,11 @@
 // Edits to a profile, applied to the parsed YAML document rather than to plain
 // data, so the user's comments, key order and flow style survive app edits.
-import { isMap, isNode, isSeq, visit, type Document, type YAMLMap, type YAMLSeq } from 'yaml'
+import { isMap, isNode, isScalar, isSeq, visit, type Document, type YAMLMap, type YAMLSeq } from 'yaml'
 import type { z } from 'zod'
 import {
   NavItem,
   Profile,
+  PROFILE_FIELDS,
   TYPE_FIELDS,
   type ItemInput,
   type ListAddr,
@@ -118,6 +119,25 @@ function updateItemNode(doc: Document, node: YAMLMap, input: ItemInput) {
   else node.delete('icon')
 }
 
+/** Set a top-level profile key in place; a new key goes after the keys that precede it in PROFILE_FIELDS. */
+function setProfileField(doc: Document, key: (typeof PROFILE_FIELDS)[number], raw: string) {
+  const map = doc.contents
+  if (!isMap(map)) throw new OpError('The profile is not a mapping')
+  const value = raw.trim()
+  if (!value && (key === 'home' || key === 'notes')) {
+    map.delete(key)
+    return
+  }
+  if (map.has(key)) {
+    map.set(key, value)
+    return
+  }
+  const before = new Set<unknown>(PROFILE_FIELDS.slice(0, PROFILE_FIELDS.indexOf(key)))
+  const keyOf = (pair: (typeof map.items)[number]) => (isScalar(pair.key) ? pair.key.value : pair.key)
+  const after = map.items.findLastIndex((pair) => before.has(keyOf(pair)))
+  map.items.splice(after + 1, 0, doc.createPair(key, value))
+}
+
 function applyOp(doc: Document, op: Op) {
   switch (op.op) {
     case 'addSection': {
@@ -172,6 +192,9 @@ function applyOp(doc: Document, op: Op) {
       target.items.splice(clamp(op.index, target.items.length), 0, node)
       return
     }
+    case 'setProfileField':
+      setProfileField(doc, op.key, op.value)
+      return
   }
 }
 

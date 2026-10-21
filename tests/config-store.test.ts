@@ -66,6 +66,9 @@ describe('first run', () => {
       expect(p.profile?.sections.length).toBeGreaterThan(0)
     }
     expect(state.profiles[1].profile?.home).toBe('~')
+    expect(state.profiles.map((p) => p.profile?.notes)).toEqual(['~/Documents/work/notes', '~/Documents/notes'])
+    const notesHeading = state.profiles[0].profile?.sections.find((sec) => sec.title === 'Notes')
+    expect(notesHeading?.items).toEqual([{ label: 'Today', type: 'daily' }])
   })
 
   it('does not seed over existing profiles', async () => {

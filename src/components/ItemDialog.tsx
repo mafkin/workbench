@@ -6,7 +6,8 @@ import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
 
 const HINTS: Record<ItemType, string> = {
   folder: 'Opens in the file browser (part 3). For now: Open in Files.',
-  note: 'A Markdown file. Opens in the notes editor (part 2). For now: your default app.',
+  note: 'A Markdown file. Opens formatted in the main pane; Edit (Ctrl+E) to change it.',
+  daily: "Today's note in the notes folder, made from a template the first time.",
   project: 'A project card id. Cards arrive in part 4.',
   link: 'Opens in your default browser.',
   launch: 'Starts a program directly, without a shell.',
@@ -14,7 +15,7 @@ const HINTS: Record<ItemType, string> = {
 }
 
 interface Props {
-  dialog: DialogState
+  dialog: Exclude<DialogState, { mode: 'note' }>
   onClose: () => void
   onSubmit: (item: ItemInput) => Promise<boolean>
 }
@@ -32,6 +33,8 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
   const [command, setCommand] = useState(initial?.type === 'launch' ? initial.command : '')
   const [argsText, setArgsText] = useState(initial?.type === 'launch' ? initial.args.join('\n') : '')
   const [cwd, setCwd] = useState(initial?.type === 'launch' ? (initial.cwd ?? '') : '')
+  const [folder, setFolder] = useState(initial?.type === 'daily' ? (initial.folder ?? '') : '')
+  const [template, setTemplate] = useState(initial?.type === 'daily' ? (initial.template ?? '') : '')
   const [icon, setIcon] = useState(initial?.icon ?? '')
   const [error, setError] = useState<{ field?: string; message: string } | null>(null)
   const [pathStatus, setPathStatus] = useState<{ exists: boolean; kind: string | null } | null>(null)
@@ -64,6 +67,8 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
         return { ...base, type, path: path.trim() }
       case 'link':
         return { ...base, type, url: url.trim() }
+      case 'daily':
+        return { ...base, type, folder: folder.trim() || undefined, template: template.trim() || undefined }
       case 'project':
         return { ...base, type, project: project.trim() }
       case 'launch':
@@ -166,6 +171,21 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
               />
               {fieldError('path') ?? pathHint()}
             </label>
+          )}
+
+          {type === 'daily' && (
+            <>
+              <label className="field">
+                <span>Folder (optional)</span>
+                <input className="mono" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="daily" name="folder" />
+                <span className="hint">Inside the notes folder. Each day is YYYY-MM-DD.md.</span>
+              </label>
+              <label className="field">
+                <span>Template (optional)</span>
+                <input className="mono" value={template} onChange={(e) => setTemplate(e.target.value)} placeholder="templates/daily.md" name="template" />
+                <span className="hint">{'Inside the notes folder. {{date}} and {{title}} are filled in.'}</span>
+              </label>
+            </>
           )}
 
           {type === 'link' && (

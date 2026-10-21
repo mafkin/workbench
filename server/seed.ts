@@ -5,7 +5,8 @@ import path from 'node:path'
 
 const HEADER = `# Edit this file by hand or in Workbench (pencil at the top of the nav panel).
 # Your comments are kept when the app saves.
-# Entry types: folder, note, project, link, launch, and group (one level of entries inside).
+# Entry types: folder, note, daily, project, link, launch, and group (one level of entries inside).
+# notes: is the folder for new notes, daily notes, search and [[wiki links]].
 `
 
 const SETTINGS = `# Workbench settings. Each file in profiles/ is a profile; this sets their order.
@@ -16,6 +17,7 @@ profiles: [work, personal]
 const WORK = `${HEADER}name: Work
 accent: "#7d93ab"
 home: ~/Documents/work
+notes: ~/Documents/work/notes
 sections:
   - title: Projects
     items:
@@ -58,12 +60,15 @@ sections:
         command: gnome-terminal
         args: ["--working-directory=~/ifc_checker_project", "--", "claude"]
   - title: Notes
-    items: []
+    items:
+      - label: Today
+        type: daily
 `
 
 const PERSONAL = `${HEADER}name: Personal
 accent: "#8fa58a"
 home: "~"            # a bare ~ means null in YAML, so it is quoted
+notes: ~/Documents/notes
 sections:
   - title: Games & dev
     items:
@@ -97,7 +102,9 @@ sections:
         type: folder
         path: ~/Documents
   - title: Notes
-    items: []
+    items:
+      - label: Today
+        type: daily
 `
 
 export async function seedConfig(dir: string): Promise<void> {

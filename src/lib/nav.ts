@@ -1,4 +1,4 @@
-import type { ItemAddr, ItemType, ListAddr, NavItem } from '../../shared/config-schema.ts'
+import type { ItemAddr, ItemType, ListAddr, NavItem, Profile } from '../../shared/config-schema.ts'
 
 export const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(' ')
 
@@ -21,6 +21,8 @@ export function describeTarget(item: NavItem): string {
     case 'folder':
     case 'note':
       return item.path
+    case 'daily':
+      return `${item.folder ?? 'daily'}/YYYY-MM-DD.md in the notes folder`
     case 'link':
       return item.url
     case 'launch':
@@ -35,6 +37,34 @@ export function describeTarget(item: NavItem): string {
 export type DialogState =
   | { mode: 'add'; list: ListAddr; index?: number; context: string; presetType?: ItemType }
   | { mode: 'edit'; at: ItemAddr; item: NavItem; context: string }
+  | { mode: 'note'; list: ListAddr; context: string }
+
+/** What the main pane shows: a nav entry, or a note opened by path (a link or a search result). */
+export type Selection = { kind: 'entry'; addr: ItemAddr; item: NavItem } | { kind: 'note'; path: string }
+
+/** Selection key prefix for a note opened by path; other keys are entry addresses. */
+export const NOTE_KEY = 'note:'
+
+/** The first note entry whose path matches, searching headings and groups. */
+export function findNoteEntry(profile: Profile, matches: (path: string) => boolean): ItemAddr | null {
+  for (const [si, section] of profile.sections.entries()) {
+    for (const [i, item] of section.items.entries()) {
+      if (item.type === 'note' && matches(item.path)) return { section: si, index: i }
+      if (item.type !== 'group') continue
+      for (const [ci, child] of item.items.entries()) {
+        if (child.type === 'note' && matches(child.path)) return { section: si, group: i, index: ci }
+      }
+    }
+  }
+  return null
+}
+
+export function listLength(profile: Profile, list: ListAddr): number {
+  const items = profile.sections[list.section]?.items ?? []
+  if (list.group === undefined) return items.length
+  const group = items[list.group]
+  return group?.type === 'group' ? group.items.length : 0
+}
 
 export interface MenuEntry {
   label: string

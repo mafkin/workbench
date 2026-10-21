@@ -33,8 +33,8 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | Part | Scope | Status |
 | --- | --- | --- |
 | 1 | Shell, profiles, configurable nav | Done (`2a8811a`) |
-| 2 | Markdown notes | Next in the suggested order |
-| 3 | File browser | |
+| 2 | Markdown notes | Done (branch `claude/inspiring-einstein-vwftq8`) |
+| 3 | File browser | Next in the suggested order |
 | 4 | Project cards | |
 | 5 | Agent chats | |
 | 6 | Skills & MCP panel | |
@@ -43,18 +43,24 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
-### Part 2: Markdown notes
+### Part 2: Markdown notes (done)
 
 - **In Mr. Mak:** Markdown opens as a formatted document, an Edit switch edits it in the same window, and saving writes back to the file. Images, video and audio preview next to the file tree. It uses `react-markdown` + `remark-gfm`.
-- **Hooks into:** `note` entries, which open in `MainPane` instead of the current placeholder. The "Notes" heading in each seeded profile is empty, waiting for this part.
-- **Ask:**
-  - Where notes live: a notes root per profile (a `notes:` key in the profile YAML, e.g. `~/Documents/work/notes`), or anywhere a note entry points.
-  - Editing style: a raw Markdown textarea with a toggle, side-by-side split, or WYSIWYG-ish.
-  - Whether to have quick-create ("New note" under a heading, which also adds a nav entry), daily notes, search across notes, and wiki links.
-  - Autosave or explicit save, and how to handle a conflict when the file changed on disk (reuse the rev/409 pattern from `config-store`).
-- **Notes:**
-  - File reads and writes need a new API. Scope it to paths under the profile's allowed roots, so the service can't read arbitrary files.
-  - Keep the guard on every route.
+- **Decisions (2026-10-21):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Where notes live | A `notes:` folder per profile, plus note entries pointing at any file |
+  | Editing style | View/Edit toggle in place (Ctrl+E); the editor is CodeMirror 6 |
+  | Extras | All four: quick-create, search, wiki links, daily notes |
+  | Saving | Autosave (1 s), paused on a conflict with Reload from disk / Keep mine |
+
+- **Built:**
+  - `server/notes.ts` with confinement by realpath, rev-checked atomic saves, list, search, images and folder watches.
+  - The `setProfileField` op, so the UI can set `notes:` without losing comments.
+  - The `daily` entry type: `folder` and `template` are relative to the notes folder; the template fills `{{date}}` and `{{title}}`.
+  - Back navigation, which part 3's file browser can reuse.
+- **Left for later:** see "Known gaps" in CLAUDE.md (no search index, `#heading` in wiki links, clickable checkboxes, links that follow a rename, code highlighting).
 
 ### Part 3: File browser
 
@@ -70,7 +76,10 @@ The user may pick parts in a different order; ask. For each part, the "Ask" item
   - Which operations: move, rename, delete to trash, new folder or file.
   - Which previews: image, video, audio, PDF, text/code.
   - Hidden files on or off, and whether to respect `.gitignore`.
-- **Notes:** use `gio trash` or a trash library for deletes, never permanent deletes by default. Keep paths confined to the profile's roots plus explicit nav paths.
+- **Notes:**
+  - Use `gio trash` or a trash library for deletes, never permanent deletes by default.
+  - Keep paths confined to the profile's roots plus explicit nav paths. `Notes.#resolve` in `server/notes.ts` is the pattern: `realish()` + allowed roots.
+  - Markdown previews can reuse `src/components/Markdown.tsx`, and image previews the `/api/notes/asset` approach.
 
 ### Part 4: Project cards
 

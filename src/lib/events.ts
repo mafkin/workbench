@@ -2,6 +2,22 @@ import type { AppState } from '../../shared/config-schema.ts'
 
 export type Connection = 'connecting' | 'live' | 'offline'
 
+export interface NoteEvent {
+  path: string
+  rev: string | null
+}
+
+// Open notes listen here: to changes on disk, and to reconnects (the service
+// may have restarted and stopped watching them).
+const noteListeners = new Set<(e: NoteEvent | 'reconnected') => void>()
+
+export function onNoteEvent(fn: (e: NoteEvent | 'reconnected') => void): () => void {
+  noteListeners.add(fn)
+  return () => {
+    noteListeners.delete(fn)
+  }
+}
+
 /**
  * Follow /api/events. Uses fetch rather than EventSource, which cannot send
  * the X-Workbench header. Reconnects with backoff; returns an unsubscribe.
@@ -9,6 +25,7 @@ export type Connection = 'connecting' | 'live' | 'offline'
 export function followState(onState: (s: AppState) => void, onConnection: (c: Connection) => void): () => void {
   const abort = new AbortController()
   let delay = 500
+  let connectedBefore = false
 
   async function connect() {
     while (!abort.signal.aborted) {
@@ -17,6 +34,8 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
         const res = await fetch('/api/events', { headers: { 'x-workbench': '1' }, signal: abort.signal })
         if (!res.ok || !res.body) throw new Error(`events: ${res.status}`)
         onConnection('live')
+        if (connectedBefore) for (const fn of noteListeners) fn('reconnected')
+        connectedBefore = true
         delay = 500
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
         let buffer = ''
@@ -26,14 +45,20 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
           buffer += value
           let end
           while ((end = buffer.indexOf('\n\n')) >= 0) {
-            const block = buffer.slice(0, end)
+            const lines = buffer.slice(0, end).split('\n')
             buffer = buffer.slice(end + 2)
-            const data = block
-              .split('\n')
+            const event = lines.find((l) => l.startsWith('event: '))?.slice(7) ?? 'message'
+            const data = lines
               .filter((l) => l.startsWith('data: '))
               .map((l) => l.slice(6))
               .join('\n')
-            if (data) onState(JSON.parse(data))
+            if (!data) continue
+            if (event === 'note') {
+              const e = JSON.parse(data) as NoteEvent
+              for (const fn of noteListeners) fn(e)
+            } else {
+              onState(JSON.parse(data))
+            }
           }
         }
       } catch {

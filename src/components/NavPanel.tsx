@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ArrowUpRight, ChevronDown, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowUpRight, ChevronDown, FilePlus, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { itemKey, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import type { Connection } from '../lib/events.ts'
@@ -333,6 +333,7 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
       y: e.clientY,
       entries: [
         { label: 'Add entry…', icon: <Plus size={14} />, run: addEntry },
+        { label: 'New note…', icon: <FilePlus size={14} />, run: () => ctx.openDialog({ mode: 'note', list: { section: index }, context }) },
         { label: 'Add group…', icon: <Plus size={14} />, run: () => ctx.openDialog({ mode: 'add', list: { section: index }, context, presetType: 'group' }) },
         { label: 'Rename heading', icon: <Pencil size={14} />, run: () => renaming.start(index) },
         {

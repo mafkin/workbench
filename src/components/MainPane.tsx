@@ -1,54 +1,121 @@
-import { ExternalLink, FolderOpen, Pencil } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import type { ItemAddr, NavItem, ProfileState } from '../../shared/config-schema.ts'
+import { ArrowLeft, ExternalLink, FileText, FolderOpen, Pencil, Search } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { NOTE_EXT, type ItemAddr, type NavItem, type ProfileState, type SearchHit } from '../../shared/config-schema.ts'
 import { stat } from '../lib/api.ts'
-import { opensExternally } from '../lib/nav.ts'
+import { opensExternally, type Selection } from '../lib/nav.ts'
+import { useNotes } from '../lib/notes-ctx.ts'
+import { DailyView } from './DailyView.tsx'
 import { EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
+import { NotesFolderHint } from './NotesFolderHint.tsx'
+import { NoteView } from './NoteView.tsx'
+import { SearchView } from './SearchView.tsx'
+
+export interface SearchState {
+  open: boolean
+  query: string
+}
 
 interface Props {
   active: ProfileState
-  selected: { addr: ItemAddr; item: NavItem } | null
+  selected: Selection | null
+  search: SearchState
+  setSearch: (s: SearchState) => void
+  searchRef: React.RefObject<HTMLInputElement | null>
+  canGoBack: boolean
+  onBack: () => void
   onHome: () => void
   activate: (addr: ItemAddr, item: NavItem) => void
   openExternally: (addr: ItemAddr, item: NavItem) => void
   startEditing: () => void
 }
 
-export function MainPane({ active, selected, onHome, activate, openExternally, startEditing }: Props) {
+const noteName = (path: string) => (path.split('/').pop() ?? path).replace(NOTE_EXT, '')
+
+export function MainPane({ active, selected, search, setSearch, searchRef, canGoBack, onBack, onHome, activate, openExternally, startEditing }: Props) {
+  const notes = useNotes()
+  const firstHit = useRef<string | null>(null)
   const profile = active.profile
-  const section = selected && profile ? profile.sections[selected.addr.section] : undefined
-  const group = selected && section && selected.addr.group !== undefined ? section.items[selected.addr.group] : undefined
+  const entry = selected?.kind === 'entry' ? selected : null
+  const section = entry && profile ? profile.sections[entry.addr.section] : undefined
+  const group = entry && section && entry.addr.group !== undefined ? section.items[entry.addr.group] : undefined
+  const atHome = !selected && !search.open
 
   return (
     <main className="main">
       <div className="topbar">
+        {canGoBack && (
+          <button className="icon-btn" onClick={onBack} title="Back (Alt+←)" aria-label="Back">
+            <ArrowLeft size={15} />
+          </button>
+        )}
         <div className="crumbs">
-          {selected ? <button onClick={onHome}>{profile?.name ?? active.id}</button> : <span className="current">{profile?.name ?? active.id}</span>}
-          {section && (
+          {atHome ? <span className="current">{profile?.name ?? active.id}</span> : <button onClick={onHome}>{profile?.name ?? active.id}</button>}
+          {search.open ? (
             <>
               <span className="sep">/</span>
-              <span>{section.title}</span>
+              <span className="current">Search</span>
             </>
-          )}
-          {group && (
+          ) : entry ? (
+            <>
+              {section && (
+                <>
+                  <span className="sep">/</span>
+                  <span>{section.title}</span>
+                </>
+              )}
+              {group && (
+                <>
+                  <span className="sep">/</span>
+                  <span>{group.label}</span>
+                </>
+              )}
+              <span className="sep">/</span>
+              <span className="current">{entry.item.label}</span>
+            </>
+          ) : selected?.kind === 'note' ? (
             <>
               <span className="sep">/</span>
-              <span>{group.label}</span>
-            </>
-          )}
-          {selected && (
-            <>
+              <span>Notes</span>
               <span className="sep">/</span>
-              <span className="current">{selected.item.label}</span>
+              <span className="current" title={selected.path}>
+                {noteName(selected.path)}
+              </span>
             </>
-          )}
+          ) : null}
         </div>
+        <span style={{ flex: 1 }} />
+        <label className="search-box">
+          <Search size={13} />
+          <input
+            ref={searchRef}
+            value={search.query}
+            placeholder="Search notes"
+            aria-label="Search notes"
+            onFocus={() => !search.open && setSearch({ ...search, open: true })}
+            onChange={(e) => setSearch({ open: true, query: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setSearch({ ...search, open: false })
+                e.currentTarget.blur()
+              } else if (e.key === 'Enter' && firstHit.current) {
+                notes.open(firstHit.current)
+                e.currentTarget.blur()
+              }
+            }}
+          />
+          {!search.open && <span className="kbd">Ctrl+Shift+F</span>}
+        </label>
       </div>
       <div className="content">
         {!profile ? (
           <BrokenProfile active={active} />
-        ) : selected ? (
-          <EntryView key={`${active.id}:${selected.item.label}`} addr={selected.addr} item={selected.item} kicker={section?.title ?? ''} openExternally={openExternally} />
+        ) : search.open ? (
+          <SearchView query={search.query} onResults={(hits: SearchHit[]) => (firstHit.current = hits[0]?.path ?? null)} />
+        ) : entry ? (
+          <EntryView key={`${active.id}:${entry.item.label}`} addr={entry.addr} item={entry.item} kicker={section?.title ?? ''} openExternally={openExternally} />
+        ) : selected?.kind === 'note' ? (
+          <PathNote key={selected.path} path={selected.path} />
         ) : (
           <Home active={active} activate={activate} startEditing={startEditing} />
         )}
@@ -108,7 +175,14 @@ function Home({ active, activate, startEditing }: { active: ProfileState; activa
             <span className="mono">{profile.home}</span>
           </>
         )}
+        {profile.notes && (
+          <>
+            {' · notes '}
+            <span className="mono">{profile.notes}</span>
+          </>
+        )}
       </p>
+      {!profile.notes && <NotesFolderHint compact />}
       <div className="overview">
         {profile.sections.map((s, si) => (
           <section className="card" key={si}>
@@ -156,7 +230,61 @@ function PathStatus({ path, want }: { path: string; want: 'dir' | 'file' }) {
   return <span className="status ok">Found</span>
 }
 
+/** A note opened by path: from a link or a search result, not from the nav. */
+function PathNote({ path }: { path: string }) {
+  const notes = useNotes()
+  const rel = notes.list.find((n) => n.path === path)?.rel
+  const folder = rel?.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : null
+  const name = noteName(path)
+  return (
+    <NoteView
+      path={path}
+      title={name}
+      kicker={folder ? `Notes · ${folder}` : 'Notes'}
+      heading={
+        <>
+          <FileText size={22} className="icon" />
+          {name}
+        </>
+      }
+      below={
+        <div className="path-row">
+          <span className="path mono">{path}</span>
+        </div>
+      }
+    />
+  )
+}
+
 function EntryView({ addr, item, kicker, openExternally }: { addr: ItemAddr; item: NavItem; kicker: string; openExternally: Props['openExternally'] }) {
+  if (item.type === 'note') {
+    return (
+      <NoteView
+        key={item.path}
+        path={item.path}
+        title={item.label}
+        kicker={`${kicker} · ${TYPE_LABEL.note}`}
+        heading={
+          <>
+            <EntryIcon type="note" icon={item.icon} size={22} />
+            {item.label}
+          </>
+        }
+        below={
+          <div className="path-row">
+            <span className="path mono">{item.path}</span>
+            <button className="btn ghost" onClick={() => openExternally(addr, item)}>
+              <ExternalLink size={14} />
+              Open in default app
+            </button>
+          </div>
+        }
+      />
+    )
+  }
+
+  if (item.type === 'daily') return <DailyView item={item} kicker={kicker} />
+
   return (
     <div className="page">
       <div className="page-kicker">
@@ -167,28 +295,19 @@ function EntryView({ addr, item, kicker, openExternally }: { addr: ItemAddr; ite
         {item.label}
       </h1>
 
-      {(item.type === 'folder' || item.type === 'note') && (
+      {item.type === 'folder' && (
         <>
           <div className="path-row">
             <span className="path mono">{item.path}</span>
-            <PathStatus path={item.path} want={item.type === 'folder' ? 'dir' : 'file'} />
+            <PathStatus path={item.path} want="dir" />
             <button className="btn" onClick={() => openExternally(addr, item)}>
-              {item.type === 'folder' ? <FolderOpen size={14} /> : <ExternalLink size={14} />}
-              {item.type === 'folder' ? 'Open in Files' : 'Open in default app'}
+              <FolderOpen size={14} />
+              Open in Files
             </button>
           </div>
           <div className="placeholder">
-            {item.type === 'folder' ? (
-              <>
-                <h3>File browser: part 3</h3>
-                <p>The folder tree, quick-jump chips, filter and previews will open here.</p>
-              </>
-            ) : (
-              <>
-                <h3>Notes: part 2</h3>
-                <p>This note will open here formatted, with an Edit mode that saves in place.</p>
-              </>
-            )}
+            <h3>File browser: part 3</h3>
+            <p>The folder tree, quick-jump chips, filter and previews will open here.</p>
           </div>
         </>
       )}

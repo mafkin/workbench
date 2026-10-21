@@ -1,7 +1,6 @@
 // Profiles and settings on disk. The files are the source of truth: hand edits
 // are picked up by a watcher, app edits are applied to the parsed document and
 // written atomically, and a file the user has broken is never overwritten.
-import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -16,13 +15,17 @@ import {
   type ProfileState,
 } from '../shared/config-schema.ts'
 import { applyOps, describeIssue, OpError } from './config-ops.ts'
+import { revOf, writeAtomic } from './fs-util.ts'
 import { seedConfig } from './seed.ts'
 
 export class StoreError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** Extra fields for the response body, e.g. the current rev on a conflict. */
+  data?: Record<string, unknown>
+  constructor(message: string, status: number, data?: Record<string, unknown>) {
     super(message)
     this.status = status
+    this.data = data
   }
 }
 
@@ -31,8 +34,6 @@ interface Entry extends ProfileState {
   /** Content before the last app edit, restorable while the file still has that edit. */
   undo?: { text: string; revAfter: string }
 }
-
-const revOf = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 12)
 
 export function parseProfile(text: string): { profile: Profile | null; error: ConfigError | null } {
   const lineCounter = new LineCounter()
@@ -58,12 +59,6 @@ export function parseProfile(text: string): { profile: Profile | null; error: Co
   }
   const pos = range ? lineCounter.linePos(range[0]) : undefined
   return { profile: null, error: { message: describeIssue(result.error), line: pos?.line, col: pos?.col } }
-}
-
-async function writeAtomic(file: string, text: string) {
-  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`)
-  await fsp.writeFile(tmp, text)
-  await fsp.rename(tmp, file)
 }
 
 export class ConfigStore extends EventEmitter {
@@ -101,7 +96,8 @@ export class ConfigStore extends EventEmitter {
     this.#watchers = []
   }
 
-  state(): AppState {
+  /** Everything but `home`, which the server adds. */
+  state(): Omit<AppState, 'home'> {
     const ids = [...this.#entries.keys()]
     const order = [
       ...this.#settings.profiles.filter((id) => this.#entries.has(id)),

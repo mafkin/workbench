@@ -1,10 +1,11 @@
-import { FileText, Folder, FolderTree, LayoutGrid, Link2, Play, type LucideIcon } from 'lucide-react'
+import { CalendarDays, FileText, Folder, FolderTree, LayoutGrid, Link2, Play, type LucideIcon } from 'lucide-react'
 import { DynamicIcon, iconNames, type IconName } from 'lucide-react/dynamic.mjs'
 import type { ItemType } from '../../shared/config-schema.ts'
 
 export const TYPE_ICON: Record<ItemType, LucideIcon> = {
   folder: Folder,
   note: FileText,
+  daily: CalendarDays,
   project: LayoutGrid,
   link: Link2,
   launch: Play,
@@ -14,6 +15,7 @@ export const TYPE_ICON: Record<ItemType, LucideIcon> = {
 export const TYPE_LABEL: Record<ItemType, string> = {
   folder: 'Folder',
   note: 'Note',
+  daily: 'Daily',
   project: 'Project',
   link: 'Link',
   launch: 'Launcher',

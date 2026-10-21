@@ -12,6 +12,7 @@ import { describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
 import { makeGuard } from './guard.ts'
 import { LaunchError, openItem } from './launch.ts'
+import { Notes, type NoteEvent } from './notes.ts'
 
 export const DEFAULT_PORT = 7420
 const DEV_UI_PORT = 7421
@@ -31,6 +32,10 @@ const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
 const RevBody = z.object({ rev: z.string() })
 const ActiveBody = z.object({ profile: z.string() })
 const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr })
+const NoteQuery = z.object({ profile: z.string(), path: z.string() })
+const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string().nullable(), text: z.string() })
+const ProfileQuery = z.object({ profile: z.string() })
+const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body)
@@ -49,6 +54,8 @@ export async function buildServer(opts: ServerOptions) {
   const store = new ConfigStore(opts.configDir)
   await store.init({ watch: opts.watch ?? true })
   store.on('error', (err) => console.error('[config]', err))
+  const notes = new Notes(store, home)
+  const state = () => ({ ...store.state(), home })
 
   const app = Fastify({ logger: false })
   const guard = makeGuard(opts.dev ? [opts.port, DEV_UI_PORT] : [opts.port])
@@ -57,10 +64,13 @@ export async function buildServer(opts: ServerOptions) {
     const reason = guard(req.headers, req.url)
     if (reason) return reply.code(403).send({ error: reason })
   })
-  app.addHook('onClose', async () => store.close())
+  app.addHook('onClose', async () => {
+    store.close()
+    notes.close()
+  })
 
   app.setErrorHandler((err, _req, reply) => {
-    if (err instanceof StoreError) return reply.code(err.status).send({ error: err.message })
+    if (err instanceof StoreError) return reply.code(err.status).send({ error: err.message, ...err.data })
     if (err instanceof LaunchError) return reply.code(422).send({ error: err.message })
     const status = (err as { statusCode?: number }).statusCode
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message })
@@ -70,7 +80,7 @@ export async function buildServer(opts: ServerOptions) {
 
   app.get('/api/health', async () => ({ ok: true }))
 
-  app.get('/api/state', async () => store.state())
+  app.get('/api/state', async () => state())
 
   app.post<{ Params: { id: string } }>('/api/profiles/:id/ops', async (req) => {
     const { rev, ops } = parse(OpsBody, req.body)
@@ -105,7 +115,38 @@ export async function buildServer(opts: ServerOptions) {
     return { exists: !!stat, kind: stat ? (stat.isDirectory() ? 'dir' : 'file') : null }
   })
 
-  // Server-sent events: the full state after every change.
+  // Notes: paths are checked against the profile's notes folder and note entries (see notes.ts).
+  app.get('/api/notes/file', async (req) => {
+    const { profile, path: p } = parse(NoteQuery, req.query)
+    return notes.read(profile, p)
+  })
+
+  // A note may be up to 2 MB; JSON escaping can roughly double that.
+  app.post('/api/notes/file', { bodyLimit: 8 * 1024 * 1024 }, async (req) => {
+    const { profile, path: p, rev, text } = parse(NoteSave, req.body)
+    return notes.write(profile, p, rev, text)
+  })
+
+  app.get('/api/notes/list', async (req) => notes.list(parse(ProfileQuery, req.query).profile))
+
+  app.get('/api/notes/search', async (req) => {
+    const { profile, q } = parse(SearchQuery, req.query)
+    return notes.search(profile, q)
+  })
+
+  app.get('/api/notes/asset', async (req, reply) => {
+    const { profile, path: p } = parse(NoteQuery, req.query)
+    const image = await notes.asset(profile, p)
+    return reply
+      .header('content-type', image.type)
+      .header('content-length', image.size)
+      .header('content-security-policy', 'sandbox')
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'no-cache')
+      .send(fs.createReadStream(image.real))
+  })
+
+  // Server-sent events: the full state after every change, and changes to open notes.
   app.get('/api/events', (req, reply) => {
     reply.hijack()
     const res = reply.raw
@@ -114,13 +155,16 @@ export async function buildServer(opts: ServerOptions) {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
-    const send = () => res.write(`event: state\ndata: ${JSON.stringify(store.state())}\n\n`)
+    const send = () => res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`)
+    const sendNote = (e: NoteEvent) => res.write(`event: note\ndata: ${JSON.stringify(e)}\n\n`)
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000)
     store.on('change', send)
+    notes.on('note', sendNote)
     send()
     req.raw.on('close', () => {
       clearInterval(ping)
       store.off('change', send)
+      notes.off('note', sendNote)
     })
   })
 
@@ -133,7 +177,7 @@ export async function buildServer(opts: ServerOptions) {
     })
   }
 
-  return { app, store }
+  return { app, store, notes }
 }
 
 if (import.meta.main) {
