@@ -3,6 +3,9 @@
 // - a browser Origin, if sent, must be ours (blocks other sites' forms and fetches),
 // - API calls must carry X-Workbench, which a cross-site request cannot add
 //   without a CORS preflight that this service never approves.
+// /raw/ is the exception after the Host check: it only reads, and only with a
+// random ticket the app fetched through the API. A report shown in a sandboxed
+// frame has no origin of ours, so its own CSS and scripts arrive as cross-site.
 import type { IncomingHttpHeaders } from 'node:http'
 
 export const API_HEADER = 'x-workbench'
@@ -13,6 +16,7 @@ export function makeGuard(ports: number[]) {
 
   return function check(headers: IncomingHttpHeaders, url: string): string | null {
     if (!headers.host || !hosts.has(headers.host)) return 'Host not allowed'
+    if (url.startsWith('/raw/')) return null
     if (headers.origin && !origins.has(headers.origin)) return 'Origin not allowed'
     if (headers['sec-fetch-site'] === 'cross-site') return 'Cross-site request'
     if (url.startsWith('/api/') && headers[API_HEADER] !== '1') return 'Missing X-Workbench header'

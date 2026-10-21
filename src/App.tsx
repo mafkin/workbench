@@ -1,4 +1,4 @@
-import { ExternalLink, FilePlus, FolderOpen, Pencil, Play, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ExternalLink, FilePlus, FolderOpen, Pencil, Pin, Play, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   expandHome,
@@ -309,12 +309,12 @@ export function App() {
     () => ({
       run,
       openDialog: setDialog,
-      launchStep: (addr, index, label) => {
+      launchStep: (addr, index, label, kind) => {
         const a = activeRef.current
         if (!a) return
         api
           .openEntry(a.id, a.rev, addr, index)
-          .then(() => toasts.push({ message: `Started ${label}` }))
+          .then(() => toasts.push({ message: `${kind === 'link' ? 'Opened' : 'Started'} ${label}` }))
           .catch(fail)
       },
       rememberStep: (addr, label) => {
@@ -330,7 +330,27 @@ export function App() {
       const section = activeRef.current?.profile?.sections[addr.section]
       const where = addr.group === undefined ? section?.title : `${section?.title} / ${section?.items[addr.group]?.label}`
       const entries: (MenuEntry | 'sep')[] = []
-      if (item.type === 'folder') entries.push({ label: 'Open in Files', icon: <FolderOpen size={14} />, run: () => openExternally(addr, item) })
+      if (item.type === 'folder') {
+        const card = (field: 'pinned' | 'status', value: string | boolean | null, label?: string) =>
+          void run([{ op: 'setCard', at: addr, field, value }], label)
+        const status = item.status ?? 'active'
+        entries.push(
+          { label: 'Open in Files', icon: <FolderOpen size={14} />, run: () => openExternally(addr, item) },
+          'sep',
+          { label: item.pinned ? 'Unpin' : 'Pin', icon: <Pin size={14} />, run: () => card('pinned', item.pinned ? null : true) },
+          ...(['active', 'paused', 'done'] as const)
+            .filter((s) => s !== status && !(s === 'active' && status === 'archived'))
+            .map((s) => ({
+              label: `Mark ${s}`,
+              icon: <span className={cx('status-dot', s)} />,
+              // Active is the default: the field is left out.
+              run: () => card('status', s === 'active' ? null : s, `${item.label}: ${s}`),
+            })),
+          status === 'archived'
+            ? { label: 'Unarchive', icon: <ArchiveRestore size={14} />, run: () => card('status', null, `${item.label}: back from the archive`) }
+            : { label: 'Archive', icon: <Archive size={14} />, run: () => card('status', 'archived', `Archived "${item.label}"`) },
+        )
+      }
       if (item.type === 'note') entries.push({ label: 'Open in default app', icon: <ExternalLink size={14} />, run: () => openExternally(addr, item) })
       if (item.type === 'link') entries.push({ label: 'Open link', icon: <ExternalLink size={14} />, run: () => openExternally(addr, item) })
       if (item.type === 'launch') entries.push({ label: 'Start', icon: <Play size={14} />, run: () => openExternally(addr, item) })

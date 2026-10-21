@@ -1,25 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
-import { ITEM_TYPES, NavItem, STEP_TYPES, stepPath, type ItemInput, type ItemType } from '../../shared/config-schema.ts'
+import { ITEM_TYPES, NavItem, StepItem, STEP_TYPES, stepPath, type AnyType, type ItemInput } from '../../shared/config-schema.ts'
 import { stat } from '../lib/api.ts'
 import { cx, type DialogState } from '../lib/nav.ts'
 import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
 
 // For a workflow step, paths are inside the project.
-const STEP_HINTS: Partial<Record<ItemType, string>> = {
+const STEP_HINTS: Partial<Record<AnyType, string>> = {
   folder: 'A folder in the project, like assets. It opens in the browser.',
   note: 'A note in the project, like docs/design.md. It opens in place, with Edit.',
+  report: 'An HTML file in the project, like reports/index.html. Shown in the tab, with the files next to it.',
+  file: 'One file in the project, like renders/latest.png. Shown large in the tab.',
   launch: 'Runs in the project folder; arguments can be paths inside it.',
+  link: 'A web address. The tab opens it in your browser.',
 }
 
-const HINTS: Record<ItemType, string> = {
-  folder: 'Opens in the file browser (part 3). For now: Open in Files.',
+const HINTS: Record<AnyType, string> = {
+  folder: 'A project: its card, workflow tabs and files.',
   note: 'A Markdown file. Opens formatted in the main pane; Edit (Ctrl+E) to change it.',
+  report: '',
+  file: '',
   daily: "Today's note in the notes folder, made from a template the first time.",
-  project: 'A project card id. Cards arrive in part 4.',
   link: 'Opens in your default browser.',
   launch: 'Starts a program directly, without a shell.',
   group: 'Holds entries one level deep under this heading.',
 }
+
+const PATH_TYPES: AnyType[] = ['folder', 'note', 'report', 'file']
 
 interface Props {
   dialog: Exclude<DialogState, { mode: 'note' }>
@@ -33,14 +39,13 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
   const adding = dialog.mode === 'add' || (step !== null && step.index === undefined)
   const insideGroup = dialog.mode === 'edit' ? dialog.at.group !== undefined : dialog.mode === 'add' && dialog.list.group !== undefined
   const lockedGroup = initial?.type === 'group' && initial.items.length > 0
-  const types: readonly ItemType[] = step ? STEP_TYPES : ITEM_TYPES
+  const types: readonly AnyType[] = step ? STEP_TYPES : ITEM_TYPES
   const noun = step ? 'step' : 'entry'
 
-  const [type, setType] = useState<ItemType>(initial?.type ?? (dialog.mode === 'add' ? (dialog.presetType ?? 'folder') : 'folder'))
+  const [type, setType] = useState<AnyType>(initial?.type ?? (dialog.mode === 'add' ? (dialog.presetType ?? 'folder') : 'folder'))
   const [label, setLabel] = useState(initial?.label ?? '')
   const [path, setPath] = useState(initial && 'path' in initial ? initial.path : '')
   const [url, setUrl] = useState(initial?.type === 'link' ? initial.url : '')
-  const [project, setProject] = useState(initial?.type === 'project' ? initial.project : '')
   const [command, setCommand] = useState(initial?.type === 'launch' ? initial.command : '')
   const [argsText, setArgsText] = useState(initial?.type === 'launch' ? initial.args.join('\n') : '')
   const [cwd, setCwd] = useState(initial?.type === 'launch' ? (initial.cwd ?? '') : '')
@@ -63,7 +68,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
   // Warn, without blocking, when the path does not exist or is the wrong kind.
   useEffect(() => {
     setPathStatus(null)
-    if ((type !== 'folder' && type !== 'note') || !path.trim()) return
+    if (!PATH_TYPES.includes(type) || !path.trim()) return
     const t = setTimeout(() => {
       stat(step ? stepPath(step.base, path.trim()) : path.trim()).then(setPathStatus, () => setPathStatus(null))
     }, 250)
@@ -75,13 +80,13 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
     switch (type) {
       case 'folder':
       case 'note':
+      case 'report':
+      case 'file':
         return { ...base, type, path: path.trim() }
       case 'link':
         return { ...base, type, url: url.trim() }
       case 'daily':
         return { ...base, type, folder: folder.trim() || undefined, template: template.trim() || undefined }
-      case 'project':
-        return { ...base, type, project: project.trim() }
       case 'launch':
         return {
           ...base,
@@ -98,7 +103,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const item = build()
-    const parsed = NavItem.safeParse(item)
+    const parsed = (step ? StepItem : NavItem).safeParse(item)
     if (!parsed.success) {
       const issue = parsed.error.issues[0]
       setError({ field: String(issue?.path[0] ?? ''), message: issue?.message ?? 'Invalid entry' })
@@ -123,7 +128,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
     if (!pathStatus) return null
     if (!pathStatus.exists) return <span className="hint" style={{ color: 'var(--warn)' }}>Not found on disk (you can still save it)</span>
     if (type === 'folder' && pathStatus.kind !== 'dir') return <span className="hint" style={{ color: 'var(--warn)' }}>This is a file, not a folder</span>
-    if (type === 'note' && pathStatus.kind !== 'file') return <span className="hint" style={{ color: 'var(--warn)' }}>This is a folder, not a file</span>
+    if (type !== 'folder' && pathStatus.kind !== 'file') return <span className="hint" style={{ color: 'var(--warn)' }}>This is a folder, not a file</span>
     return <span className="hint" style={{ color: 'var(--ok)' }}>Found</span>
   }
 
@@ -169,7 +174,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
             {fieldError('label')}
           </label>
 
-          {(type === 'folder' || type === 'note') && (
+          {PATH_TYPES.includes(type) && (
             <label className="field">
               <span>{type === 'folder' ? 'Folder' : 'File'}</span>
               <input
@@ -177,7 +182,13 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
                 onBlur={suggestLabel}
-                placeholder={step ? (type === 'folder' ? 'assets' : 'docs/design.md') : type === 'folder' ? '~/Projects/name' : '~/notes/file.md'}
+                placeholder={
+                  step
+                    ? { folder: 'assets', note: 'docs/design.md', report: 'reports/index.html', file: 'renders/latest.png' }[type as string]
+                    : type === 'folder'
+                      ? '~/Projects/name'
+                      : '~/notes/file.md'
+                }
                 name="path"
               />
               {fieldError('path') ?? pathHint()}
@@ -204,14 +215,6 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
               <span>URL</span>
               <input className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" name="url" />
               {fieldError('url')}
-            </label>
-          )}
-
-          {type === 'project' && (
-            <label className="field">
-              <span>Project id</span>
-              <input className="mono" value={project} onChange={(e) => setProject(e.target.value)} name="project" />
-              {fieldError('project')}
             </label>
           )}
 

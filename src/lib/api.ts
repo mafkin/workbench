@@ -70,7 +70,9 @@ export const searchNotes = (profile: string, q: string) => api<SearchHit[]>(`/ap
 export const listFiles = (profile: string, path: string) => api<FileListing>(`/api/files/list?${query({ profile, path })}`)
 export const fileText = (profile: string, path: string) => api<FileText>(`/api/files/text?${query({ profile, path })}`)
 /** A short-lived URL for media elements, which cannot send the X-Workbench header. */
-export const fileTicket = (profile: string, path: string) => api<{ url: string }>('/api/files/ticket', { body: { profile, path } })
+/** With `folder`, an HTML report's URL also serves the files next to it. */
+export const fileTicket = (profile: string, path: string, folder = false) =>
+  api<{ url: string }>('/api/files/ticket', { body: { profile, path, folder } })
 export const fileOp = <T extends FileOpResult = FileOpResult>(profile: string, op: FileOp) =>
   api<T>('/api/files/op', { body: { profile, op } })
 export const openFile = (profile: string, path: string) => api('/api/files/open', { body: { profile, path } })

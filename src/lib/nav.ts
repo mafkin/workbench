@@ -27,8 +27,6 @@ export function describeTarget(item: NavItem): string {
       return item.url
     case 'launch':
       return [item.command, ...item.args].join(' ')
-    case 'project':
-      return `project: ${item.project}`
     case 'group':
       return `${item.items.length} entries`
   }

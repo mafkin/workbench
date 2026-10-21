@@ -40,6 +40,8 @@ workflow:                       # the steps every project (folder entry) starts 
   - { label: assets, type: folder, path: assets }                                  # paths are inside the project
   - { label: modeling, type: launch, command: blender, args: [models/main.blend] }  # runs in the project folder
   - { label: design, type: note, path: docs/design.md }
+categories:                     # optional colours for project categories
+  game: "#8fa58a"
 sections:
   - title: Projects
     collapsed: false
@@ -48,13 +50,19 @@ sections:
       - label: Tuohi
         type: folder
         path: ~/Projects/tuohi
+        description: Card game about birch-bark crafts   # the project card
+        status: paused          # active (the default) | paused | done | archived
+        category: game
+        pinned: true
         steps:                  # this project's own steps instead of the workflow
           - { label: sprites, type: folder, path: assets/sprites }
           - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
+          - { label: tests, type: report, path: reports/index.html }   # an HTML page shown in the tab
+          - { label: render, type: file, path: renders/latest.png }    # one file shown large
+          - { label: board, type: link, url: "https://example.com/b" } # opens in your browser
       - { label: Runbook, type: note, path: ~/deploy-tools/RUNBOOK.md }
       - { label: Today, type: daily }   # optional: folder (default daily), template (default templates/daily.md)
       - { label: Docs, type: link, url: "https://example.com" }
-      - { label: Card, type: project, project: card-id }
       - label: Claude here
         type: launch
         command: gnome-terminal
@@ -79,13 +87,21 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - **Alt+←** or the back arrow in the top bar goes back to the previous page.
 - **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
 
-### Projects and workflow steps
+### Projects: cards and workflow steps
 
-- A **folder** entry is a project. Its page has a row of tabs: **All files** (the project folder), then the project's workflow steps.
+- A **folder** entry is a project. The top of its page is its card:
+  - a **category** chip (pick one or make a new one),
+  - a **status** (active, paused, done, archived),
+  - a **pin**,
+  - a **description** you click to edit.
+- **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, mark it or archive it.
+- Below the card is a row of tabs: **All files** (the project folder), then the project's workflow steps.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
   - A **note** step shows the note in place, with Edit and autosave.
-  - A **launcher** step starts its program in the project folder.
-- Steps are yours to name: **+** adds one (folder, note or launcher; paths are inside the project). Right-click a tab to edit or remove it, and drag tabs to reorder them.
+  - A **report** step shows an HTML page (a test or analysis report) with its own styles and scripts. It runs in a sandbox, cut off from Workbench.
+  - A **file** step shows one image, PDF, video or text file large.
+  - A **launcher** step starts its program in the project folder, and a **link** step opens its address in your browser.
+- Steps are yours to name: **+** adds one (paths are inside the project). Right-click a tab to edit or remove it, and drag tabs to reorder them.
 - Every project starts with the profile's `workflow:` steps. Changing a project's steps gives it its own `steps:`. From the right-click menu, **Use these steps for every project** makes them the `workflow:`, and **Reset to profile steps** goes back to it.
 - Note steps also count as notes, so they show up in search and wiki links.
 
@@ -127,7 +143,7 @@ Notes can only touch:
 - the files of that profile's note entries,
 - images inside those places, read-only.
 
-The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file, and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header.
+The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file, and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
 
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else.
 
@@ -158,7 +174,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | --- | --- |
 | 2 | Markdown notes (done) |
 | 3 | File browser (done) |
-| 4 | Project cards |
+| 4 | Project cards (done) |
 | 5 | Agent chats (real `claude` CLI in xterm.js, so `/remote-control` keeps working) |
 | 6 | Skills & MCP panel |
 | 7 | Context folders |

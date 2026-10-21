@@ -1,6 +1,6 @@
 # Workbench: context for Claude sessions
 
-This is a personal Linux workbench for one user. It's a local web app with a React UI and a Fastify service on `127.0.0.1:7420`. The user switches between **Work** and **Personal** profiles, each with its own configurable left nav panel. The app is built **part by part**; parts 1 to 3 are done. Start with the decisions and per-part notes in [docs/roadmap.md](docs/roadmap.md). The [README](README.md) covers usage and the config format.
+This is a personal Linux workbench for one user. It's a local web app with a React UI and a Fastify service on `127.0.0.1:7420`. The user switches between **Work** and **Personal** profiles, each with its own configurable left nav panel. The app is built **part by part**; parts 1 to 4 are done. Start with the decisions and per-part notes in [docs/roadmap.md](docs/roadmap.md). The [README](README.md) covers usage and the config format.
 
 ## How to work with this user
 
@@ -37,14 +37,19 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - A step is a folder (browser), a note (inline, editable) or a launcher (runs in the project folder), with the same fields as a nav entry, and relative paths inside the project.
   - Steps come from the profile's `workflow:` until a project gets its own `steps:` (the first change copies the workflow in). Add, edit, remove and drag-reorder in the UI; **Use these steps for every project** and **Reset to profile steps** in the tab menu.
   - Home is **Recent work** (per browser, per profile) plus a Today card. No nav cards or folder chips; the browser has no chips either.
-- **Placeholders:** project-card entries (`type: project`) open a page whose placeholder text points to part 4.
-- **Next:** part 4 is next in the suggested order, but ask the user which part they want next.
+- **Part 4 (project cards) is done** on the same branch:
+  - Folder entries are the cards (`type: project` is gone). Card fields on the entry: `description`, `status` (active by default; paused, done, archived), `category` (colours from the profile's `categories:` or a steady palette pick) and `pinned`.
+  - The project page header is the card: category chip and menu, status pill and menu, pin toggle, click-to-edit description. There is no dashboard (no repeated nav).
+  - Nav: status dot per project, pinned first, archived hidden behind "N archived · Show", real file order while editing. The right-click menu has Pin, Mark…, and Archive/Unarchive.
+  - New step kinds: `report` (HTML in a sandboxed iframe, with a folder ticket for its assets), `file` (one file large) and `link` (opens in the browser).
+- **Next:** part 5 (agent chats) is next in the suggested order, but ask the user which part they want next.
 - **Known gaps:**
   - The selection is stored by address (`section.index` or `section.group.index`) in localStorage, so it doesn't follow an entry that has moved.
   - There's no UI for profile settings (name, accent, home) or for adding profiles; both are file-only, except `notes:`, which the hint can set.
   - When the YAML file is broken, the pencil button still toggles but does nothing.
   - Notes: search reads the files on every query (no index; capped at 5000 notes). `[[Name#heading]]` opens the note but doesn't scroll to the heading. Task checkboxes can't be ticked in View; edit the text instead. Renaming a note in a file manager breaks links to it. Code blocks have no syntax colours.
   - "Today" is worked out when the daily entry opens; after midnight, open it again.
+  - Cards: categories can be picked and created in the UI, but their colours are set only in YAML (`categories:`). There are no created or updated dates.
   - Steps: the active tab is remembered per project in this browser only. Recent work keeps entries by address plus label, so an entry that moved drops out of the list.
   - Files: Trash can't be undone in the app (restore from Trash in Files). Moving to another drive is refused rather than copied. No copy or duplicate, no upload or drop from the desktop. Folder sizes aren't computed. The filter only looks in folders that are open. Very large folders render every row. The selection isn't remembered between visits.
 
@@ -52,8 +57,8 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
 
 ```sh
 npm install
-npm test           # Vitest: 158 tests (config ops, store, guard, launch, notes, wiki links, files, steps, HTTP API)
-npm run e2e        # Playwright: 40 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
+npm test           # Vitest: 175 tests (config ops, store, guard, launch, notes, wiki links, files, steps, cards, HTTP API)
+npm run e2e        # Playwright: 47 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
 npm run build      # tsc -p . (TypeScript 7) + vite build
 npm run dev        # service on 7420 (node --watch) + Vite with hot reload on 7421 (proxies /api)
 bin/workbench      # desktop only: start the service if needed, then open the window
@@ -72,15 +77,15 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 | `server/paths.ts` | `browseRoots(profile)`: the profile's home, notes folder and folder entries (`folderRoots` in the schema), resolved with `realish`. Every file route checks paths against these after `realpath`. |
 | `server/watch.ts` | `FolderWatcher`: watches folders (LRU), and re-watches a folder that was deleted and made anew. Used by notes and files. |
 | `server/notes.ts` | Notes service. `#resolve` decides which files notes may touch: `.md` anywhere in the profile's folders, the exact paths of its note entries, and images in those places, all checked after `realpath`. List, search and wiki links still cover only the notes folder and note entries. Saves are rev-checked like profiles (`rev: null` = create, never overwrite), atomic, serialized per file, and keep the file mode. Emits `note {path, rev}` for opened notes. |
-| `server/files.ts` | File browser service: `list` (dotfile and `git check-ignore` flags), `text` (first 200 KB, binary check), `ticket`/`raw` (10-minute media URLs), `op` (rename, mkdir, touch, move, trash via `gio trash`; never overwrites; `#entry` refuses the roots themselves and acts on a symlink, not its target), `open` (`xdg-open`, refuses `.desktop` and executables). Emits `files {path}` for listed folders. |
+| `server/files.ts` | File browser service: `list` (dotfile and `git check-ignore` flags), `text` (first 200 KB, binary check), `ticket`/`rawFile` (10-minute URLs: one media file, or with `folder` an HTML report's folder, confined after realpath), `op` (rename, mkdir, touch, move, trash via `gio trash`; never overwrites; `#entry` refuses the roots themselves and acts on a symlink, not its target), `open` (`xdg-open`, refuses `.desktop` and executables). Emits `files {path}` for listed folders. |
 | `server/fs-util.ts` | `writeAtomic` and `revOf`, shared by the config store and notes. |
-| `server/guard.ts` | Every request must have the right Host (blocks DNS rebinding) and Origin, and every `/api/*` request needs `X-Workbench: 1`. Keep this for all new routes. |
+| `server/guard.ts` | Every request must have the right Host (blocks DNS rebinding) and Origin, and every `/api/*` request needs `X-Workbench: 1`. Keep this for all new routes. The one exception: `/raw/` skips the Origin and cross-site checks after the Host check (a sandboxed report's own assets arrive cross-site; the random ticket protects them). |
 | `server/launch.ts` | Links and paths open with `xdg-open`; launchers run as a detached `spawn` with no shell, `~` expanded. `/api/open` takes an entry **address** (plus a step index for a project's launcher step) from the config, never a command. |
 | `server/seed.ts` | First-run config built from real folders on the user's machine. |
 | `src/App.tsx` | State, profile switching, run-ops-with-undo, menus, shortcuts. The selection is an entry address or `note:<path>`; a back stack; the notes context (`src/lib/notes-ctx.ts`); quick-create and creating notes from wiki links. |
 | `src/components/NavPanel.tsx` | dnd-kit: sortable sections and items, cross-list drops, collision priority from innermost to outermost. |
 | `src/components/MainPane.tsx` | Top bar (back, crumbs, search box), Home (recent work, from `src/lib/recent.ts`) and the per-type entry pages. New parts plug in here. |
-| `src/components/ProjectView.tsx` | A folder entry: header, step tabs (All files + steps; drag to reorder, right-click menu), and the active tab: `FileBrowser`, a compact `NoteView`, or a launcher. Active tab per project in localStorage. |
+| `src/components/ProjectView.tsx` | A folder entry: the card header (category, status, pin, description via `setCard`), step tabs (All files + steps; drag to reorder, right-click menu), and the active tab: `FileBrowser`, a compact `NoteView`, a report iframe or a large file; launcher and link steps open outside. Active tab per project in localStorage. |
 | `src/components/NoteView.tsx` | One note: load, View/Edit, autosave, live reload, conflict banner, "missing" state. `DailyView`, `SearchView`, `NewNoteDialog` and `NotesFolderHint` sit next to it. |
 | `src/components/Markdown.tsx`, `NoteEditor.tsx` | react-markdown + remark-gfm + our wiki-link plugin (`src/lib/wikilinks.ts`); the CodeMirror 6 editor, lazy-loaded as its own chunk. |
 | `src/components/FileBrowser.tsx` | The tree: lazy listings keyed by `~` path, expanded folders in localStorage per profile and top folder, selection and keys, inline rename, native HTML5 drag to move, context menu. `FilePreview.tsx` beside it; helpers in `src/lib/files.ts`. |
@@ -104,7 +109,8 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 - **Images in notes** load through `fetch` + blob URLs, because `<img>` can't send the X-Workbench header. File previews use `/raw/` tickets instead, which also give Range requests for seeking in video.
 - **Selection keys:** an entry address, `note:<path>` or `files:<path>`. `openNote`/`openFolder` in App pick the nav entry instead when one has the same path, so the nav highlights it.
 - **No repeated nav in the centre.** The user wants the left panel to choose and the centre to hold the workflow, so don't add lists of nav entries, chips of folder entries or similar to Home or the main pane.
-- **Step paths** are relative to the project (`stepPath`); folder steps count as browse roots (`folderRoots`) and note steps as note entries, so a step outside its project still works.
+- **Step paths** are relative to the project (`stepPath`); folder steps (and the folders of report and file steps) count as browse roots (`folderRoots`), and note steps as note entries, so a step outside its project still works.
+- **Card fields** (`CARD_FIELDS`) are not in `TYPE_FIELDS`, so editing an entry in the dialog keeps them. `status: active` is written by leaving the field out. Pinned-first sorting and hiding archived projects happen only outside nav edit mode, because dnd-kit indexes must match the file.
 
 ## The user's machine (not visible from the cloud)
 

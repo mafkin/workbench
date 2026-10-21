@@ -36,8 +36,8 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 2 | Markdown notes | Done (branch `claude/inspiring-einstein-vwftq8`) |
 | 3 | File browser | Done (branch `claude/inspiring-einstein-vwftq8`) |
 | 3½ | Workflow steps, no repeated nav | Done (same branch); see below |
-| 4 | Project cards | Next in the suggested order |
-| 5 | Agent chats | |
+| 4 | Project cards | Done (same branch) |
+| 5 | Agent chats | Next in the suggested order |
 | 6 | Skills & MCP panel | |
 | 7 | Context folders | |
 | 8 | Polish | |
@@ -106,7 +106,7 @@ The user asked for this before part 4: "no overlap in the selections". The centr
 
 Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the entry dialog, `/api/open` with a step index, and Home as Recent work. The file browser's chips and Home's cards and chips are gone.
 
-### Part 4: Project cards
+### Part 4: Project cards (done)
 
 - **In Mr. Mak:** a `workspace.json` registry of entities with these fields: `id`, `title`, `description`, `icon`, `category`, `created`, `updated`, `folder`, `steps[] {name, path}` (tabs inside the card), `defaultStep`, `status` (active, done or archived) and `pinned`.
   - The dashboard groups cards by category, with a Pinned section on top.
@@ -116,11 +116,21 @@ Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the en
 - **Hooks into:** `project` entries (`project: <id>`). The Home overview could also become or include the card dashboard.
   - A card's tabs can reuse `FilePreview` (images, PDF, Markdown, text) and `NoteView` for notes. Any new file access goes through `browseRoots` in `server/paths.ts`.
   - **Workflow steps already cover Mr. Mak's `steps[]` tabs** for folder entries (`ProjectView`). Ask whether part 4's cards should build on folder entries and their steps rather than add a separate registry with its own tabs. Respect the "no repeated nav" rule: a card dashboard on Home would repeat the nav unless it shows something the nav doesn't (status, category, pinned).
-- **Ask:**
-  - Where the registry lives: per profile in `~/.config/workbench/projects/<profile>.yaml`, or a file inside each project folder.
-  - Which card fields and categories they want.
-  - What a card's tabs can be: notes, folders, URLs, HTML reports.
-  - Whether a project card replaces or sits alongside folder entries.
+- **Decisions (2026-10-21):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Card model | Folder entries are the cards; no separate registry, and `type: project` is removed |
+  | Card details | Description, status (active, paused, done, archived), category (with colours), pinned |
+  | Placement | The project page header and the nav (dots, pinned first, archive toggle); no dashboard |
+  | New tab kinds | HTML report, single file, web link |
+
+- **Built:**
+  - The `setCard` op and `categoryColor`.
+  - The card header in `ProjectView`, plus nav marks and menu.
+  - The report, file and link step kinds.
+  - Folder tickets for reports, and the `/raw/` guard exception for sandboxed reports.
+- **Left for later:** category colours from the UI, and created or updated dates.
 
 ### Part 5: Agent chats
 

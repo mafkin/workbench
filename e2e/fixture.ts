@@ -127,6 +127,9 @@ const ALPHA_FILES: Record<string, string | Buffer> = {
   'build.log': 'built\n',
   'diagram.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90" rx="8" fill="#7d93ab"/><circle cx="80" cy="45" r="22" fill="#141518"/></svg>',
   'chime.wav': wav(),
+  // An HTML report that loads a stylesheet next to it.
+  'reports/index.html': '<!doctype html><link rel="stylesheet" href="style.css"><h1>Test report</h1><p>12 passed</p>',
+  'reports/style.css': 'h1 { color: rgb(200, 30, 30); }',
   // A one-page PDF; viewers rebuild the missing cross-reference table.
   'spec.pdf': '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
 }

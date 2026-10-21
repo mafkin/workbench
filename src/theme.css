@@ -1434,10 +1434,203 @@ button {
   margin-bottom: 0;
 }
 
+.project-head {
+  align-items: center;
+}
+
+.project-head .spacer {
+  flex: 1;
+}
+
 .project-head .path {
   padding: 3px 8px;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* The card: category, status, pin, description */
+
+.card-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-kicker .sep {
+  color: var(--faint);
+}
+
+.category-chip {
+  --category: var(--muted);
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--category) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--category) 14%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.category-chip.empty {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--faint);
+}
+
+.category-chip:hover {
+  border-color: var(--accent-line);
+}
+
+.category-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.status-dot.paused {
+  background: var(--warn);
+}
+
+.status-dot.done {
+  background: var(--muted);
+}
+
+.status-dot.archived {
+  border: 1px solid var(--faint);
+  background: transparent;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-pill:hover {
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+
+.pin-btn {
+  color: var(--faint);
+}
+
+.pin-btn.on {
+  color: var(--accent);
+}
+
+.card-description {
+  max-width: 760px;
+  margin: 6px 0 0;
+  padding: 2px 0;
+  color: var(--text);
+  cursor: text;
+  white-space: pre-wrap;
+}
+
+.card-description.empty {
+  color: var(--faint);
+}
+
+.card-field {
+  padding: 4px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  outline: none;
+}
+
+.card-field.description {
+  display: block;
+  width: min(760px, 100%);
+  margin-top: 6px;
+  resize: vertical;
+}
+
+/* Nav: project marks */
+
+.project-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex: none;
+}
+
+.pin-mark {
+  color: var(--muted);
+}
+
+.item.archived .label {
+  color: var(--faint);
+}
+
+.archive-toggle {
+  display: block;
+  margin: 10px 12px 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.archive-toggle:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Report and file tabs */
+
+.step-pane .path-row {
+  margin: 0 0 12px;
+}
+
+.report-frame {
+  display: block;
+  width: 100%;
+  height: max(420px, calc(100vh - 330px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* Most reports expect a white page. */
+  background: #fff;
+}
+
+.file-step-body {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.file-step-body .preview-image {
+  max-height: max(360px, calc(100vh - 340px));
+}
+
+.file-step-body .preview-pdf {
+  height: max(420px, calc(100vh - 340px));
 }
 
 .step-tabs {
@@ -1487,8 +1680,12 @@ button {
 }
 
 .step-tab.active .icon,
-.step-tab.launch .icon {
+.step-tab.outside .icon {
   color: var(--accent);
+}
+
+.step-tab .outside-mark {
+  color: var(--faint);
 }
 
 .step-tab.add {

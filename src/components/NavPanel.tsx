@@ -13,10 +13,11 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ArrowUpRight, ChevronDown, FilePlus, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowUpRight, ChevronDown, FilePlus, GripVertical, Pencil, Pin, Plus, Trash2 } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { itemKey, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import type { Connection } from '../lib/events.ts'
+import { useLocal } from '../lib/local.ts'
 import { cx, describeTarget, opensExternally, sameList, type DialogState, type DragData, type DropData, type MenuEntry, type MenuState } from '../lib/nav.ts'
 import { EntryIcon } from './EntryIcon.tsx'
 
@@ -43,7 +44,21 @@ interface Props extends NavActions {
   onHome: () => void
 }
 
-const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState }>(null!)
+const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState; showArchive: boolean }>(null!)
+
+const archived = (item: NavItem) => item.type === 'folder' && item.status === 'archived'
+const pinned = (item: NavItem) => item.type === 'folder' && !!item.pinned
+
+function countArchived(profile: Profile): number {
+  let n = 0
+  for (const s of profile.sections) {
+    for (const item of s.items) {
+      if (archived(item)) n++
+      if (item.type === 'group') n += item.items.filter(archived).length
+    }
+  }
+  return n
+}
 
 interface DropHint {
   drag: DragData | null
@@ -105,6 +120,8 @@ export function NavPanel(props: Props) {
   const [drop, setDrop] = useState<DropHint>({ drag: null, overId: null })
   const [renaming, setRenaming] = useState<number | null>(null)
   const [addingHeading, setAddingHeading] = useState(false)
+  const [showArchive, setShowArchive] = useLocal('showArchive', false)
+  const archivedCount = profile ? countArchived(profile) : 0
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -196,6 +213,7 @@ export function NavPanel(props: Props) {
               profileId: active.id,
               drop,
               renaming: { section: renaming, start: setRenaming },
+              showArchive,
             }}
           >
             <DndContext
@@ -227,6 +245,12 @@ export function NavPanel(props: Props) {
               </DragOverlay>
             </DndContext>
           </Ctx.Provider>
+        )}
+
+        {!editing && archivedCount > 0 && (
+          <button className="archive-toggle" onClick={() => setShowArchive((v) => !v)} aria-pressed={showArchive}>
+            {archivedCount} archived · {showArchive ? 'Hide' : 'Show'}
+          </button>
         )}
 
         {editing && profile && !active.error && (
@@ -394,16 +418,20 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
 }
 
 function ItemList({ list, items }: { list: ListAddr; items: NavItem[] }) {
-  const { editing } = useContext(Ctx)
+  const { editing, showArchive } = useContext(Ctx)
   const id = listId(list)
   const { setNodeRef } = useDroppable({ id, data: { kind: 'list', list, length: items.length } satisfies DropData, disabled: !editing })
   const hint = useDropHint(id, 'into')
-  const ids = items.map((_, i) => itemId({ ...list, index: i }))
+  // Pinned projects first and archived ones hidden, except while editing, where
+  // the file's own order shows so a drag lands where it looks like it will.
+  const rows = items.map((item, index) => ({ item, index }))
+  const shown = editing ? rows : rows.filter((r) => showArchive || !archived(r.item)).sort((a, b) => Number(pinned(b.item)) - Number(pinned(a.item)))
+  const ids = shown.map((r) => itemId({ ...list, index: r.index }))
   return (
     <div ref={setNodeRef} className={cx('items', hint)}>
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        {items.map((item, i) => {
-          const addr = { ...list, index: i }
+        {shown.map(({ item, index }, i) => {
+          const addr = { ...list, index }
           return item.type === 'group' ? (
             <GroupBlock key={ids[i]} addr={addr} item={item} />
           ) : (
@@ -483,8 +511,8 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
     <div
       ref={setNodeRef}
       style={style}
-      className={cx('item', selected && 'selected', isDragging && 'dragging', hint)}
-      title={describeTarget(item)}
+      className={cx('item', selected && 'selected', isDragging && 'dragging', archived(item) && 'archived', hint)}
+      title={item.type === 'folder' && item.description ? `${item.description}\n${describeTarget(item)}` : describeTarget(item)}
       aria-current={selected ? 'page' : undefined}
       onClick={() => (ctx.editing ? ctx.openDialog({ mode: 'edit', at: addr, item, context }) : ctx.activate(addr, item))}
       onContextMenu={(e) => {
@@ -500,6 +528,12 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       <EntryIcon type={item.type} icon={item.icon} />
       <span className="label">{item.label}</span>
       {!ctx.editing && opensExternally(item) && <ArrowUpRight size={12} className="kind" />}
+      {!ctx.editing && item.type === 'folder' && (
+        <span className="project-marks">
+          {item.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
+          <span className={cx('status-dot', item.status ?? 'active')} title={item.status ?? 'active'} />
+        </span>
+      )}
       <RowActions addr={addr} item={item} />
     </div>
   )

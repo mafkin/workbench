@@ -31,7 +31,7 @@ test('a folder entry opens as a tree; dotfiles are hidden and ignored files dimm
   await openAlpha(page)
   await expect(title(page)).toHaveText('Alpha')
   const names = await tree(page).getByRole('treeitem').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
-  expect(names.slice(0, 2)).toEqual(['dist', 'src'])
+  expect(names.slice(0, 3)).toEqual(['dist', 'reports', 'src'])
   await expect(row(page, '.env')).toHaveCount(0)
   await expect(row(page, 'dist')).toHaveClass(/ignored/)
   await expect(row(page, 'build.log')).toHaveClass(/ignored/)

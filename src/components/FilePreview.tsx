@@ -70,7 +70,8 @@ export function FilePreview({ entry, count, childCount, onOpen, onOpenDefault }:
   )
 }
 
-function MediaPreview({ entry, kind }: { entry: FileEntry; kind: PreviewKind }) {
+/** An image, PDF, video or audio file, through a ticket URL. Also used by a project's file tab. */
+export function MediaPreview({ entry, kind }: { entry: Pick<FileEntry, 'path' | 'name'>; kind: PreviewKind }) {
   const { profile } = useNotes()
   const [url, setUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -94,7 +95,8 @@ function MediaPreview({ entry, kind }: { entry: FileEntry; kind: PreviewKind }) 
   return <audio className="preview-audio" src={url} controls preload="metadata" />
 }
 
-function TextPreview({ entry, markdown }: { entry: FileEntry; markdown: boolean }) {
+/** Text, or Markdown formatted, from the first 200 KB. Also used by a project's file tab. */
+export function TextPreview({ entry, markdown }: { entry: Pick<FileEntry, 'path' | 'name'>; markdown: boolean }) {
   const { profile } = useNotes()
   const [data, setData] = useState<FileTextData | null>(null)
   const [error, setError] = useState<string | null>(null)

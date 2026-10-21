@@ -345,7 +345,7 @@ function EntryView({
         key={item.path}
         addr={addr}
         item={item}
-        kicker={`${kicker} · ${TYPE_LABEL.folder}`}
+        kicker={kicker}
         profile={pane.active.profile!}
         profileId={pane.active.id}
         home={pane.home}
@@ -357,27 +357,6 @@ function EntryView({
     )
   }
 
-  return (
-    <div className="page">
-      <div className="page-kicker">
-        {kicker} · {TYPE_LABEL[item.type]}
-      </div>
-      <h1 className="page-title">
-        <EntryIcon type={item.type} icon={item.icon} size={22} />
-        {item.label}
-      </h1>
-
-      {item.type === 'project' && (
-        <>
-          <div className="path-row">
-            <span className="path mono">project: {item.project}</span>
-          </div>
-          <div className="placeholder">
-            <h3>Project cards: part 4</h3>
-            <p>The card for this project, with its tabs for brief, plan, reports and assets, will open here.</p>
-          </div>
-        </>
-      )}
-    </div>
-  )
+  // Groups, links and launchers never open in the centre.
+  return null
 }
