@@ -1,6 +1,6 @@
 # Workbench: context for Claude sessions
 
-This is a personal Linux workbench for one user. It's a local web app with a React UI and a Fastify service on `127.0.0.1:7420`. The user switches between **Work** and **Personal** profiles, each with its own configurable left nav panel. The app is built **part by part**; parts 1 to 4 are done. Start with the decisions and per-part notes in [docs/roadmap.md](docs/roadmap.md). The [README](README.md) covers usage and the config format.
+This is a personal Linux workbench for one user. It's a local web app with a React UI and a Fastify service on `127.0.0.1:7420`. The user switches between **Work** and **Personal** profiles, each with its own configurable left nav panel. The app is built **part by part**; parts 1 to 5 are done. Start with the decisions and per-part notes in [docs/roadmap.md](docs/roadmap.md). The [README](README.md) covers usage and the config format.
 
 ## How to work with this user
 
@@ -42,7 +42,11 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - The project page header is the card: category chip and menu, status pill and menu, pin toggle, click-to-edit description. There is no dashboard (no repeated nav).
   - Nav: status dot per project, pinned first, archived hidden behind "N archived · Show", real file order while editing. The right-click menu has Pin, Mark…, and Archive/Unarchive.
   - New step kinds: `report` (HTML in a sandboxed iframe, with a folder ticket for its assets), `file` (one file large) and `link` (opens in the browser).
-- **Next:** part 5 (agent chats) is next in the suggested order, but ask the user which part they want next.
+- **Part 5 (agent chats) is done** on the same branch:
+  - A chat is the real `claude` (or the login shell) in a PTY kept by the service, shown with xterm.js. Chats are tabs after a project's steps (New chat / Shell, History at the end of the row), `chat` steps and `chat` nav entries (one chat each, started on first open), and Chat here / Shell here in the browser.
+  - Chats survive reloads and a closed window (a headless xterm per chat replays the screen). After a service restart they are Stopped, with Resume (`claude --resume <id>`) and New session; nothing starts by itself. History lists the Claude sessions in the project folder from `~/.claude/projects`.
+  - Tab menu: Rename, Colour, Pin, Summarize and continue (`claude -p --resume <id> --fork-session`, then a new chat seeded with the summary), Close (asks if running). Needs-you: bell, or quiet after 3 s of work while nobody looks; tab dot, accent nav spark, desktop notification when the window isn't focused. Files dropped on a chat or its tab are typed as paths.
+- **Next:** part 6 (Skills & MCP panel) is next in the suggested order, but ask the user which part they want next.
 - **Known gaps:**
   - The selection is stored by address (`section.index` or `section.group.index`) in localStorage, so it doesn't follow an entry that has moved.
   - There's no UI for profile settings (name, accent, home) or for adding profiles; both are file-only, except `notes:`, which the hint can set.
@@ -50,6 +54,7 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - Notes: search reads the files on every query (no index; capped at 5000 notes). `[[Name#heading]]` opens the note but doesn't scroll to the heading. Task checkboxes can't be ticked in View; edit the text instead. Renaming a note in a file manager breaks links to it. Code blocks have no syntax colours.
   - "Today" is worked out when the daily entry opens; after midnight, open it again.
   - Cards: categories can be picked and created in the UI, but their colours are set only in YAML (`categories:`). There are no created or updated dates.
+  - Chats: after `/clear` or `/resume` inside a chat, its tab still resumes the session it started with. Renaming a chat step loses its link to the running chat (slots are keyed by project path and step label). Dragging over a tab doesn't switch to it (drop on the chat's tab instead). Tab names, colours and pins live in `chats.json`, not the YAML (approved).
   - Steps: the active tab is remembered per project in this browser only. Recent work keeps entries by address plus label, so an entry that moved drops out of the list.
   - Files: Trash can't be undone in the app (restore from Trash in Files). Moving to another drive is refused rather than copied. No copy or duplicate, no upload or drop from the desktop. Folder sizes aren't computed. The filter only looks in folders that are open. Very large folders render every row. The selection isn't remembered between visits.
 
@@ -57,35 +62,38 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
 
 ```sh
 npm install
-npm test           # Vitest: 175 tests (config ops, store, guard, launch, notes, wiki links, files, steps, cards, HTTP API)
-npm run e2e        # Playwright: 47 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
+npm test           # Vitest: 203 tests (config ops, store, guard, launch, notes, wiki links, files, steps, cards, chats, HTTP API)
+npm run e2e        # Playwright: 58 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
 npm run build      # tsc -p . (TypeScript 7) + vite build
 npm run dev        # service on 7420 (node --watch) + Vite with hot reload on 7421 (proxies /api)
 bin/workbench      # desktop only: start the service if needed, then open the window
 ```
 
-Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. In a cloud container whose preinstalled Chromium doesn't match Playwright's version, don't download browsers: run e2e with an untracked config that spreads `playwright.config.ts` and sets `use.launchOptions.executablePath: '/opt/pw-browsers/chromium'`. Desktop actions do nothing in a cloud container: `xdg-open`, launchers, "Open in Files", the GNOME launcher. That's expected. The e2e server fakes `spawn` and logs launches to a file, so tests never start real programs; its fake `gio trash` moves files into `e2e/.tmp-config/trash`. Keep it that way. The e2e fixture runs `git init` in `~/alpha`, so `git` must be installed.
+Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. In a cloud container whose preinstalled Chromium doesn't match Playwright's version, don't download browsers: run e2e with an untracked config that spreads `playwright.config.ts` and sets `use.launchOptions.executablePath: '/opt/pw-browsers/chromium'`. Desktop actions do nothing in a cloud container: `xdg-open`, launchers, "Open in Files", the GNOME launcher. That's expected. The e2e server fakes `spawn` and logs launches to a file, so tests never start real programs; its fake `gio trash` moves files into `e2e/.tmp-config/trash`. Chats in tests run `tests/fixtures/fake-claude.mjs` and `fake-shell.mjs` in real PTYs (passed as `chatCommands`), never the real claude. Keep it that way. The e2e fixture runs `git init` in `~/alpha`, so `git` must be installed.
 
 ## Architecture
 
 | Path | Role |
 | --- | --- |
-| `shared/config-schema.ts` | zod schemas and types for profiles, items, ops and addresses, used by both the UI and the service. `ItemAddr = {section, group?, index}`. Workflow steps: `StepItem` (folder, note or launch), `stepsOf`, `stepPath`, `stepEntry`. |
+| `shared/config-schema.ts` | zod schemas and types for profiles, items, ops and addresses, used by both the UI and the service. `ItemAddr = {section, group?, index}`. Workflow steps: `StepItem` (folder, note, report, file, chat, launch, link), `stepsOf`, `stepPath`, `stepEntry`. Chats: `ChatItem`, `Chat`, `ClaudeSession`, and the keys `projectHost`, `stepSlot`, `entrySlot` (paths and labels, not addresses). |
 | `server/config-ops.ts` | Ops (`addSection`, `moveItem`, step ops, …) applied to a `yaml` **Document**, not to plain data, so comments, key order and flow style survive. Step ops copy `workflow:` into a project's `steps:` on its first change. Every result is validated against the `Profile` schema. |
 | `server/config-store.ts` | Files are the source of truth. Each file has a rev (content hash); a stale rev gets 409. Writes are serialized and atomic (temp file + rename). `fs.watch` picks up hand edits. Broken files get 423 and are never written. One level of undo. Emits `change`. |
-| `server/main.ts` | Fastify routes: `/api/state` (includes `home`), `/api/profiles/:id/ops`, `/api/profiles/:id/undo`, `/api/active`, `/api/open`, `/api/stat`, `/api/notes/{file,list,search,asset}`, `/api/files/{list,text,ticket,op,open}`, `/raw/:token/:name` (media by ticket, no header needed, Host/Origin still checked), and the SSE stream `/api/events` (events `state`, `note`, `files`). Serves `dist/` in production. `buildServer()` is exported for tests. |
+| `server/main.ts` | Fastify routes: `/api/state` (includes `home`), `/api/profiles/:id/ops`, `/api/profiles/:id/undo`, `/api/active`, `/api/open`, `/api/stat`, `/api/notes/{file,list,search,asset}`, `/api/files/{list,text,ticket,op,open}`, `/raw/:token/*` (media and report folders by ticket), `/api/chats` (list, start by address, `:id` patch/start/seen/handoff/delete, `history`, `token`), the WebSocket `/pty/:id`, and the SSE stream `/api/events` (events `state`, `note`, `files`, `chats`). Serves `dist/` in production. `buildServer()` is exported for tests. |
 | `server/paths.ts` | `browseRoots(profile)`: the profile's home, notes folder and folder entries (`folderRoots` in the schema), resolved with `realish`. Every file route checks paths against these after `realpath`. |
 | `server/watch.ts` | `FolderWatcher`: watches folders (LRU), and re-watches a folder that was deleted and made anew. Used by notes and files. |
 | `server/notes.ts` | Notes service. `#resolve` decides which files notes may touch: `.md` anywhere in the profile's folders, the exact paths of its note entries, and images in those places, all checked after `realpath`. List, search and wiki links still cover only the notes folder and note entries. Saves are rev-checked like profiles (`rev: null` = create, never overwrite), atomic, serialized per file, and keep the file mode. Emits `note {path, rev}` for opened notes. |
 | `server/files.ts` | File browser service: `list` (dotfile and `git check-ignore` flags), `text` (first 200 KB, binary check), `ticket`/`rawFile` (10-minute URLs: one media file, or with `folder` an HTML report's folder, confined after realpath), `op` (rename, mkdir, touch, move, trash via `gio trash`; never overwrites; `#entry` refuses the roots themselves and acts on a symlink, not its target), `open` (`xdg-open`, refuses `.desktop` and executables). Emits `files {path}` for listed folders. |
+| `server/chats.ts` | `Chats`: node-pty (imported with the first chat) plus a headless xterm and serialize addon per chat; frames `r`+screen and `o`+output to views; title, bell and quiet-after-work (needs-you, suppressed while a view reports focus); `chats.json` (0600) in the state dir, loaded as stopped; `--session-id`/`--resume`; handoff; strips the env claude sets for its children. `commands` and timings are injectable for tests. |
+| `server/claude-sessions.ts` | Reads claude's transcripts (`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<slug>/<id>.jsonl`, slug = path with non-alphanumerics as `-`): sessions in a folder (prefix match, then each file's `cwd`), titles (`custom-title`, else first real prompt), prompt counts. |
 | `server/fs-util.ts` | `writeAtomic` and `revOf`, shared by the config store and notes. |
-| `server/guard.ts` | Every request must have the right Host (blocks DNS rebinding) and Origin, and every `/api/*` request needs `X-Workbench: 1`. Keep this for all new routes. The one exception: `/raw/` skips the Origin and cross-site checks after the Host check (a sandboxed report's own assets arrive cross-site; the random ticket protects them). |
+| `server/guard.ts` | Every request must have the right Host (blocks DNS rebinding) and Origin, and every `/api/*` request needs `X-Workbench: 1`. Keep this for all new routes. Exceptions: `/raw/` skips the Origin and cross-site checks after the Host check (a sandboxed report's own assets arrive cross-site; the random ticket protects them); `/pty/` must have an Origin (browsers can't add headers to a WebSocket) and `main.ts` also checks the per-start token. |
 | `server/launch.ts` | Links and paths open with `xdg-open`; launchers run as a detached `spawn` with no shell, `~` expanded. `/api/open` takes an entry **address** (plus a step index for a project's launcher step) from the config, never a command. |
 | `server/seed.ts` | First-run config built from real folders on the user's machine. |
 | `src/App.tsx` | State, profile switching, run-ops-with-undo, menus, shortcuts. The selection is an entry address or `note:<path>`; a back stack; the notes context (`src/lib/notes-ctx.ts`); quick-create and creating notes from wiki links. |
 | `src/components/NavPanel.tsx` | dnd-kit: sortable sections and items, cross-list drops, collision priority from innermost to outermost. |
 | `src/components/MainPane.tsx` | Top bar (back, crumbs, search box), Home (recent work, from `src/lib/recent.ts`) and the per-type entry pages. New parts plug in here. |
-| `src/components/ProjectView.tsx` | A folder entry: the card header (category, status, pin, description via `setCard`), step tabs (All files + steps; drag to reorder, right-click menu), and the active tab: `FileBrowser`, a compact `NoteView`, a report iframe or a large file; launcher and link steps open outside. Active tab per project in localStorage. |
+| `src/components/ProjectView.tsx` | A folder entry: the card header (category, status, pin, description via `setCard`), step tabs (All files + steps; drag to reorder, right-click menu), chat tabs (`chat:<id>`), New chat and History, and the active tab: `FileBrowser`, a compact `NoteView`, a report iframe, a large file or a `ChatPane`; launcher and link steps open outside. Active tab per project in localStorage; `showProjectTab` picks it from elsewhere. |
+| `src/components/ChatPane.tsx`, `ChatTerminal.tsx`, `src/lib/chats.ts` | One chat: bar, stopped and ended states, earlier sessions for slots; the xterm terminal (lazy chunk) on the socket, with the token as a second subprotocol; the chats context (list, start, open, close…), paste routing for dropped paths, `PATHS_TYPE` drags. |
 | `src/components/NoteView.tsx` | One note: load, View/Edit, autosave, live reload, conflict banner, "missing" state. `DailyView`, `SearchView`, `NewNoteDialog` and `NotesFolderHint` sit next to it. |
 | `src/components/Markdown.tsx`, `NoteEditor.tsx` | react-markdown + remark-gfm + our wiki-link plugin (`src/lib/wikilinks.ts`); the CodeMirror 6 editor, lazy-loaded as its own chunk. |
 | `src/components/FileBrowser.tsx` | The tree: lazy listings keyed by `~` path, expanded folders in localStorage per profile and top folder, selection and keys, inline rename, native HTML5 drag to move, context menu. `FilePreview.tsx` beside it; helpers in `src/lib/files.ts`. |
@@ -110,6 +118,8 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 - **Selection keys:** an entry address, `note:<path>` or `files:<path>`. `openNote`/`openFolder` in App pick the nav entry instead when one has the same path, so the nav highlights it.
 - **No repeated nav in the centre.** The user wants the left panel to choose and the centre to hold the workflow, so don't add lists of nav entries, chips of folder entries or similar to Home or the main pane.
 - **Step paths** are relative to the project (`stepPath`); folder steps (and the folders of report and file steps) count as browse roots (`folderRoots`), and note steps as note entries, so a step outside its project still works.
+- **Chat sockets:** refuse a WebSocket upgrade in the route's `preValidation`, not in `onRequest`: refused there, @fastify/websocket leaves the connection open and `app.close()` hangs. The guard skips `/pty/` upgrades in `onRequest` for that reason.
+- **Chat tests:** `Chats.text()` uses `translateToString(true)`, which trims trailing spaces, so wait for `args=` rather than the `> ` prompt. In e2e, read the screen from `.chat-terminal .xterm-rows`, and `closeChats()` in `beforeEach` (the service outlives tests). The e2e server shortens needs-you timings (`chatTiming`).
 - **Card fields** (`CARD_FIELDS`) are not in `TYPE_FIELDS`, so editing an entry in the dialog keeps them. `status: active` is written by leaving the field out. Pinned-first sorting and hiding archived projects happen only outside nav edit mode, because dnd-kit indexes must match the file.
 
 ## The user's machine (not visible from the cloud)
@@ -117,4 +127,4 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 - **System:** CachyOS (Arch), GNOME on Wayland, Node 26, npm. No Rust or cargo, no tmux.
 - **Browsers:** Firefox is the default. GNOME Web 51 is installed, but its web-app mode can't be set up from a script, so `bin/workbench` uses a GNOME Web app if one exists for this address and falls back to the default browser.
 - **Programs installed:** `gnome-terminal`, `alacritty`, `nautilus`, `godot`, `blender`, `claude`, `gcc`/`make` (so node-pty can build), `python3`.
-- **Paths:** the real config is in `~/.config/workbench/`; the launcher is at `~/.local/share/applications/workbench.desktop`; logs go to `~/.local/state/workbench/`.
+- **Paths:** the real config is in `~/.config/workbench/`; the launcher is at `~/.local/share/applications/workbench.desktop`; logs and `chats.json` go to `~/.local/state/workbench/`.

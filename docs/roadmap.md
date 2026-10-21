@@ -37,8 +37,8 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 3 | File browser | Done (branch `claude/inspiring-einstein-vwftq8`) |
 | 3½ | Workflow steps, no repeated nav | Done (same branch); see below |
 | 4 | Project cards | Done (same branch) |
-| 5 | Agent chats | Next in the suggested order |
-| 6 | Skills & MCP panel | |
+| 5 | Agent chats | Done (same branch) |
+| 6 | Skills & MCP panel | Next in the suggested order |
 | 7 | Context folders | |
 | 8 | Polish | |
 
@@ -132,7 +132,7 @@ Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the en
   - Folder tickets for reports, and the `/raw/` guard exception for sandboxed reports.
 - **Left for later:** category colours from the UI, and created or updated dates.
 
-### Part 5: Agent chats
+### Part 5: Agent chats (done)
 
 - **In Mr. Mak:**
   - Chats are real CLIs in PTYs (`node-pty` 1.1.0 + `@xterm/xterm` 6 + `addon-fit` + `addon-web-links`), with tabs, history, pinning, colours and groups by project.
@@ -150,6 +150,28 @@ Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the en
 - **Notes:**
   - **Security:** a PTY is shell access, so add a per-start random token on top of the guard. Pass it via the URL fragment or an `HttpOnly` cookie, and check it on the WebSocket upgrade.
   - **Build:** node-pty builds natively; gcc and make are present. Mr. Mak's spawn-helper chmod fix is macOS-only.
+- **Decisions (2026-10-21):**
+
+  | Question | Answer |
+  | --- | --- |
+  | View | Terminal only (xterm.js); no Conversation view |
+  | Placement | Tabs in the project, after its workflow steps |
+  | Start points | New chat in a project (and the nav menu), a `chat` workflow step, Chat here in the file browser, a `chat` nav entry |
+  | History | Chats keep running across reloads; a per-project History of Claude sessions, resumed with `claude --resume` |
+  | Agents | Claude plus a shell |
+  | Extras | Drop files as paths, a needs-you marker and notification, pin and colour, summarize and continue |
+  | Nav | A spark on projects (and chat entries) with running chats |
+  | Restart | Tabs come back as Stopped; Resume by hand, nothing starts by itself |
+
+  Approved in the plan: pins, colours and names live in the service's chat list (`~/.local/state/workbench/chats.json`), not the YAML, because they belong to one running session.
+
+- **Built:**
+  - `ChatItem` (`agent`, `path`, `args`) as a nav entry and a step; host and slot keys from paths and labels.
+  - `server/chats.ts`: node-pty (loaded with the first chat) with a headless xterm per chat for screen replay; titles, bell and quiet-after-work for needs-you; the saved list; resume by `--session-id`/`--resume`; handoff via `claude -p --resume <id> --fork-session`.
+  - `server/claude-sessions.ts` for History and message counts.
+  - `/api/chats` routes by address, the `/pty/:id` socket with a per-start token in `Sec-WebSocket-Protocol`, guarded in `preValidation`.
+  - `ChatPane`, the lazy `ChatTerminal`, chat tabs, New chat and History in `ProjectView`, Chat here in the browser, the chat entry page, Other chats on Home, nav marks, notifications.
+- **Left for later:** following `/clear` or `/resume` inside a chat (the tab resumes the session it started with); keeping a running chat when its step is renamed; switching tabs while dragging over them.
 
 ### Part 6: Skills & MCP panel
 

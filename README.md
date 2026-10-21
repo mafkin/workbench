@@ -10,7 +10,7 @@ npm run install-launcher   # adds "Workbench" to the GNOME app grid
 bin/workbench              # starts the service if needed, then opens the window
 ```
 
-`bin/workbench` builds the UI on first use and logs to `~/.local/state/workbench/server.log`.
+`bin/workbench` builds the UI on first use and logs to `~/.local/state/workbench/server.log`. `npm install` also builds `node-pty` for chats, which needs `gcc`, `make` and `python3`.
 
 For a window without browser chrome:
 
@@ -40,6 +40,8 @@ workflow:                       # the steps every project (folder entry) starts 
   - { label: assets, type: folder, path: assets }                                  # paths are inside the project
   - { label: modeling, type: launch, command: blender, args: [models/main.blend] }  # runs in the project folder
   - { label: design, type: note, path: docs/design.md }
+  - { label: agent, type: chat }                                                   # claude in the project folder
+  - { label: shell, type: chat, agent: shell, path: src }                          # your login shell, in src/
 categories:                     # optional colours for project categories
   game: "#8fa58a"
 sections:
@@ -63,6 +65,7 @@ sections:
       - { label: Runbook, type: note, path: ~/deploy-tools/RUNBOOK.md }
       - { label: Today, type: daily }   # optional: folder (default daily), template (default templates/daily.md)
       - { label: Docs, type: link, url: "https://example.com" }
+      - { label: Scratch, type: chat, path: "~", args: [--model, opus] }  # a chat outside projects
       - label: Claude here
         type: launch
         command: gnome-terminal
@@ -104,6 +107,23 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - Steps are yours to name: **+** adds one (paths are inside the project). Right-click a tab to edit or remove it, and drag tabs to reorder them.
 - Every project starts with the profile's `workflow:` steps. Changing a project's steps gives it its own `steps:`. From the right-click menu, **Use these steps for every project** makes them the `workflow:`, and **Reset to profile steps** goes back to it.
 - Note steps also count as notes, so they show up in search and wiki links.
+
+### Chats
+
+- A chat is the real `claude` CLI (or your login shell) in a terminal inside the app, so everything claude does works as in GNOME Terminal, including `/remote-control` for your phone.
+- Start one:
+  - **New chat** at the end of a project's tab row (the arrow next to it offers **Shell**), or **New chat** / **New shell** when you right-click a project in the nav.
+  - A **chat step** (`type: chat`) is a fixed tab in every project that uses the workflow. It starts the first time you open it. `agent: shell` makes it a shell, `path:` a folder inside the project, `args:` extra arguments for claude.
+  - **Chat here** / **Shell here** when you right-click a folder in the file browser.
+  - A **chat entry** in the nav (`type: chat`, `path:` defaults to home) has a page of its own, for chats outside projects.
+- Chats keep running when you switch tabs or projects, reload or close the window; the screen comes back as you left it. After the service restarts (a pull, a reboot), they show **Stopped** with **Resume** and **New session**. Nothing starts by itself.
+- **History** (end of the tab row) lists the Claude sessions in the project folder and below it; pick one to resume it in a new tab. A stopped chat step or entry also offers its folder's earlier sessions.
+- A tab's right-click menu: **Rename…**, **Colour…**, **Pin** (pinned tabs come first and have no ×), **Summarize and continue**, **Close**. Closing a running chat asks first; claude's conversation stays in History.
+- **Summarize and continue** asks claude (in the background, on a copy of the session) for a handoff summary, then starts a new chat with it. After 40 messages the button says so.
+- When a chat goes quiet after working (claude finished or is asking for permission), or rings the bell, while you're not looking at it, its tab gets a dot and the project's spark in the nav turns the accent colour. If the window isn't focused, you also get a desktop notification (the browser asks for permission on your first chat).
+- Drag files or folders from the browser, or a step tab, onto a chat or its tab: their paths are typed into the prompt.
+- In the terminal, **Ctrl+C** interrupts as usual, **Ctrl+Shift+C** copies the selection and **Ctrl+Shift+V** pastes. Links open in your browser.
+- Tab names, colours and pins live with the service's chat list (`~/.local/state/workbench/chats.json`), not in your YAML: they belong to a running session. A chat you want in every project is a chat step.
 
 ### Notes
 
@@ -147,12 +167,14 @@ The file browser can open the profile's `home:`, its `notes:` folder, its folder
 
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else.
 
+A chat is shell access, so its terminal socket (`/pty/`) needs more: browsers can't add the `X-Workbench` header to a WebSocket, so it must come from Workbench's own `Origin`, and it carries a random token that changes every time the service starts, which only the app can read through the API. Chats start from an entry or step in your config, by its position; a request never carries a command or arguments, and **Chat here** only works inside the profile's folders. Claude's transcripts in `~/.claude/projects/` are read for History, never written.
+
 ## Development
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, HTTP API
-npm run e2e        # Playwright against a throwaway config; programs are not started
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, HTTP API
+npm run e2e        # Playwright against a throwaway config; programs are not started, chats run stand-ins
 npm run build      # type check + production build
 ```
 
@@ -165,8 +187,9 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/config-store.ts` | loading, validation, atomic writes, watching and undo |
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; the folders a profile may reach; folder watching |
-| `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API |
-| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser |
+| `server/chats.ts`, `server/claude-sessions.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list; reading claude's transcripts for History |
+| `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
+| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats |
 
 ## Roadmap
 
@@ -175,7 +198,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 2 | Markdown notes (done) |
 | 3 | File browser (done) |
 | 4 | Project cards (done) |
-| 5 | Agent chats (real `claude` CLI in xterm.js, so `/remote-control` keeps working) |
+| 5 | Agent chats (done) |
 | 6 | Skills & MCP panel |
 | 7 | Context folders |
 | 8 | Polish (Ctrl+K switcher, systemd user service) |
