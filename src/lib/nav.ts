@@ -1,4 +1,4 @@
-import type { ItemAddr, ItemType, ListAddr, NavItem, Profile } from '../../shared/config-schema.ts'
+import type { ItemAddr, ItemType, ListAddr, NavItem, Profile, StepItem } from '../../shared/config-schema.ts'
 
 export const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(' ')
 
@@ -38,6 +38,8 @@ export type DialogState =
   | { mode: 'add'; list: ListAddr; index?: number; context: string; presetType?: ItemType }
   | { mode: 'edit'; at: ItemAddr; item: NavItem; context: string }
   | { mode: 'note'; list: ListAddr; context: string }
+  /** Add a workflow step to the project at `at`, or edit step `index`; `base` is the project folder. */
+  | { mode: 'step'; at: ItemAddr; index?: number; item?: StepItem; context: string; base: string }
 
 /**
  * What the main pane shows: a nav entry, a note opened by path (a link or a
@@ -52,14 +54,14 @@ export type Selection =
 export const NOTE_KEY = 'note:'
 export const FILES_KEY = 'files:'
 
-/** The first note or folder entry whose path matches, searching headings and groups. */
-export function findEntry(profile: Profile, type: 'note' | 'folder', matches: (path: string) => boolean): ItemAddr | null {
+/** The first entry of a type that matches, searching headings and groups. */
+export function findEntry(profile: Profile, type: ItemType, matches: (item: NavItem) => boolean = () => true): ItemAddr | null {
   for (const [si, section] of profile.sections.entries()) {
     for (const [i, item] of section.items.entries()) {
-      if (item.type === type && matches(item.path)) return { section: si, index: i }
+      if (item.type === type && matches(item)) return { section: si, index: i }
       if (item.type !== 'group') continue
       for (const [ci, child] of item.items.entries()) {
-        if (child.type === type && matches(child.path)) return { section: si, group: i, index: ci }
+        if (child.type === type && matches(child)) return { section: si, group: i, index: ci }
       }
     }
   }

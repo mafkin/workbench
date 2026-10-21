@@ -25,8 +25,10 @@ type Phase = { kind: 'loading' } | { kind: 'ready' } | { kind: 'missing' } | { k
 
 interface Props {
   path: string
-  kicker: ReactNode
+  kicker?: ReactNode
   heading: ReactNode
+  /** Inside another page (a project's note step): a small heading and no kicker. */
+  compact?: boolean
   /** Shown under the title, e.g. the path row or day arrows. */
   below?: ReactNode
   /** Text for a new file; defaults to `# <title>`. */
@@ -40,7 +42,7 @@ interface Props {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-export function NoteView({ path, kicker, heading, below, initialText, title, autoCreate, missingText }: Props) {
+export function NoteView({ path, kicker, heading, compact, below, initialText, title, autoCreate, missingText }: Props) {
   const notes = useNotes()
   const ctx = useRef(notes)
   ctx.current = notes
@@ -248,8 +250,8 @@ export function NoteView({ path, kicker, heading, below, initialText, title, aut
   const tone = conflict || saveError ? 'bad' : saving || dirty ? 'pending' : 'ok'
 
   return (
-    <div className="page note-page">
-      <div className="page-kicker">{kicker}</div>
+    <div className={cx('page note-page', compact && 'compact')}>
+      {kicker && <div className="page-kicker">{kicker}</div>}
       <div className="note-head">
         <h1 className="page-title">{heading}</h1>
         {phase.kind === 'ready' && (

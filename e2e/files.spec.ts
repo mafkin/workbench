@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, NOTES, resetFixture, SPAWN_LOG, TRASH } from './fixture.ts'
+import { ALPHA, resetFixture, SPAWN_LOG, TRASH } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -145,25 +145,15 @@ test('a file added on disk shows up', async ({ page }) => {
   await expect(row(page, 'added-by-hand.txt')).toBeVisible()
 })
 
-test('chips, the path bar and Home switch folders', async ({ page }) => {
-  await page.locator('.home-chips').getByRole('button', { name: 'Alpha' }).click()
-  await expect(entry(page, 'Alpha')).toHaveClass(/selected/)
-
-  await page.locator('.files-page .chips').getByRole('button', { name: 'Notes' }).click()
-  await expect(title(page)).toHaveText('notes')
-  await expect(row(page, 'Ideas.md')).toBeVisible()
-  await expect(page.locator('.crumbs')).toContainText('Files')
-
-  await page.getByRole('button', { name: 'Back' }).click()
-  await expect(title(page)).toHaveText('Alpha')
-
+test('the path bar and double-click move within the project', async ({ page }) => {
+  await openAlpha(page)
   await row(page, 'src').dblclick()
-  await expect(title(page)).toHaveText('src')
+  await expect(row(page, 'main.py')).toHaveAttribute('aria-level', '1')
+  await expect(title(page)).toHaveText('Alpha')
   const bar = page.getByRole('navigation', { name: 'Path' })
   await expect(bar.locator('.unreachable')).toHaveText('~')
   await bar.getByRole('button', { name: 'alpha' }).click()
-  await expect(entry(page, 'Alpha')).toHaveClass(/selected/)
-  expect(fs.existsSync(NOTES)).toBe(true)
+  await expect(row(page, 'README.md')).toBeVisible()
 })
 
 test('a missing folder says so', async ({ page }) => {

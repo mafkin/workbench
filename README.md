@@ -36,11 +36,21 @@ name: Work
 accent: "#7d93ab"
 home: ~/Documents/work
 notes: ~/Documents/work/notes   # new notes, daily notes, search and [[wiki links]]
+workflow:                       # the steps every project (folder entry) starts with
+  - { label: assets, type: folder, path: assets }                                  # paths are inside the project
+  - { label: modeling, type: launch, command: blender, args: [models/main.blend] }  # runs in the project folder
+  - { label: design, type: note, path: docs/design.md }
 sections:
   - title: Projects
     collapsed: false
     items:
       - { label: IFC Checker, type: folder, path: ~/ifc_checker_project }
+      - label: Tuohi
+        type: folder
+        path: ~/Projects/tuohi
+        steps:                  # this project's own steps instead of the workflow
+          - { label: sprites, type: folder, path: assets/sprites }
+          - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
       - { label: Runbook, type: note, path: ~/deploy-tools/RUNBOOK.md }
       - { label: Today, type: daily }   # optional: folder (default daily), template (default templates/daily.md)
       - { label: Docs, type: link, url: "https://example.com" }
@@ -67,6 +77,17 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - **Right-click** any heading or entry for the same actions.
 - **Links** open in your browser and **launchers** start their program, both without a shell. Folders and notes open in the main pane.
 - **Alt+←** or the back arrow in the top bar goes back to the previous page.
+- **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
+
+### Projects and workflow steps
+
+- A **folder** entry is a project. Its page has a row of tabs: **All files** (the project folder), then the project's workflow steps.
+  - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
+  - A **note** step shows the note in place, with Edit and autosave.
+  - A **launcher** step starts its program in the project folder.
+- Steps are yours to name: **+** adds one (folder, note or launcher; paths are inside the project). Right-click a tab to edit or remove it, and drag tabs to reorder them.
+- Every project starts with the profile's `workflow:` steps. Changing a project's steps gives it its own `steps:`. From the right-click menu, **Use these steps for every project** makes them the `workflow:`, and **Reset to profile steps** goes back to it.
+- Note steps also count as notes, so they show up in search and wiki links.
 
 ### Notes
 
@@ -81,12 +102,12 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 
 ### Files
 
-- A **folder** entry opens a file browser: a tree with sizes and dates, and a preview of the selected file on the right. The **Folders** chips on Home, and the chips above the tree, open the profile's home, its notes folder and its folder entries.
+- A project's **All files** and folder-step tabs show a file browser: a tree with sizes and dates, and a preview of the selected file on the right.
 - Click the arrow to expand a folder in place; **double-click** (or **Enter**) to make it the top. The path bar jumps back up, and so does **Backspace** or **Alt+←**.
 - **Filter by name** narrows the tree to matching names in the folders you have open. Click a column header to sort.
 - Dotfiles are hidden; **Ctrl+H** shows them. In a git repository, files `.gitignore` excludes (`node_modules`, `dist`, logs) are shown dimmed.
 - Previews: images, PDF, video and audio, Markdown formatted, and other text as plain text (the first 200 KB). **Open as note** (or Enter) opens Markdown in the notes view, where you can edit it.
-- **F2** renames in place, **Delete** moves the selection to the GNOME Trash (`gio trash`; restore it from Trash in Files), and the toolbar makes a new folder or file. Drag files onto a folder, a path-bar step or a chip to move them. Rename and move have **Undo**; nothing is ever overwritten.
+- **F2** renames in place, **Delete** moves the selection to the GNOME Trash (`gio trash`; restore it from Trash in Files), and the toolbar makes a new folder or file. Drag files onto a folder or a path-bar step to move them. Rename and move have **Undo**; nothing is ever overwritten.
 - Right-click for the rest: open in the default app, open the folder in Files, copy the path.
 - The tree follows changes on disk while it is open.
 
@@ -98,7 +119,7 @@ The service binds to loopback only. It accepts a request only if:
 - the `Origin` (if any) is its own address, and
 - an `X-Workbench: 1` header is present.
 
-Other websites therefore cannot call it. Launch requests name an entry's position in your config, never a command.
+Other websites therefore cannot call it. Launch requests name an entry's (or a step's) position in your config, never a command.
 
 Notes can only touch:
 
@@ -106,7 +127,7 @@ Notes can only touch:
 - the files of that profile's note entries,
 - images inside those places, read-only.
 
-The file browser can open the profile's `home:`, its `notes:` folder and its folder entries, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file, and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header.
+The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file, and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header.
 
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else.
 

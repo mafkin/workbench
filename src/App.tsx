@@ -19,10 +19,12 @@ import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
+import type { ProjectActions } from './components/ProjectView.tsx'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
 import { followState, type Connection } from './lib/events.ts'
-import { useLocal } from './lib/local.ts'
+import { nameOf } from './lib/files.ts'
+import { readLocal, useLocal, writeLocal } from './lib/local.ts'
 import {
   cx,
   FILES_KEY,
@@ -36,6 +38,7 @@ import {
   type Selection,
 } from './lib/nav.ts'
 import { NotesCtx, type NotesApi } from './lib/notes-ctx.ts'
+import { pushRecent, type Recent } from './lib/recent.ts'
 import { normalizePath } from './lib/wikilinks.ts'
 
 const NAV_MIN = 220
@@ -55,6 +58,7 @@ export function App() {
   const [search, setSearch] = useState<SearchState>({ open: false, query: '' })
   const [notesList, setNotesList] = useState<NoteSummary[]>([])
   const [fresh, setFresh] = useState<string | null>(null)
+  const [recent, setRecent] = useLocal<Record<string, Recent[]>>('recent', {})
   const searchRef = useRef<HTMLInputElement>(null)
   const toasts = useToasts()
 
@@ -130,7 +134,16 @@ export function App() {
     [fail],
   )
 
-  /** Show an entry (by address key), a note (`note:<path>`) or Home (undefined); Back returns. */
+  /** Add to recent work on Home. */
+  const remember = useCallback(
+    (key: string, label: string, step?: string) => {
+      const id = activeRef.current?.id
+      if (id) setRecent((all) => ({ ...all, [id]: pushRecent(all[id] ?? [], { key, label, step, at: Date.now() }) }))
+    },
+    [setRecent],
+  )
+
+  /** Show an entry (by address key), a note (`note:<path>`), a folder (`files:<path>`) or Home (undefined); Back returns. */
   const navigate = useCallback(
     (key: string | undefined) => {
       const a = activeRef.current
@@ -139,8 +152,15 @@ export function App() {
       if (current !== key) setHistory((h) => [...h.slice(-49), current])
       setSelected((s) => ({ ...s, [a.id]: key }))
       setSearch((s) => (s.open ? { ...s, open: false } : s))
+      if (!key) return
+      if (key.startsWith(NOTE_KEY) || key.startsWith(FILES_KEY)) remember(key, nameOf(key.slice(key.indexOf(':') + 1)))
+      else {
+        const addr = parseKey(key)
+        const item = addr && a.profile ? getItem(a.profile, addr) : undefined
+        if (item) remember(key, item.label)
+      }
     },
-    [setSelected],
+    [setSelected, remember],
   )
 
   const back = useCallback(() => {
@@ -162,7 +182,7 @@ export function App() {
       const p = activeRef.current?.profile
       if (!p) return
       const want = normalizePath(expandHome(path, homeRef.current))
-      const addr = findEntry(p, type, (entryPath) => normalizePath(expandHome(entryPath, homeRef.current)) === want)
+      const addr = findEntry(p, type, (item) => 'path' in item && normalizePath(expandHome(item.path, homeRef.current)) === want)
       navigate(addr ? itemKey(addr) : (type === 'note' ? NOTE_KEY : FILES_KEY) + path)
     },
     [navigate],
@@ -271,6 +291,40 @@ export function App() {
 
   const goHome = useCallback(() => navigate(undefined), [navigate])
 
+  /** Open something from recent work, on the step it was on. */
+  const openRecent = useCallback(
+    (r: Recent) => {
+      const a = activeRef.current
+      const addr = parseKey(r.key)
+      const item = addr && a?.profile ? getItem(a.profile, addr) : undefined
+      if (a && r.step && item?.type === 'folder') {
+        writeLocal('projectTab', { ...readLocal<Record<string, string>>('projectTab', {}), [`${a.id}|${item.path}`]: r.step })
+      }
+      navigate(r.key)
+    },
+    [navigate],
+  )
+
+  const projectActions = useMemo<ProjectActions>(
+    () => ({
+      run,
+      openDialog: setDialog,
+      launchStep: (addr, index, label) => {
+        const a = activeRef.current
+        if (!a) return
+        api
+          .openEntry(a.id, a.rev, addr, index)
+          .then(() => toasts.push({ message: `Started ${label}` }))
+          .catch(fail)
+      },
+      rememberStep: (addr, label) => {
+        const item = activeRef.current?.profile ? getItem(activeRef.current.profile, addr) : undefined
+        if (item) remember(itemKey(addr), item.label, label)
+      },
+    }),
+    [run, fail, toasts.push, remember],
+  )
+
   const itemMenu = useCallback(
     (addr: ItemAddr, item: NavItem): (MenuEntry | 'sep')[] => {
       const section = activeRef.current?.profile?.sections[addr.section]
@@ -302,6 +356,10 @@ export function App() {
       if (!dialog) return false
       if (dialog.mode === 'add') return run([{ op: 'addItem', to: dialog.list, index: dialog.index, item }])
       if (dialog.mode === 'edit') return run([{ op: 'updateItem', at: dialog.at, item }])
+      if (dialog.mode === 'step') {
+        if (dialog.index === undefined) return run([{ op: 'addStep', at: dialog.at, step: item }])
+        return run([{ op: 'updateStep', at: dialog.at, index: dialog.index, step: item }])
+      }
       return false
     },
     [dialog, run],
@@ -419,6 +477,9 @@ export function App() {
           openFolder={openFolder}
           toast={toasts.push}
           home={state.home}
+          actions={projectActions}
+          recent={recent[active.id] ?? []}
+          openRecent={openRecent}
           onHome={goHome}
           activate={activate}
           openExternally={openExternally}

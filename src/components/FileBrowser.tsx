@@ -3,7 +3,7 @@
 // they change on disk. Operations go through the service, which confines them
 // to the profile's folders; deletes go to the Trash.
 import { ArrowDown, ArrowUp, ChevronRight, Copy, ExternalLink, Eye, FilePlus, FileText, FolderOpen, FolderPlus, ListFilter, PencilLine, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { expandHome, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { onFilesEvent } from '../lib/events.ts'
@@ -26,12 +26,10 @@ type SortKey = 'name' | 'size' | 'mtime'
 interface Props {
   /** The folder at the top of the tree. */
   top: string
-  kicker: string
-  heading: ReactNode
-  /** The profile's folders: chips, and which path-bar steps can be opened. */
+  /** The profile's folders: which path-bar steps can be opened. */
   roots: { label: string; path: string }[]
   home: string
-  /** Make another folder the top: a chip, the path bar, or opening a subfolder. */
+  /** Make another folder the top: the path bar, or opening a subfolder. */
   onNavigate: (path: string) => void
   toast: (t: ToastInput) => void
 }
@@ -46,7 +44,8 @@ function sorted(entries: FileEntry[], key: SortKey, dir: 1 | -1): FileEntry[] {
   return [...entries].sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || dir * by(a, b) || collator.compare(a.name, b.name))
 }
 
-export function FileBrowser({ top, kicker, heading, roots, home, onNavigate, toast }: Props) {
+/** The toolbar, tree and preview; the page around it supplies the heading. */
+export function FileBrowser({ top, roots, home, onNavigate, toast }: Props) {
   const notes = useNotes()
   const profile = notes.profile
   const [listings, setListings] = useState<Record<string, Listing>>({})
@@ -307,7 +306,7 @@ export function FileBrowser({ top, kicker, heading, roots, home, onNavigate, toa
     }
   }
 
-  // Drag rows onto a folder, a path-bar step or a chip to move them there.
+  // Drag rows onto a folder or a path-bar step to move them there.
   const canDrop = (target: string) => {
     const paths = dragging.current
     if (!paths?.length || !reachable(target)) return false
@@ -438,10 +437,7 @@ export function FileBrowser({ top, kicker, heading, roots, home, onNavigate, toa
   })()
 
   return (
-    <div className="page wide files-page">
-      <div className="page-kicker">{kicker}</div>
-      <h1 className="page-title">{heading}</h1>
-
+    <div className="files">
       <div className="files-toolbar">
         <nav className="path-bar" aria-label="Path">
           {steps.map((s, i) => (
@@ -496,22 +492,6 @@ export function FileBrowser({ top, kicker, heading, roots, home, onNavigate, toa
           <FolderOpen size={15} />
         </button>
       </div>
-
-      {roots.length > 1 && (
-        <div className="chips" aria-label="Folders">
-          {roots.map((r) => (
-            <button
-              key={`${r.label}:${r.path}`}
-              className={cx('chip', norm(r.path) === norm(top) && 'active', dropTarget === r.path && 'drop-into')}
-              onClick={() => onNavigate(r.path)}
-              title={r.path}
-              {...dropProps(r.path)}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-      )}
 
       <div className="files-body">
         <div

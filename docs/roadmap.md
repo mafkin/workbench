@@ -35,6 +35,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 1 | Shell, profiles, configurable nav | Done (`2a8811a`) |
 | 2 | Markdown notes | Done (branch `claude/inspiring-einstein-vwftq8`) |
 | 3 | File browser | Done (branch `claude/inspiring-einstein-vwftq8`) |
+| 3½ | Workflow steps, no repeated nav | Done (same branch); see below |
 | 4 | Project cards | Next in the suggested order |
 | 5 | Agent chats | |
 | 6 | Skills & MCP panel | |
@@ -92,6 +93,19 @@ The user may pick parts in a different order; ask. For each part, the "Ask" item
   - Folder chips on Home.
 - **Left for later:** see "Known gaps" in CLAUDE.md (trash undo, cross-drive moves, copy, upload, folder sizes, virtualized rows).
 
+### Between parts 3 and 4: workflow steps
+
+The user asked for this before part 4: "no overlap in the selections". The centre repeated the nav (Home cards, folder chips). The user wants to "choose a project from the left and preserve the center for my customizable workflow", with workflow items like "assets", "modeling" and "design" that they name and customise.
+
+| Question | Answer |
+| --- | --- |
+| What a step opens | A folder, a note or a launcher |
+| Shared or per project | A profile default (`workflow:`), and each project can customise its own (`steps:`) |
+| Where stored | The profile YAML |
+| Home | Recent work plus today's note, instead of the nav cards |
+
+Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the entry dialog, `/api/open` with a step index, and Home as Recent work. The file browser's chips and Home's cards and chips are gone.
+
 ### Part 4: Project cards
 
 - **In Mr. Mak:** a `workspace.json` registry of entities with these fields: `id`, `title`, `description`, `icon`, `category`, `created`, `updated`, `folder`, `steps[] {name, path}` (tabs inside the card), `defaultStep`, `status` (active, done or archived) and `pinned`.
@@ -101,6 +115,7 @@ The user may pick parts in a different order; ask. For each part, the "Ask" item
   - Tabs inside a card hold related iterations: HTML reports in an iframe, Markdown formatted, image previews.
 - **Hooks into:** `project` entries (`project: <id>`). The Home overview could also become or include the card dashboard.
   - A card's tabs can reuse `FilePreview` (images, PDF, Markdown, text) and `NoteView` for notes. Any new file access goes through `browseRoots` in `server/paths.ts`.
+  - **Workflow steps already cover Mr. Mak's `steps[]` tabs** for folder entries (`ProjectView`). Ask whether part 4's cards should build on folder entries and their steps rather than add a separate registry with its own tabs. Respect the "no repeated nav" rule: a card dashboard on Home would repeat the nav unless it shows something the nav doesn't (status, category, pinned).
 - **Ask:**
   - Where the registry lives: per profile in `~/.config/workbench/projects/<profile>.yaml`, or a file inside each project folder.
   - Which card fields and categories they want.

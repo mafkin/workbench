@@ -90,6 +90,11 @@ describe('step ops', () => {
     expect(text).toContain('# Every project starts with these')
   })
 
+  it('writes a new step on one line when the list is written that way', () => {
+    const { text } = run([{ op: 'addStep', at: wargame, step: { label: 'art', type: 'folder', path: 'art' } }])
+    expect(text).toContain('- { label: art, type: folder, path: art }')
+  })
+
   it('adds at an index and leaves out empty fields', () => {
     const { profile } = run([{ op: 'addStep', at: wargame, index: 0, step: { label: 'build', type: 'launch', command: 'make', args: [], cwd: '' } }])
     expect(profile.sections[0].items[1]).toMatchObject({ steps: [{ label: 'build', type: 'launch', command: 'make', args: [] }, { label: 'rules' }] })

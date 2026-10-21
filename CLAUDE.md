@@ -32,7 +32,12 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - F2 rename, new folder or file, Delete to the GNOME Trash (`gio trash`), drag to move (rows, path bar, chips), Undo for rename and move, a right-click menu,
   - Markdown anywhere in the profile's folders opens as a note (Open as note / Enter),
   - live updates of open folders.
-- **Placeholders:** project entries open a page whose placeholder text points to part 4.
+- **Workflow steps (between parts 3 and 4) are done** on the same branch:
+  - The left panel picks the project; the centre doesn't repeat the nav. A folder entry is a project: tabs **All files** + its workflow steps.
+  - A step is a folder (browser), a note (inline, editable) or a launcher (runs in the project folder), with the same fields as a nav entry, and relative paths inside the project.
+  - Steps come from the profile's `workflow:` until a project gets its own `steps:` (the first change copies the workflow in). Add, edit, remove and drag-reorder in the UI; **Use these steps for every project** and **Reset to profile steps** in the tab menu.
+  - Home is **Recent work** (per browser, per profile) plus a Today card. No nav cards or folder chips; the browser has no chips either.
+- **Placeholders:** project-card entries (`type: project`) open a page whose placeholder text points to part 4.
 - **Next:** part 4 is next in the suggested order, but ask the user which part they want next.
 - **Known gaps:**
   - The selection is stored by address (`section.index` or `section.group.index`) in localStorage, so it doesn't follow an entry that has moved.
@@ -40,14 +45,15 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - When the YAML file is broken, the pencil button still toggles but does nothing.
   - Notes: search reads the files on every query (no index; capped at 5000 notes). `[[Name#heading]]` opens the note but doesn't scroll to the heading. Task checkboxes can't be ticked in View; edit the text instead. Renaming a note in a file manager breaks links to it. Code blocks have no syntax colours.
   - "Today" is worked out when the daily entry opens; after midnight, open it again.
+  - Steps: the active tab is remembered per project in this browser only. Recent work keeps entries by address plus label, so an entry that moved drops out of the list.
   - Files: Trash can't be undone in the app (restore from Trash in Files). Moving to another drive is refused rather than copied. No copy or duplicate, no upload or drop from the desktop. Folder sizes aren't computed. The filter only looks in folders that are open. Very large folders render every row. The selection isn't remembered between visits.
 
 ## Commands
 
 ```sh
 npm install
-npm test           # Vitest: 138 tests (config ops, store, guard, launch, notes, wiki links, files, HTTP API)
-npm run e2e        # Playwright: 32 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
+npm test           # Vitest: 158 tests (config ops, store, guard, launch, notes, wiki links, files, steps, HTTP API)
+npm run e2e        # Playwright: 40 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
 npm run build      # tsc -p . (TypeScript 7) + vite build
 npm run dev        # service on 7420 (node --watch) + Vite with hot reload on 7421 (proxies /api)
 bin/workbench      # desktop only: start the service if needed, then open the window
@@ -59,8 +65,8 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 
 | Path | Role |
 | --- | --- |
-| `shared/config-schema.ts` | zod schemas and types for profiles, items, ops and addresses, used by both the UI and the service. `ItemAddr = {section, group?, index}`. |
-| `server/config-ops.ts` | Ops (`addSection`, `moveItem`, …) applied to a `yaml` **Document**, not to plain data, so comments, key order and flow style survive. Every result is validated against the `Profile` schema. |
+| `shared/config-schema.ts` | zod schemas and types for profiles, items, ops and addresses, used by both the UI and the service. `ItemAddr = {section, group?, index}`. Workflow steps: `StepItem` (folder, note or launch), `stepsOf`, `stepPath`, `stepEntry`. |
+| `server/config-ops.ts` | Ops (`addSection`, `moveItem`, step ops, …) applied to a `yaml` **Document**, not to plain data, so comments, key order and flow style survive. Step ops copy `workflow:` into a project's `steps:` on its first change. Every result is validated against the `Profile` schema. |
 | `server/config-store.ts` | Files are the source of truth. Each file has a rev (content hash); a stale rev gets 409. Writes are serialized and atomic (temp file + rename). `fs.watch` picks up hand edits. Broken files get 423 and are never written. One level of undo. Emits `change`. |
 | `server/main.ts` | Fastify routes: `/api/state` (includes `home`), `/api/profiles/:id/ops`, `/api/profiles/:id/undo`, `/api/active`, `/api/open`, `/api/stat`, `/api/notes/{file,list,search,asset}`, `/api/files/{list,text,ticket,op,open}`, `/raw/:token/:name` (media by ticket, no header needed, Host/Origin still checked), and the SSE stream `/api/events` (events `state`, `note`, `files`). Serves `dist/` in production. `buildServer()` is exported for tests. |
 | `server/paths.ts` | `browseRoots(profile)`: the profile's home, notes folder and folder entries (`folderRoots` in the schema), resolved with `realish`. Every file route checks paths against these after `realpath`. |
@@ -69,11 +75,12 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 | `server/files.ts` | File browser service: `list` (dotfile and `git check-ignore` flags), `text` (first 200 KB, binary check), `ticket`/`raw` (10-minute media URLs), `op` (rename, mkdir, touch, move, trash via `gio trash`; never overwrites; `#entry` refuses the roots themselves and acts on a symlink, not its target), `open` (`xdg-open`, refuses `.desktop` and executables). Emits `files {path}` for listed folders. |
 | `server/fs-util.ts` | `writeAtomic` and `revOf`, shared by the config store and notes. |
 | `server/guard.ts` | Every request must have the right Host (blocks DNS rebinding) and Origin, and every `/api/*` request needs `X-Workbench: 1`. Keep this for all new routes. |
-| `server/launch.ts` | Links and paths open with `xdg-open`; launchers run as a detached `spawn` with no shell, `~` expanded. `/api/open` takes an entry **address** from the config, never a command. |
+| `server/launch.ts` | Links and paths open with `xdg-open`; launchers run as a detached `spawn` with no shell, `~` expanded. `/api/open` takes an entry **address** (plus a step index for a project's launcher step) from the config, never a command. |
 | `server/seed.ts` | First-run config built from real folders on the user's machine. |
 | `src/App.tsx` | State, profile switching, run-ops-with-undo, menus, shortcuts. The selection is an entry address or `note:<path>`; a back stack; the notes context (`src/lib/notes-ctx.ts`); quick-create and creating notes from wiki links. |
 | `src/components/NavPanel.tsx` | dnd-kit: sortable sections and items, cross-list drops, collision priority from innermost to outermost. |
-| `src/components/MainPane.tsx` | Top bar (back, crumbs, search box), Home overview and the per-type entry pages. New parts plug in here. |
+| `src/components/MainPane.tsx` | Top bar (back, crumbs, search box), Home (recent work, from `src/lib/recent.ts`) and the per-type entry pages. New parts plug in here. |
+| `src/components/ProjectView.tsx` | A folder entry: header, step tabs (All files + steps; drag to reorder, right-click menu), and the active tab: `FileBrowser`, a compact `NoteView`, or a launcher. Active tab per project in localStorage. |
 | `src/components/NoteView.tsx` | One note: load, View/Edit, autosave, live reload, conflict banner, "missing" state. `DailyView`, `SearchView`, `NewNoteDialog` and `NotesFolderHint` sit next to it. |
 | `src/components/Markdown.tsx`, `NoteEditor.tsx` | react-markdown + remark-gfm + our wiki-link plugin (`src/lib/wikilinks.ts`); the CodeMirror 6 editor, lazy-loaded as its own chunk. |
 | `src/components/FileBrowser.tsx` | The tree: lazy listings keyed by `~` path, expanded folders in localStorage per profile and top folder, selection and keys, inline rename, native HTML5 drag to move, context menu. `FilePreview.tsx` beside it; helpers in `src/lib/files.ts`. |
@@ -96,6 +103,8 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 - **react-markdown components:** a component defined inline is a new type on every render and remounts; keep stateful ones (like images, which fetch) at module level.
 - **Images in notes** load through `fetch` + blob URLs, because `<img>` can't send the X-Workbench header. File previews use `/raw/` tickets instead, which also give Range requests for seeking in video.
 - **Selection keys:** an entry address, `note:<path>` or `files:<path>`. `openNote`/`openFolder` in App pick the nav entry instead when one has the same path, so the nav highlights it.
+- **No repeated nav in the centre.** The user wants the left panel to choose and the centre to hold the workflow, so don't add lists of nav entries, chips of folder entries or similar to Home or the main pane.
+- **Step paths** are relative to the project (`stepPath`); folder steps count as browse roots (`folderRoots`) and note steps as note entries, so a step outside its project still works.
 
 ## The user's machine (not visible from the cloud)
 

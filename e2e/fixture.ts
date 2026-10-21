@@ -18,6 +18,11 @@ export const WORK = `# fixture: work profile
 name: Work
 accent: "#7d93ab"
 notes: ~/notes
+# Every project starts with these
+workflow:
+  - { label: sources, type: folder, path: src }
+  - { label: readme, type: note, path: README.md }
+  - { label: build, type: launch, command: make, args: [all] }
 sections:
   - title: Projects
     items:

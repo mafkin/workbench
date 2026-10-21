@@ -236,7 +236,10 @@ function applyOp(doc: Document, op: Op) {
     case 'addStep': {
       checkStep(op.step)
       const seq = ownSteps(doc, op.at)
-      seq.items.splice(clamp(op.index, seq.items.length), 0, doc.createNode(newItemData(op.step)))
+      const node = doc.createNode(newItemData(op.step)) as YAMLMap
+      // Match the list: steps written as one-line { … } maps get a new one the same way.
+      node.flow = seq.items.length > 0 && seq.items.every((i) => isMap(i) && i.flow)
+      seq.items.splice(clamp(op.index, seq.items.length), 0, node)
       return
     }
     case 'updateStep': {

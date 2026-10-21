@@ -1138,51 +1138,6 @@ button {
   outline: none;
 }
 
-.chips {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 0 0 14px;
-}
-
-.chips-label {
-  margin-right: 4px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.chip:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
-.chip.active {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--text-strong);
-}
-
-.home-chips {
-  margin: -8px 0 22px;
-}
-
 .drop-into,
 .file-row.drop-into {
   outline: 1px dashed var(--accent);
@@ -1459,25 +1414,159 @@ button {
   background: var(--hover);
 }
 
-/* Home overview */
-
-.overview {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
+.empty-state {
+  max-width: 440px;
+  margin: 12vh auto 0;
+  text-align: center;
+  color: var(--muted);
 }
 
-.card {
-  padding: 14px 14px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
-}
+/* ── Projects and workflow steps ────────────────────── */
 
-.card h2 {
+.project-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.project-head .page-title {
+  margin-bottom: 0;
+}
+
+.project-head .path {
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.step-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex-wrap: wrap;
+  margin: 16px 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.step-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  color: var(--muted);
+}
+
+.step-tab .icon {
+  color: var(--faint);
+}
+
+.step-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.step-tab.active {
+  color: var(--text-strong);
+}
+
+.step-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.step-tab.active .icon,
+.step-tab.launch .icon {
+  color: var(--accent);
+}
+
+.step-tab.add {
+  padding: 0 10px;
+  color: var(--faint);
+}
+
+.step-tab.drop-before::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.step-hint {
+  align-self: center;
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.note-page.compact {
+  max-width: none;
+}
+
+.note-page.compact .page-title {
+  margin-top: 0;
+  font-size: 16px;
+}
+
+/* Home: recent work */
+
+.home-page .page-title {
+  margin-bottom: 20px;
+}
+
+.today-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(420px, 100%);
+  margin: 0 0 28px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: left;
+}
+
+.today-card:hover {
+  border-color: var(--accent-line);
+}
+
+.today-card .icon {
+  color: var(--accent);
+  flex: none;
+}
+
+.today-card > span {
+  display: grid;
+}
+
+.today-card strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.today-card span span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.section-label {
   margin: 0 0 8px;
   color: var(--muted);
   font-size: 11px;
@@ -1486,57 +1575,57 @@ button {
   text-transform: uppercase;
 }
 
-.card h2 span {
+.home-page .none {
   color: var(--faint);
-  letter-spacing: 0;
-  font-weight: 500;
 }
 
-.card ul {
+.recent-list {
+  max-width: 720px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.card li button {
-  display: flex;
+.recent-list button {
+  display: grid;
+  grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  height: 28px;
-  padding: 0 6px;
+  height: 34px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--text);
   text-align: left;
 }
 
-.card li button:hover {
+.recent-list button:hover {
   background: var(--hover);
 }
 
-.card li .icon {
+.recent-list .icon {
   color: var(--muted);
-  flex: none;
 }
 
-.card li .label {
+.recent-list .label {
   overflow: hidden;
+  color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.card .none {
-  padding: 4px 6px 6px;
+.recent-list .where {
+  overflow: hidden;
   color: var(--faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.empty-state {
-  max-width: 440px;
-  margin: 12vh auto 0;
-  text-align: center;
-  color: var(--muted);
+.recent-list .when {
+  color: var(--faint);
+  font-size: 12px;
 }
 
 /* ── Dialog, menu, toasts ───────────────────────────── */

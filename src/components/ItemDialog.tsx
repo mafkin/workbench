@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { ITEM_TYPES, NavItem, type ItemInput, type ItemType } from '../../shared/config-schema.ts'
+import { ITEM_TYPES, NavItem, STEP_TYPES, stepPath, type ItemInput, type ItemType } from '../../shared/config-schema.ts'
 import { stat } from '../lib/api.ts'
 import { cx, type DialogState } from '../lib/nav.ts'
 import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
+
+// For a workflow step, paths are inside the project.
+const STEP_HINTS: Partial<Record<ItemType, string>> = {
+  folder: 'A folder in the project, like assets. It opens in the browser.',
+  note: 'A note in the project, like docs/design.md. It opens in place, with Edit.',
+  launch: 'Runs in the project folder; arguments can be paths inside it.',
+}
 
 const HINTS: Record<ItemType, string> = {
   folder: 'Opens in the file browser (part 3). For now: Open in Files.',
@@ -21,9 +28,13 @@ interface Props {
 }
 
 export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
-  const initial = dialog.mode === 'edit' ? dialog.item : undefined
-  const insideGroup = dialog.mode === 'edit' ? dialog.at.group !== undefined : dialog.list.group !== undefined
+  const step = dialog.mode === 'step' ? dialog : null
+  const initial = dialog.mode === 'edit' ? dialog.item : step?.item
+  const adding = dialog.mode === 'add' || (step !== null && step.index === undefined)
+  const insideGroup = dialog.mode === 'edit' ? dialog.at.group !== undefined : dialog.mode === 'add' && dialog.list.group !== undefined
   const lockedGroup = initial?.type === 'group' && initial.items.length > 0
+  const types: readonly ItemType[] = step ? STEP_TYPES : ITEM_TYPES
+  const noun = step ? 'step' : 'entry'
 
   const [type, setType] = useState<ItemType>(initial?.type ?? (dialog.mode === 'add' ? (dialog.presetType ?? 'folder') : 'folder'))
   const [label, setLabel] = useState(initial?.label ?? '')
@@ -54,7 +65,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
     setPathStatus(null)
     if ((type !== 'folder' && type !== 'note') || !path.trim()) return
     const t = setTimeout(() => {
-      stat(path.trim()).then(setPathStatus, () => setPathStatus(null))
+      stat(step ? stepPath(step.base, path.trim()) : path.trim()).then(setPathStatus, () => setPathStatus(null))
     }, 250)
     return () => clearTimeout(t)
   }, [type, path])
@@ -118,14 +129,14 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
 
   return (
     <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="dialog" onSubmit={submit} aria-label={dialog.mode === 'add' ? 'Add entry' : 'Edit entry'}>
+      <form className="dialog" onSubmit={submit} aria-label={`${adding ? 'Add' : 'Edit'} ${noun}`}>
         <header>
-          {dialog.mode === 'add' ? 'Add entry' : 'Edit entry'}
+          {adding ? 'Add' : 'Edit'} {noun}
           <small>{dialog.context}</small>
         </header>
         <div className="body">
-          <div className="type-picker" role="radiogroup" aria-label="Type">
-            {ITEM_TYPES.map((t) => {
+          <div className="type-picker" role="radiogroup" aria-label="Type" style={{ gridTemplateColumns: `repeat(${types.length}, 1fr)` }}>
+            {types.map((t) => {
               const Icon = TYPE_ICON[t]
               const disabled = (t === 'group' && insideGroup) || (lockedGroup && t !== 'group')
               return (
@@ -149,7 +160,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
             })}
           </div>
           <span className="hint" style={{ color: 'var(--faint)', fontSize: 11, marginTop: -6 }}>
-            {HINTS[type]}
+            {(step && STEP_HINTS[type]) || HINTS[type]}
           </span>
 
           <label className="field">
@@ -166,7 +177,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
                 onBlur={suggestLabel}
-                placeholder={type === 'folder' ? '~/Projects/name' : '~/notes/file.md'}
+                placeholder={step ? (type === 'folder' ? 'assets' : 'docs/design.md') : type === 'folder' ? '~/Projects/name' : '~/notes/file.md'}
                 name="path"
               />
               {fieldError('path') ?? pathHint()}
@@ -244,7 +255,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
             Cancel
           </button>
           <button type="submit" className="btn primary" disabled={busy}>
-            {dialog.mode === 'add' ? 'Add' : 'Save'}
+            {adding ? 'Add' : 'Save'}
           </button>
         </footer>
       </form>

@@ -11,8 +11,8 @@ import { DIR, HOME, PORT, resetFixture, SPAWN_LOG, TRASH } from './fixture.ts'
 await fsp.rm(DIR, { recursive: true, force: true })
 await resetFixture()
 
-const spawn = ((command: string, args: string[]) => {
-  fs.appendFileSync(SPAWN_LOG, `${[command, ...args].join(' ')}\n`)
+const spawn = ((command: string, args: string[], options: { cwd?: string } = {}) => {
+  fs.appendFileSync(SPAWN_LOG, `${[command, ...args].join(' ')}${options.cwd ? ` (in ${options.cwd})` : ''}\n`)
   if (command === 'gio' && args[0] === 'trash') {
     fs.mkdirSync(TRASH, { recursive: true })
     for (const p of args.slice(2)) fs.renameSync(p, path.join(TRASH, path.basename(p)))

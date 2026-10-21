@@ -49,7 +49,8 @@ export const applyOps = (profile: string, rev: string, ops: Op[]) =>
 export const undo = (profile: string, rev: string) =>
   api<{ rev: string }>(`/api/profiles/${encodeURIComponent(profile)}/undo`, { body: { rev } })
 export const setActive = (profile: string) => api('/api/active', { body: { profile } })
-export const openEntry = (profile: string, rev: string, at: ItemAddr) => api('/api/open', { body: { profile, rev, at } })
+/** Open an entry, or with `step`, start a project's launcher step. */
+export const openEntry = (profile: string, rev: string, at: ItemAddr, step?: number) => api('/api/open', { body: { profile, rev, at, step } })
 export const stat = (path: string) =>
   api<{ exists: boolean; kind: 'dir' | 'file' | null }>(`/api/stat?path=${encodeURIComponent(path)}`)
 

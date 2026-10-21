@@ -139,7 +139,8 @@ test('search finds notes by their text', async ({ page }) => {
   await page.keyboard.press('Control+Shift+F')
   await expect(page.getByLabel('Search notes')).toBeFocused()
   await expect(title(page)).toHaveText('Recent notes')
-  await expect(page.locator('.search-results li')).toHaveCount(4)
+  // Ideas, Deploy plan, the daily template, the Runbook entry, and Alpha's README (a note step).
+  await expect(page.locator('.search-results li')).toHaveCount(5)
   await page.keyboard.type('rollback')
   const hits = page.locator('.search-results li')
   await expect(hits).toHaveCount(1)
@@ -170,7 +171,6 @@ test('a profile without a notes folder offers one', async ({ page }) => {
   await expect(hint).toContainText('personal.yaml')
   await hint.getByRole('button', { name: 'Use ~/notes' }).click()
   await expect(hint).toHaveCount(0)
-  await expect(page.locator('.page-sub')).toContainText('notes ~/notes')
   const yaml = await read(PERSONAL_FILE)
   expect(yaml).toMatch(/accent: "#8fa58a"\nnotes: ~\/notes\nsections:/)
 })
