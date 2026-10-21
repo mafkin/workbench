@@ -20,6 +20,20 @@ export const LaunchItem = z.object({
   cwd: z.string().optional(),
 })
 export const LinkItem = z.object({ ...base, type: z.literal('link'), url: z.url('Not a valid URL') })
+export const AGENTS = ['claude', 'shell'] as const
+export type Agent = (typeof AGENTS)[number]
+/**
+ * A chat: `claude` (or your login shell) in a terminal in the app. As a nav entry
+ * its folder defaults to home; as a step it is inside the project. `args` come
+ * only from the config, never from a request.
+ */
+export const ChatItem = z.object({
+  ...base,
+  type: z.literal('chat'),
+  agent: z.enum(AGENTS, 'Agent must be claude or shell').optional(),
+  path: z.string().trim().min(1).optional(),
+  args: list(z.string()),
+})
 
 // Only as workflow steps: an HTML report shown in its tab, and one file shown large.
 const ReportStep = z.object({ ...base, type: z.literal('report'), path: z.string().trim().min(1, 'Path is required') })
@@ -27,12 +41,12 @@ const FileStep = z.object({ ...base, type: z.literal('file'), path: z.string().t
 
 /**
  * A step in a project's workflow ("assets", "modeling", "design"): a folder, a
- * note, an HTML report or a single file shown in its tab, or a launcher or web
+ * note, an HTML report, a single file or a chat shown in its tab, or a launcher or web
  * link that opens outside. The fields are those of a nav entry. Relative paths
  * are inside the project folder, which is also a launcher's working folder.
  */
-export const StepItem = z.discriminatedUnion('type', [z.object(folderFields), NoteItem, ReportStep, FileStep, LaunchItem, LinkItem])
-export const STEP_TYPES = ['folder', 'note', 'report', 'file', 'launch', 'link'] as const
+export const StepItem = z.discriminatedUnion('type', [z.object(folderFields), NoteItem, ReportStep, FileStep, ChatItem, LaunchItem, LinkItem])
+export const STEP_TYPES = ['folder', 'note', 'report', 'file', 'chat', 'launch', 'link'] as const
 
 export const STATUSES = ['active', 'paused', 'done', 'archived'] as const
 export type Status = (typeof STATUSES)[number]
@@ -59,7 +73,7 @@ export const FolderItem = z.object({
 /** Today's note in the profile's notes folder: `<notes>/<folder>/YYYY-MM-DD.md`. */
 export const DailyItem = z.object({ ...base, type: z.literal('daily'), folder: z.string().optional(), template: z.string().optional() })
 
-export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, LinkItem, LaunchItem])
+export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem])
 
 /** One level of sub-groups under a heading; a group cannot contain another group. */
 export const GroupItem = z.object({
@@ -69,7 +83,7 @@ export const GroupItem = z.object({
   items: list(LeafItem),
 })
 
-export const NavItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, LinkItem, LaunchItem, GroupItem])
+export const NavItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, GroupItem])
 
 export const Section = z.object({
   id: z.string().optional(),
@@ -109,7 +123,7 @@ export type StepType = StepItem['type']
 export type AnyType = ItemType | StepType
 export type ItemInput = z.input<typeof NavItem> | z.input<typeof StepItem>
 
-export const ITEM_TYPES: ItemType[] = ['folder', 'note', 'daily', 'link', 'launch', 'group']
+export const ITEM_TYPES: ItemType[] = ['folder', 'note', 'daily', 'chat', 'link', 'launch', 'group']
 
 /** The fields each item type owns; editing an item replaces these and keeps any others. */
 export const TYPE_FIELDS: Record<AnyType, string[]> = {
@@ -118,6 +132,7 @@ export const TYPE_FIELDS: Record<AnyType, string[]> = {
   report: ['path'],
   file: ['path'],
   daily: ['folder', 'template'],
+  chat: ['agent', 'path', 'args'],
   link: ['url'],
   launch: ['command', 'args', 'cwd'],
   group: ['collapsed', 'items'],
@@ -303,6 +318,7 @@ export function stepPath(project: string, p: string): string {
 export function stepEntry(project: string, step: StepItem): StepItem {
   if (step.type === 'launch') return { ...step, cwd: stepPath(project, step.cwd ?? '.') }
   if (step.type === 'link') return step
+  if (step.type === 'chat') return { ...step, path: stepPath(project, step.path ?? '.') }
   return { ...step, path: stepPath(project, step.path) }
 }
 
@@ -404,3 +420,59 @@ export interface MoveResult {
 }
 
 export type FileOpResult = { path: string } | MoveResult | { trashed: string[] }
+
+// Agent chats (part 5)
+
+export type ChatState = 'running' | 'exited' | 'stopped'
+
+/** A chat as the UI sees it; the service keeps the program and its screen. */
+export interface Chat {
+  id: string
+  profile: string
+  /** Where its tab shows: `project:<path>` for a project, or a chat entry's slot. */
+  host: string
+  /** The chat step or chat entry this chat belongs to; null for one started with New chat. */
+  slot: string | null
+  agent: Agent
+  /** Working folder, `~/…` form. */
+  cwd: string
+  /** Your name for it. */
+  label: string | null
+  /** The terminal title the program set. */
+  title: string | null
+  color: string | null
+  pinned: boolean
+  /** Claude's session id; resumes with `claude --resume`. */
+  session: string | null
+  state: ChatState
+  exitCode: number | null
+  /** Rang the bell, or went quiet after working, and nobody has looked since. */
+  attention: boolean
+  /** Your prompts in the Claude session, when counted. */
+  messages: number
+  createdAt: number
+}
+
+/** A past Claude session in a folder, from claude's own transcripts. */
+export interface ClaudeSession {
+  id: string
+  /** `~/…` form. */
+  cwd: string
+  title: string
+  mtime: number
+}
+
+export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Colours a chat can be given; the same tame palette as categories. */
+export const CHAT_COLORS = CATEGORY_PALETTE
+
+/** Keys are made from paths and labels, not nav addresses, so moving an entry keeps its chats. */
+export const projectHost = (projectPath: string) => `project:${normalizePath(projectPath)}`
+export const stepSlot = (projectPath: string, label: string) => `step:${normalizePath(projectPath)}|${label}`
+export const entrySlot = (item: { label: string; path?: string }) => `entry:${normalizePath(item.path ?? '~')}|${item.label}`
+
+/** What a chat tab is called: your name, else the program's title without its spinner, else the agent. */
+export function chatName(chat: Pick<Chat, 'label' | 'title' | 'agent'>): string {
+  const title = chat.title?.replace(/^[^\p{L}\p{N}]+/u, '').trim()
+  return chat.label || title || (chat.agent === 'shell' ? 'Shell' : 'Claude')
+}

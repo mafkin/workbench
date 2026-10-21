@@ -1,19 +1,39 @@
 // Local Workbench service: config API, live updates and, when built, the UI.
 // Listens on loopback only; see guard.ts for who may call it.
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
+import websocket from '@fastify/websocket'
 import Fastify from 'fastify'
 import { z } from 'zod'
-import { expandHome, FileOp, getItem, ItemAddr, Op, stepEntry, stepsOf } from '../shared/config-schema.ts'
+import {
+  AGENTS,
+  CHAT_COLORS,
+  entrySlot,
+  expandHome,
+  FileOp,
+  getItem,
+  ItemAddr,
+  Op,
+  projectHost,
+  SESSION_ID,
+  stepEntry,
+  stepSlot,
+  stepsOf,
+  type Profile,
+} from '../shared/config-schema.ts'
+import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
+import { sessionsIn } from './claude-sessions.ts'
 import { describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { makeGuard } from './guard.ts'
 import { LaunchError, openItem } from './launch.ts'
 import { Notes, type NoteEvent } from './notes.ts'
+import { absPath, browseRoots, realish, within } from './paths.ts'
 
 export const DEFAULT_PORT = 7420
 const DEV_UI_PORT = 7421
@@ -27,6 +47,10 @@ export interface ServerOptions {
   home?: string
   spawn?: Parameters<typeof openItem>[2]
   watch?: boolean
+  /** Where the chat list is kept; defaults to `state/` in the config folder (tests). */
+  stateDir?: string
+  /** Programs for chats; tests pass stand-ins. */
+  chatCommands?: Partial<ChatCommands>
 }
 
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
@@ -39,6 +63,25 @@ const ProfileQuery = z.object({ profile: z.string() })
 const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
 const FileOpBody = z.object({ profile: z.string(), op: FileOp })
 const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.boolean().optional() })
+const ChatStart = z.object({
+  profile: z.string(),
+  rev: z.string(),
+  at: ItemAddr,
+  step: z.int().nonnegative().optional(),
+  agent: z.enum(AGENTS).optional(),
+  path: z.string().optional(),
+  resume: z.string().regex(SESSION_ID, 'Not a session id').optional(),
+})
+const ChatPatch = z.object({
+  label: z.string().max(80).nullable().optional(),
+  color: z
+    .string()
+    .refine((c) => CHAT_COLORS.includes(c), 'Not one of the chat colours')
+    .nullable()
+    .optional(),
+  pinned: z.boolean().optional(),
+})
+const ChatRestart = z.object({ fresh: z.boolean().default(false) })
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body)
@@ -52,6 +95,14 @@ export function defaultConfigDir(): string {
   return path.join(base, 'workbench')
 }
 
+export function defaultStateDir(): string {
+  if (process.env.WORKBENCH_STATE_DIR) return process.env.WORKBENCH_STATE_DIR
+  const base = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state')
+  return path.join(base, 'workbench')
+}
+
+const sameSecret = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
+
 export async function buildServer(opts: ServerOptions) {
   const home = opts.home ?? os.homedir()
   const store = new ConfigStore(opts.configDir)
@@ -59,12 +110,20 @@ export async function buildServer(opts: ServerOptions) {
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
   const files = new Files(store, home, { spawn: opts.spawn })
+  const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands })
+  await chats.init()
+  // A chat's terminal is shell access. Besides the guard, its socket needs this
+  // token, new on every start, which only the app can read (through the API).
+  const ptyToken = randomBytes(32).toString('hex')
   const state = () => ({ ...store.state(), home })
 
   const app = Fastify({ logger: false })
   const guard = makeGuard(opts.dev ? [opts.port, DEV_UI_PORT] : [opts.port])
 
   app.addHook('onRequest', async (req, reply) => {
+    // A socket upgrade is checked in its route's preValidation instead: refused
+    // here, the upgraded connection would be left open.
+    if (req.headers.upgrade && req.url.startsWith('/pty/')) return
     const reason = guard(req.headers, req.url)
     if (reason) return reply.code(403).send({ error: reason })
   })
@@ -72,6 +131,12 @@ export async function buildServer(opts: ServerOptions) {
     store.close()
     notes.close()
     files.close()
+    await chats.shutdown()
+  })
+  // The token comes as a second subprotocol, so it never appears in a URL or a log;
+  // the reply names only `workbench`.
+  await app.register(websocket, {
+    options: { maxPayload: 1024 * 1024, handleProtocols: (protocols) => (protocols.has('workbench') ? 'workbench' : false) },
   })
 
   app.setErrorHandler((err, _req, reply) => {
@@ -202,7 +267,121 @@ export async function buildServer(opts: ServerOptions) {
     return reply.sendFile(path.basename(file.real), path.dirname(file.real), { dotfiles: 'allow', acceptRanges: true })
   })
 
-  // Server-sent events: the full state after every change, changes to open notes, and to listed folders.
+  // Chats: started from an entry or step in the config, by address; a request
+  // never carries a command or arguments.
+  async function chatFolder(profile: Profile, raw: string, confine: boolean): Promise<string> {
+    const real = await realish(absPath(raw, home))
+    if (confine && !(await browseRoots(profile, home)).some((r) => within(real, r.real))) {
+      throw new StoreError("Not allowed: outside this profile's folders", 403)
+    }
+    return real
+  }
+
+  app.get('/api/chats', async (req) => chats.list(parse(ProfileQuery, req.query).profile))
+
+  app.get('/api/chats/token', async () => ({ token: ptyToken }))
+
+  app.post('/api/chats', async (req) => {
+    const body = parse(ChatStart, req.body)
+    const p = store.profile(body.profile)
+    if (p.rev !== body.rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
+    const item = getItem(p.profile, body.at)
+    if (!item) throw new StoreError('No such entry', 404)
+    let spec: ChatSpec
+    if (item.type === 'chat') {
+      const slot = entrySlot(item)
+      spec = { profile: body.profile, host: slot, slot, agent: item.agent ?? 'claude', cwd: await chatFolder(p.profile, item.path ?? '~', false), args: item.args }
+    } else if (item.type === 'folder' && body.step !== undefined) {
+      const step = stepsOf(p.profile, item)[body.step]
+      if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
+      const entry = stepEntry(item.path, step) as typeof step
+      spec = {
+        profile: body.profile,
+        host: projectHost(item.path),
+        slot: stepSlot(item.path, step.label),
+        agent: step.agent ?? 'claude',
+        cwd: await chatFolder(p.profile, entry.path ?? item.path, false),
+        args: step.args,
+      }
+    } else if (item.type === 'folder') {
+      const cwd = body.path === undefined ? await chatFolder(p.profile, item.path, false) : await chatFolder(p.profile, body.path, true)
+      spec = { profile: body.profile, host: projectHost(item.path), slot: null, agent: body.agent ?? 'claude', cwd, args: [] }
+    } else {
+      throw new StoreError('Only projects and chat entries have chats', 422)
+    }
+    if (body.resume) spec.resume = body.resume
+    // A step or an entry has one chat: opening it again returns it, and resuming
+    // an earlier session there replaces it once it has stopped.
+    const existing = spec.slot ? chats.inSlot(body.profile, spec.slot) : undefined
+    if (existing && !body.resume) return existing
+    if (existing) {
+      if (existing.state === 'running') throw new StoreError('Stop this chat first', 409)
+      await chats.close(existing.id)
+    }
+    return chats.start(spec)
+  })
+
+  app.patch<{ Params: { id: string } }>('/api/chats/:id', async (req) => chats.update(req.params.id, parse(ChatPatch, req.body)))
+
+  app.post<{ Params: { id: string } }>('/api/chats/:id/start', async (req) => chats.restart(req.params.id, parse(ChatRestart, req.body ?? {})))
+
+  app.post<{ Params: { id: string } }>('/api/chats/:id/seen', async (req) => {
+    chats.seen(req.params.id)
+    return { ok: true }
+  })
+
+  app.post<{ Params: { id: string } }>('/api/chats/:id/handoff', async (req) => chats.handoff(req.params.id))
+
+  app.delete<{ Params: { id: string } }>('/api/chats/:id', async (req) => {
+    await chats.close(req.params.id)
+    return { ok: true }
+  })
+
+  app.get('/api/chats/history', async (req) => {
+    const { profile: id, path: raw } = parse(PathQuery, req.query)
+    const p = store.profile(id)
+    if (!p.profile) throw new StoreError('The profile file is broken', 423)
+    return sessionsIn(await chatFolder(p.profile, raw, true), home)
+  })
+
+  // A chat's terminal. Frames to the view: `r` + the whole screen, `o` + output.
+  // From the view: `i` + typed input, `s` + "cols,rows", `f` + 1 or 0 (window focus).
+  app.get<{ Params: { id: string }; Querystring: { cols?: string; rows?: string } }>(
+    '/pty/:id',
+    {
+      websocket: true,
+      preValidation: async (req, reply) => {
+        const reason = guard(req.headers, req.url)
+        if (reason) return reply.code(403).send({ error: reason })
+        const offered = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map((s) => s.trim())
+        const given = offered.find((s) => s.startsWith('wb.'))?.slice(3) ?? ''
+        if (!sameSecret(given, ptyToken)) return reply.code(403).send({ error: 'Missing or wrong chat token' })
+        if (!chats.get(req.params.id)) return reply.code(404).send({ error: 'No such chat' })
+      },
+    },
+    (socket, req) => {
+      const id = req.params.id
+      chats.resize(id, Number(req.query.cols), Number(req.query.rows))
+      const view = chats.attach(id, {
+        send: (frame) => {
+          if (socket.readyState === socket.OPEN) socket.send(frame)
+        },
+        close: () => socket.close(4404, 'Chat closed'),
+      })
+      socket.on('message', (raw) => {
+        const msg = raw.toString()
+        const rest = msg.slice(1)
+        if (msg[0] === 'i') chats.write(id, rest)
+        else if (msg[0] === 's') {
+          const [cols, rows] = rest.split(',').map(Number)
+          chats.resize(id, cols, rows)
+        } else if (msg[0] === 'f') view.focus(rest === '1')
+      })
+      socket.on('close', () => view.detach())
+    },
+  )
+
+  // Server-sent events: the full state after every change, changes to open notes, to listed folders and to chats.
   app.get('/api/events', (req, reply) => {
     reply.hijack()
     const res = reply.raw
@@ -214,16 +393,19 @@ export async function buildServer(opts: ServerOptions) {
     const send = () => res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`)
     const sendNote = (e: NoteEvent) => res.write(`event: note\ndata: ${JSON.stringify(e)}\n\n`)
     const sendFiles = (e: FilesEvent) => res.write(`event: files\ndata: ${JSON.stringify(e)}\n\n`)
+    const sendChats = (e: { profile: string }) => res.write(`event: chats\ndata: ${JSON.stringify(e)}\n\n`)
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000)
     store.on('change', send)
     notes.on('note', sendNote)
     files.on('files', sendFiles)
+    chats.on('chats', sendChats)
     send()
     req.raw.on('close', () => {
       clearInterval(ping)
       store.off('change', send)
       notes.off('note', sendNote)
       files.off('files', sendFiles)
+      chats.off('chats', sendChats)
     })
   })
 
@@ -233,12 +415,12 @@ export async function buildServer(opts: ServerOptions) {
   await app.register(fastifyStatic, serveUi ? { root: distDir } : { root: ROOT, serve: false })
   if (serveUi) {
     app.setNotFoundHandler((req, reply) => {
-      if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html')
+      if (req.method === 'GET' && !req.url.startsWith('/api/') && !req.url.startsWith('/pty/')) return reply.sendFile('index.html')
       return reply.code(404).send({ error: 'Not found' })
     })
   }
 
-  return { app, store, notes, files }
+  return { app, store, notes, files, chats }
 }
 
 if (import.meta.main) {
@@ -247,7 +429,7 @@ if (import.meta.main) {
   const port = portArg >= 0 ? Number(args[portArg + 1]) : Number(process.env.WORKBENCH_PORT || DEFAULT_PORT)
   const dev = args.includes('--dev')
   const configDir = defaultConfigDir()
-  const { app } = await buildServer({ configDir, port, dev, distDir: dev ? null : undefined })
+  const { app } = await buildServer({ configDir, port, dev, distDir: dev ? null : undefined, stateDir: defaultStateDir() })
   await app.listen({ host: '127.0.0.1', port })
   console.log(`Workbench service on http://127.0.0.1:${port}/ (config: ${configDir})`)
   const stop = () => app.close().then(() => process.exit(0))

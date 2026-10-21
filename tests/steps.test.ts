@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseDocument } from 'yaml'
 import { applyOps, OpError } from '../server/config-ops.ts'
 import { buildServer } from '../server/main.ts'
-import { categoryColor, folderRoots, Profile, stepEntry, stepPath, stepsOf, type Op } from '../shared/config-schema.ts'
+import { categoryColor, chatName, entrySlot, folderRoots, NavItem, Profile, projectHost, stepEntry, stepPath, stepSlot, stepsOf, type Op } from '../shared/config-schema.ts'
 
 const SOURCE = `# Personal
 name: Personal
@@ -110,6 +110,36 @@ describe('report, file and link steps', () => {
   it('can be added through the step ops', () => {
     const { profile } = run([{ op: 'addStep', at: wargame, step: { label: 'report', type: 'report', path: 'out/index.html' } }])
     expect(labels(profile, 1)).toEqual(['rules', 'report'])
+  })
+})
+
+describe('chat steps and entries', () => {
+  it('a chat step runs claude in the project unless it names an agent or a folder', () => {
+    const { profile } = run([
+      { op: 'addStep', at: wargame, step: { label: 'agent', type: 'chat' } },
+      { op: 'addStep', at: wargame, step: { label: 'shell', type: 'chat', agent: 'shell', path: 'src', args: ['--norc'] } },
+    ])
+    const [, agent, shell] = stepsOf(profile, profile.sections[0].items[1])
+    expect(stepEntry('~/wargame', agent)).toEqual({ label: 'agent', type: 'chat', args: [], path: '~/wargame' })
+    expect(stepEntry('~/wargame', shell)).toMatchObject({ agent: 'shell', path: '~/wargame/src', args: ['--norc'] })
+  })
+
+  it('a chat can be a nav entry, inside a group too; the agent must be claude or shell', () => {
+    expect(NavItem.parse({ label: 'Scratch', type: 'chat', path: '~' })).toEqual({ label: 'Scratch', type: 'chat', path: '~', args: [] })
+    expect(NavItem.safeParse({ label: 'X', type: 'group', items: [{ label: 'c', type: 'chat' }] }).success).toBe(true)
+    expect(NavItem.safeParse({ label: 'X', type: 'chat', agent: 'codex' }).success).toBe(false)
+  })
+
+  it('keys chats by path and label, not by place in the nav', () => {
+    expect(projectHost('~/alpha/')).toBe('project:~/alpha')
+    expect(stepSlot('~/alpha', 'agent')).toBe('step:~/alpha|agent')
+    expect(entrySlot({ label: 'Scratch' })).toBe('entry:~|Scratch')
+  })
+
+  it("names a chat by your name, else the program's title without its spinner, else the agent", () => {
+    expect(chatName({ label: 'parser', title: '✳ Fix tests', agent: 'claude' })).toBe('parser')
+    expect(chatName({ label: null, title: '⠂ Fix tests', agent: 'claude' })).toBe('Fix tests')
+    expect(chatName({ label: null, title: null, agent: 'shell' })).toBe('Shell')
   })
 })
 
