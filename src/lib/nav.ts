@@ -23,6 +23,8 @@ export function describeTarget(item: NavItem): string {
       return item.path
     case 'daily':
       return `${item.folder ?? 'daily'}/YYYY-MM-DD.md in the notes folder`
+    case 'chat':
+      return `${item.agent === 'shell' ? 'Shell' : 'Claude'} in ${item.path ?? '~'}`
     case 'link':
       return item.url
     case 'launch':
@@ -41,16 +43,19 @@ export type DialogState =
 
 /**
  * What the main pane shows: a nav entry, a note opened by path (a link or a
- * search result), or a folder opened by path (a chip, the path bar, a subfolder).
+ * search result), a folder opened by path (a chip, the path bar, a subfolder),
+ * or a chat whose project or entry is gone.
  */
 export type Selection =
   | { kind: 'entry'; addr: ItemAddr; item: NavItem }
   | { kind: 'note'; path: string }
   | { kind: 'files'; path: string }
+  | { kind: 'chat'; id: string }
 
-/** Selection key prefixes for a note or folder opened by path; other keys are entry addresses. */
+/** Selection key prefixes for a note, folder or chat opened on its own; other keys are entry addresses. */
 export const NOTE_KEY = 'note:'
 export const FILES_KEY = 'files:'
+export const CHAT_KEY = 'chat:'
 
 /** The first entry of a type that matches, searching headings and groups. */
 export function findEntry(profile: Profile, type: ItemType, matches: (item: NavItem) => boolean = () => true): ItemAddr | null {
@@ -76,7 +81,10 @@ export function listLength(profile: Profile, list: ListAddr): number {
 export interface MenuEntry {
   label: string
   icon?: React.ReactNode
+  /** Muted text after the label, e.g. when. */
+  detail?: string
   danger?: boolean
+  disabled?: boolean
   run: () => void
 }
 

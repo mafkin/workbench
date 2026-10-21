@@ -1,5 +1,8 @@
 import type {
+  Agent,
   AppState,
+  Chat,
+  ClaudeSession,
   FileListing,
   FileOp,
   FileOpResult,
@@ -76,6 +79,29 @@ export const fileTicket = (profile: string, path: string, folder = false) =>
 export const fileOp = <T extends FileOpResult = FileOpResult>(profile: string, op: FileOp) =>
   api<T>('/api/files/op', { body: { profile, op } })
 export const openFile = (profile: string, path: string) => api('/api/files/open', { body: { profile, path } })
+
+// Chats: started from an entry or step by address; the service picks the program.
+export interface ChatStart {
+  at: ItemAddr
+  /** A chat step of the project at `at`. */
+  step?: number
+  /** New chat in a project: claude or the shell, in `path` (default the project folder). */
+  agent?: Agent
+  path?: string
+  /** A Claude session from History. */
+  resume?: string
+}
+export const listChats = (profile: string) => api<Chat[]>(`/api/chats?${query({ profile })}`)
+export const startChat = (profile: string, rev: string, req: ChatStart) => api<Chat>('/api/chats', { body: { profile, rev, ...req } })
+export const updateChat = (id: string, patch: { label?: string | null; color?: string | null; pinned?: boolean }) =>
+  api<Chat>(`/api/chats/${id}`, { method: 'PATCH', body: patch })
+export const restartChat = (id: string, fresh: boolean) => api<Chat>(`/api/chats/${id}/start`, { body: { fresh } })
+export const seenChat = (id: string) => api(`/api/chats/${id}/seen`, { body: {} })
+export const handoffChat = (id: string) => api<Chat>(`/api/chats/${id}/handoff`, { body: {} })
+export const closeChat = (id: string) => api(`/api/chats/${id}`, { method: 'DELETE' })
+export const chatHistory = (profile: string, path: string) => api<ClaudeSession[]>(`/api/chats/history?${query({ profile, path })}`)
+/** The token a chat's terminal socket needs; new each time the service starts. */
+export const chatToken = () => api<{ token: string }>('/api/chats/token').then((r) => r.token)
 
 /** Images in notes go through fetch, because an <img> cannot send the X-Workbench header. */
 export async function noteImage(profile: string, path: string): Promise<Blob> {

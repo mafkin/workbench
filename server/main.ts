@@ -51,6 +51,8 @@ export interface ServerOptions {
   stateDir?: string
   /** Programs for chats; tests pass stand-ins. */
   chatCommands?: Partial<ChatCommands>
+  /** How quickly a chat that went quiet after working needs you (tests). */
+  chatTiming?: { quietMs: number; busyMs: number }
 }
 
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
@@ -110,7 +112,7 @@ export async function buildServer(opts: ServerOptions) {
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
   const files = new Files(store, home, { spawn: opts.spawn })
-  const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands })
+  const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
   await chats.init()
   // A chat's terminal is shell access. Besides the guard, its socket needs this
   // token, new on every start, which only the app can read (through the API).

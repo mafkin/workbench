@@ -3,19 +3,46 @@
 // step shows its folder in the browser, a note step its note in place, a report
 // its HTML page, a file step one file large, and launcher and link steps open
 // outside. Steps are the project's own `steps:` or, until it has any, the
-// profile's `workflow:`.
-import { ExternalLink, FolderOpen, Pencil, Pin, Plus, RefreshCw, RotateCcw, Share2, Tag, Trash2, X } from 'lucide-react'
+// profile's `workflow:`. A chat step is claude (or the shell) in its tab, and
+// chats started with New chat are tabs after the steps.
+import {
+  ChevronDown,
+  ExternalLink,
+  FastForward,
+  FolderOpen,
+  History,
+  MessageSquarePlus,
+  Palette,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Share2,
+  Sparkles,
+  SquareTerminal,
+  Tag,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
   categoriesOf,
   categoryColor,
+  CHAT_COLORS,
+  chatName,
   expandHome,
   folderRoots,
   normalizePath,
+  projectHost,
   STATUSES,
   stepPath,
+  stepSlot,
   stepsOf,
+  type Agent,
   type CARD_FIELDS,
+  type Chat,
   type ItemAddr,
   type NavItem,
   type Op,
@@ -24,11 +51,14 @@ import {
   type StepItem,
 } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
+import { byPin, carriesPaths, CHAT_TAB, droppedPaths, onProjectTab, pasteInto, PATHS_TYPE, quotePaths, useChats } from '../lib/chats.ts'
 import { nameOf, parentOf, previewKind } from '../lib/files.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx, type DialogState, type MenuEntry, type MenuState } from '../lib/nav.ts'
+import { ago } from '../lib/recent.ts'
+import { ChatPane } from './ChatPane.tsx'
 import { ContextMenu } from './ContextMenu.tsx'
-import { EntryIcon } from './EntryIcon.tsx'
+import { agentIcon, EntryIcon } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
 import { MediaPreview, TextPreview } from './FilePreview.tsx'
 import { NoteView } from './NoteView.tsx'
@@ -64,7 +94,11 @@ interface Props {
   onTab: (label: string | null) => void
 }
 
-const describe = (s: StepItem) => (s.type === 'launch' ? [s.command, ...s.args].join(' ') : s.type === 'link' ? s.url : s.path)
+const describe = (s: StepItem) =>
+  s.type === 'launch' ? [s.command, ...s.args].join(' ') : s.type === 'link' ? s.url : s.type === 'chat' ? `${s.agent === 'shell' ? 'Shell' : 'Claude'} in ${s.path ?? 'the project folder'}` : s.path
+
+/** Names for the chat colours, in the order of CHAT_COLORS. */
+const COLOR_NAMES = ['Slate', 'Sage', 'Sand', 'Heather', 'Teal', 'Clay', 'Grey']
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export function ProjectView({ addr, item, kicker, profile, profileId, home, actions, openFolder, toast, onTab }: Props) {
@@ -72,16 +106,29 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const own = item.steps !== undefined
   const [tabs, setTabs] = useLocal<Record<string, string>>('projectTab', {})
   const tabKey = `${profileId}|${item.path}`
-  const active = steps.find((s) => s.label === tabs[tabKey] && !opensOutside(s)) ?? null
-  const tabId = active?.label ?? ''
+  const chats = useChats()
+  const host = projectHost(item.path)
+  const adhoc = chats.list.filter((c) => c.host === host && !c.slot).sort(byPin)
+  const slotChat = (s: StepItem) => chats.list.find((c) => c.slot === stepSlot(item.path, s.label)) ?? null
+  const saved = tabs[tabKey] ?? ''
+  const activeChat = saved.startsWith(CHAT_TAB) ? (adhoc.find((c) => CHAT_TAB + c.id === saved) ?? null) : null
+  // Until the list arrives, a chat tab cannot be told from a closed one.
+  const waitingForChats = saved.startsWith(CHAT_TAB) && !chats.loaded
+  const active = activeChat ? null : (steps.find((s) => s.label === saved && !opensOutside(s)) ?? null)
+  const tabId = activeChat ? saved : (active?.label ?? '')
   const [browse, setBrowse] = useState<{ tab: string; top: string } | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
   const [editing, setEditing] = useState<'description' | 'category' | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [dropChat, setDropChat] = useState<string | null>(null)
   const dragging = useRef<number | null>(null)
   const status = item.status ?? 'active'
+  const crumb = activeChat ? chatName(activeChat) : (active?.label ?? null)
 
-  useEffect(() => onTab(active?.label ?? null), [active?.label])
+  useEffect(() => onTab(crumb), [crumb])
+  // A chat opened from elsewhere (the nav menu, a notification) picks its tab here.
+  useEffect(() => onProjectTab((key, tab) => key === tabKey && setTabs((t) => ({ ...t, [key]: tab }))), [tabKey])
 
   const norm = (p: string) => normalizePath(expandHome(p, home))
   const within = (p: string, dir: string) => {
@@ -94,6 +141,85 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     setBrowse(null)
     if (step) actions.rememberStep(addr, step.label)
   }
+
+  const selectChat = (chat: Chat) => {
+    setTabs((t) => ({ ...t, [tabKey]: CHAT_TAB + chat.id }))
+    setBrowse(null)
+  }
+
+  /** New chat in the project, or with `path` in a folder inside it (Chat here). */
+  const newChat = async (agent: Agent, path?: string) => {
+    const chat = await chats.start({ at: addr, agent, path })
+    if (chat) selectChat(chat)
+  }
+
+  const handoff = async (chat: Chat) => {
+    const next = await chats.handoff(chat)
+    if (next) selectChat(next)
+  }
+
+  // Earlier Claude sessions in the project folder and below; one already open is shown, not started twice.
+  const historyMenu = async (e: React.MouseEvent) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const sessions = await chats.history(item.path)
+    const open = new Map(chats.list.filter((c) => c.session).map((c) => [c.session, c]))
+    const entries: MenuEntry[] = sessions.slice(0, 15).map((s) => ({
+      label: s.title,
+      detail: `${normalizePath(s.cwd) === normalizePath(item.path) ? '' : `${s.cwd} · `}${open.has(s.id) ? 'open' : ago(s.mtime)}`,
+      icon: <Sparkles size={14} />,
+      run: () => {
+        const chat = open.get(s.id)
+        if (chat) return chats.open(chat)
+        void chats.start({ at: addr, resume: s.id, path: s.cwd }).then((c) => c && selectChat(c))
+      },
+    }))
+    setMenu({ x: r.left, y: r.bottom + 4, entries: entries.length ? entries : [{ label: 'No Claude sessions in this folder yet', disabled: true, run() {} }] })
+  }
+
+  function chatMenu(e: React.MouseEvent, chat: Chat) {
+    e.preventDefault()
+    e.stopPropagation()
+    const at = { x: e.clientX, y: e.clientY }
+    const colours: (MenuEntry | 'sep')[] = [
+      ...CHAT_COLORS.map((c, i) => ({
+        label: COLOR_NAMES[i] ?? c,
+        icon: <span className="category-dot" style={{ background: c }} />,
+        run: () => void chats.update(chat, { color: c }),
+      })),
+      ...(chat.color ? (['sep', { label: 'No colour', icon: <X size={14} />, run: () => void chats.update(chat, { color: null }) }] as const) : []),
+    ]
+    setMenu({
+      ...at,
+      entries: [
+        { label: 'Rename…', icon: <Pencil size={14} />, run: () => setRenaming(chat.id) },
+        { label: 'Colour…', icon: <Palette size={14} />, run: () => setMenu({ ...at, entries: colours }) },
+        chat.pinned
+          ? { label: 'Unpin', icon: <PinOff size={14} />, run: () => void chats.update(chat, { pinned: false }) }
+          : { label: 'Pin', icon: <Pin size={14} />, run: () => void chats.update(chat, { pinned: true }) },
+        ...(chat.agent === 'claude' && chat.session ? [{ label: 'Summarize and continue', icon: <FastForward size={14} />, run: () => void handoff(chat) }] : []),
+        'sep',
+        { label: 'Close', icon: <X size={14} />, danger: true, run: () => chats.close(chat) },
+      ],
+    })
+  }
+
+  /** Paths dropped on a chat's tab are typed into its prompt. */
+  const chatDrop = (chat: Chat) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!carriesPaths(e)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      setDropChat(chat.id)
+    },
+    onDragLeave: () => setDropChat((d) => (d === chat.id ? null : d)),
+    onDrop: (e: React.DragEvent) => {
+      setDropChat(null)
+      if (!carriesPaths(e)) return
+      e.preventDefault()
+      pasteInto(chat.id, quotePaths(droppedPaths(e)))
+      selectChat(chat)
+    },
+  })
 
   const folderTop = active?.type === 'folder' ? stepPath(item.path, active.path) : item.path
   const top = browse?.tab === tabId ? browse.top : folderTop
@@ -263,6 +389,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
         </button>
         {steps.map((step, i) => {
           const outside = opensOutside(step)
+          const stepChat = step.type === 'chat' ? slotChat(step) : null
           return (
             <button
               key={`${i}:${step.label}`}
@@ -273,8 +400,12 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
               draggable
               onDragStart={(e) => {
                 dragging.current = i
-                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.effectAllowed = 'copyMove'
                 e.dataTransfer.setData('text/plain', step.label)
+                // A path step can also be dropped on a chat, which types its path.
+                if ('path' in step && step.path && step.type !== 'chat') {
+                  e.dataTransfer.setData(PATHS_TYPE, JSON.stringify([expandHome(stepPath(item.path, step.path), home)]))
+                }
               }}
               onDragOver={(e) => {
                 if (dragging.current === null || dragging.current === i) return
@@ -296,19 +427,99 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
               onClick={() => (opensOutside(step) ? actions.launchStep(addr, i, step.label, step.type as 'launch' | 'link') : select(step))}
               onContextMenu={(e) => stepMenu(e, step, i)}
             >
-              <EntryIcon type={step.type} icon={step.icon} size={14} />
+              <EntryIcon type={step.type} icon={step.icon} agent={step.type === 'chat' ? step.agent : undefined} size={14} />
               {step.label}
               {step.type === 'link' && <ExternalLink size={11} className="outside-mark" />}
+              {stepChat?.attention && active !== step && <span className="attention" aria-label="Needs you" />}
             </button>
           )
         })}
         <button className="step-tab add" onClick={addStep} title="Add step" aria-label="Add step">
           <Plus size={14} />
         </button>
-        {steps.length === 0 && <span className="step-hint">Add steps like assets, modeling or design</span>}
+        {steps.length === 0 && adhoc.length === 0 && <span className="step-hint">Add steps like assets, modeling or design</span>}
+        {adhoc.map((chat) => {
+          const on = activeChat?.id === chat.id
+          const Icon = agentIcon(chat.agent)
+          return (
+            <div
+              key={chat.id}
+              role="tab"
+              tabIndex={0}
+              aria-selected={on}
+              className={cx('step-tab chat-tab', on && 'active', chat.color && 'colored', dropChat === chat.id && 'dropping', chat.state !== 'running' && 'idle')}
+              style={chat.color ? ({ '--chat': chat.color } as React.CSSProperties) : undefined}
+              title={`${chatName(chat)} · ${chat.cwd}`}
+              onClick={() => selectChat(chat)}
+              onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && selectChat(chat)}
+              onContextMenu={(e) => chatMenu(e, chat)}
+              {...chatDrop(chat)}
+            >
+              <Icon size={14} className="icon" />
+              {renaming === chat.id ? (
+                <InlineField
+                  initial={chat.label ?? chatName(chat)}
+                  label="Chat name"
+                  onDone={(v) => {
+                    setRenaming(null)
+                    if (v !== null) void chats.update(chat, { label: v || null })
+                  }}
+                />
+              ) : (
+                <span className="chat-name">{chatName(chat)}</span>
+              )}
+              {chat.attention && !on && <span className="attention" aria-label="Needs you" />}
+              {chat.pinned ? (
+                <Pin size={11} className="pin-mark" aria-label="Pinned" />
+              ) : (
+                <button
+                  className="tab-close"
+                  aria-label={`Close ${chatName(chat)}`}
+                  title="Close"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    chats.close(chat)
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )
+        })}
+        <span className="tab-spacer" />
+        <button className="tab-action" onClick={() => void newChat('claude')} title="New Claude chat in the project folder">
+          <MessageSquarePlus size={14} />
+          New chat
+        </button>
+        <button
+          className="tab-action more"
+          aria-label="More kinds of chat"
+          onClick={(e) =>
+            menuBelow(e, [
+              { label: 'Claude chat', icon: <Sparkles size={14} />, run: () => void newChat('claude') },
+              { label: 'Shell', icon: <SquareTerminal size={14} />, run: () => void newChat('shell') },
+            ])
+          }
+        >
+          <ChevronDown size={13} />
+        </button>
+        <button className="tab-action" onClick={(e) => void historyMenu(e)} title="Earlier Claude sessions in this folder">
+          <History size={14} />
+          History
+        </button>
       </div>
 
-      {active?.type === 'report' ? (
+      {waitingForChats ? null : activeChat ? (
+        <ChatPane key={activeChat.id} chat={activeChat} />
+      ) : active?.type === 'chat' ? (
+        <ChatPane
+          key={stepSlot(item.path, active.label)}
+          chat={slotChat(active)}
+          start={(resume) => chats.start({ at: addr, step: steps.indexOf(active), resume })}
+          historyPath={stepPath(item.path, active.path ?? '.')}
+        />
+      ) : active?.type === 'report' ? (
         <ReportTab key={stepPath(item.path, active.path)} path={stepPath(item.path, active.path)} profileId={profileId} onOpenDefault={openDefault} />
       ) : active?.type === 'file' ? (
         <FileTab key={stepPath(item.path, active.path)} path={stepPath(item.path, active.path)} onOpenDefault={openDefault} />
@@ -338,6 +549,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           onNavigate={navigate}
           toast={toast}
           within={within}
+          onChat={(dir, agent) => void newChat(agent, dir)}
         />
       )}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
@@ -356,6 +568,7 @@ function StepFolder({
   onNavigate,
   toast,
   within,
+  onChat,
 }: {
   path: string
   creatable: boolean
@@ -366,6 +579,7 @@ function StepFolder({
   onNavigate: (p: string) => void
   toast: (t: ToastInput) => void
   within: (p: string, dir: string) => boolean
+  onChat: (dir: string, agent: Agent) => void
 }) {
   const [exists, setExists] = useState<boolean | null>(creatable ? null : true)
 
@@ -411,7 +625,7 @@ function StepFolder({
       </div>
     )
   }
-  return <FileBrowser top={path} roots={folderRoots(profile)} home={home} onNavigate={onNavigate} toast={toast} />
+  return <FileBrowser top={path} roots={folderRoots(profile)} home={home} onNavigate={onNavigate} toast={toast} onChat={onChat} />
 }
 
 /** A report: its HTML page in a sandboxed frame, loading the files next to it through a folder ticket. */

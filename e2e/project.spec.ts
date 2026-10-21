@@ -65,7 +65,7 @@ test('adding a step copies the profile steps into the project, and a missing fol
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('button', { name: 'Add step' }).click()
   const dialog = page.getByRole('form', { name: 'Add step' })
-  await expect(dialog.getByRole('radio')).toHaveCount(6)
+  await expect(dialog.getByRole('radio')).toHaveCount(7)
   await dialog.locator('input[name=label]').fill('assets')
   await dialog.locator('input[name=path]').fill('art/assets')
   await expect(dialog).toContainText('Not found on disk')

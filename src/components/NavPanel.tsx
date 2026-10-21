@@ -13,9 +13,9 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ArrowUpRight, ChevronDown, FilePlus, GripVertical, Pencil, Pin, Plus, Trash2 } from 'lucide-react'
+import { ArrowUpRight, ChevronDown, FilePlus, GripVertical, Pencil, Pin, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { itemKey, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import { entrySlot, itemKey, projectHost, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import type { Connection } from '../lib/events.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx, describeTarget, opensExternally, sameList, type DialogState, type DragData, type DropData, type MenuEntry, type MenuState } from '../lib/nav.ts'
@@ -31,6 +31,8 @@ export interface NavActions {
   openDialog: (d: DialogState) => void
   openMenu: (m: MenuState) => void
   itemMenu: (addr: ItemAddr, item: NavItem) => (MenuEntry | 'sep')[]
+  /** Running chats, and whether one needs you, per project (`project:<path>`) or chat entry. */
+  chatMarks: Map<string, { running: number; attention: boolean }>
   notify: (message: string, kind?: 'info' | 'error') => void
 }
 
@@ -525,9 +527,10 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
           <GripVertical size={13} />
         </span>
       )}
-      <EntryIcon type={item.type} icon={item.icon} />
+      <EntryIcon type={item.type} icon={item.icon} agent={item.type === 'chat' ? item.agent : undefined} />
       <span className="label">{item.label}</span>
       {!ctx.editing && opensExternally(item) && <ArrowUpRight size={12} className="kind" />}
+      {!ctx.editing && <ChatMark item={item} />}
       {!ctx.editing && item.type === 'folder' && (
         <span className="project-marks">
           {item.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
@@ -536,6 +539,21 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       )}
       <RowActions addr={addr} item={item} />
     </div>
+  )
+}
+
+/** A spark on a project or chat entry with running chats (with a count past one); the accent colour when one needs you. */
+function ChatMark({ item }: { item: NavItem }) {
+  const { chatMarks } = useContext(Ctx)
+  const key = item.type === 'folder' ? projectHost(item.path) : item.type === 'chat' ? entrySlot(item) : null
+  const mark = key ? chatMarks.get(key) : undefined
+  if (!mark || (!mark.running && !mark.attention)) return null
+  const what = `${mark.running} running ${mark.running === 1 ? 'chat' : 'chats'}${mark.attention ? ', one needs you' : ''}`
+  return (
+    <span className={cx('chat-mark', mark.attention && 'attention', item.type !== 'folder' && 'alone')} title={what} aria-label={what}>
+      <Sparkles size={11} />
+      {mark.running > 1 && mark.running}
+    </span>
   )
 }
 

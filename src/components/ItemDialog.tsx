@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ITEM_TYPES, NavItem, StepItem, STEP_TYPES, stepPath, type AnyType, type ItemInput } from '../../shared/config-schema.ts'
+import { ITEM_TYPES, NavItem, StepItem, STEP_TYPES, stepPath, type Agent, type AnyType, type ItemInput } from '../../shared/config-schema.ts'
 import { stat } from '../lib/api.ts'
 import { cx, type DialogState } from '../lib/nav.ts'
 import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
@@ -10,6 +10,7 @@ const STEP_HINTS: Partial<Record<AnyType, string>> = {
   note: 'A note in the project, like docs/design.md. It opens in place, with Edit.',
   report: 'An HTML file in the project, like reports/index.html. Shown in the tab, with the files next to it.',
   file: 'One file in the project, like renders/latest.png. Shown large in the tab.',
+  chat: 'Claude (or your shell) in a tab, in the project folder or a folder inside it. Keeps running when you close the window.',
   launch: 'Runs in the project folder; arguments can be paths inside it.',
   link: 'A web address. The tab opens it in your browser.',
 }
@@ -20,6 +21,7 @@ const HINTS: Record<AnyType, string> = {
   report: '',
   file: '',
   daily: "Today's note in the notes folder, made from a template the first time.",
+  chat: 'Claude (or your shell) in a terminal in the app. Keeps running when you close the window.',
   link: 'Opens in your default browser.',
   launch: 'Starts a program directly, without a shell.',
   group: 'Holds entries one level deep under this heading.',
@@ -44,10 +46,11 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
 
   const [type, setType] = useState<AnyType>(initial?.type ?? (dialog.mode === 'add' ? (dialog.presetType ?? 'folder') : 'folder'))
   const [label, setLabel] = useState(initial?.label ?? '')
-  const [path, setPath] = useState(initial && 'path' in initial ? initial.path : '')
+  const [path, setPath] = useState(initial && 'path' in initial ? (initial.path ?? '') : '')
   const [url, setUrl] = useState(initial?.type === 'link' ? initial.url : '')
   const [command, setCommand] = useState(initial?.type === 'launch' ? initial.command : '')
-  const [argsText, setArgsText] = useState(initial?.type === 'launch' ? initial.args.join('\n') : '')
+  const [argsText, setArgsText] = useState(initial?.type === 'launch' || initial?.type === 'chat' ? initial.args.join('\n') : '')
+  const [agent, setAgent] = useState<Agent>(initial?.type === 'chat' ? (initial.agent ?? 'claude') : 'claude')
   const [cwd, setCwd] = useState(initial?.type === 'launch' ? (initial.cwd ?? '') : '')
   const [folder, setFolder] = useState(initial?.type === 'daily' ? (initial.folder ?? '') : '')
   const [template, setTemplate] = useState(initial?.type === 'daily' ? (initial.template ?? '') : '')
@@ -68,7 +71,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
   // Warn, without blocking, when the path does not exist or is the wrong kind.
   useEffect(() => {
     setPathStatus(null)
-    if (!PATH_TYPES.includes(type) || !path.trim()) return
+    if ((!PATH_TYPES.includes(type) && type !== 'chat') || !path.trim()) return
     const t = setTimeout(() => {
       stat(step ? stepPath(step.base, path.trim()) : path.trim()).then(setPathStatus, () => setPathStatus(null))
     }, 250)
@@ -94,6 +97,14 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
           command: command.trim(),
           args: argsText.split('\n').map((a) => a.trim()).filter(Boolean),
           cwd: cwd.trim() || undefined,
+        }
+      case 'chat':
+        return {
+          ...base,
+          type,
+          agent: agent === 'shell' ? 'shell' : undefined,
+          path: path.trim() || undefined,
+          args: argsText.split('\n').map((a) => a.trim()).filter(Boolean),
         }
       case 'group':
         return { ...base, type, items: [] }
@@ -127,8 +138,9 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
   const pathHint = () => {
     if (!pathStatus) return null
     if (!pathStatus.exists) return <span className="hint" style={{ color: 'var(--warn)' }}>Not found on disk (you can still save it)</span>
-    if (type === 'folder' && pathStatus.kind !== 'dir') return <span className="hint" style={{ color: 'var(--warn)' }}>This is a file, not a folder</span>
-    if (type !== 'folder' && pathStatus.kind !== 'file') return <span className="hint" style={{ color: 'var(--warn)' }}>This is a folder, not a file</span>
+    const wantsDir = type === 'folder' || type === 'chat'
+    if (wantsDir && pathStatus.kind !== 'dir') return <span className="hint" style={{ color: 'var(--warn)' }}>This is a file, not a folder</span>
+    if (!wantsDir && pathStatus.kind !== 'file') return <span className="hint" style={{ color: 'var(--warn)' }}>This is a folder, not a file</span>
     return <span className="hint" style={{ color: 'var(--ok)' }}>Found</span>
   }
 
@@ -210,6 +222,32 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
             </>
           )}
 
+          {type === 'chat' && (
+            <>
+              <div className="field">
+                <span>Agent</span>
+                <div className="segmented" role="radiogroup" aria-label="Agent">
+                  {(['claude', 'shell'] as const).map((a) => (
+                    <button key={a} type="button" role="radio" aria-checked={agent === a} className={cx(agent === a && 'active')} onClick={() => setAgent(a)}>
+                      <EntryIcon type="chat" agent={a} size={14} />
+                      {a === 'claude' ? 'Claude' : 'Shell'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="field">
+                <span>Folder (optional)</span>
+                <input className="mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder={step ? 'docs' : '~'} name="path" />
+                {fieldError('path') ?? pathHint() ?? <span className="hint">{step ? 'Inside the project; empty is the project folder.' : 'Empty is your home folder.'}</span>}
+              </label>
+              <label className="field">
+                <span>Arguments (optional)</span>
+                <textarea value={argsText} onChange={(e) => setArgsText(e.target.value)} placeholder={agent === 'claude' ? '--model\nopus' : ''} name="args" />
+                <span className="hint">One per line, added to {agent === 'claude' ? 'claude' : 'the shell'}.</span>
+              </label>
+            </>
+          )}
+
           {type === 'link' && (
             <label className="field">
               <span>URL</span>
@@ -241,7 +279,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
             <span>Icon (optional)</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ display: 'inline-grid', placeItems: 'center', width: 30 }}>
-                <EntryIcon type={type} icon={icon.trim()} size={16} />
+                <EntryIcon type={type} icon={icon.trim()} agent={agent} size={16} />
               </span>
               <input className="mono" value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="lucide name, e.g. rocket" name="icon" />
             </div>

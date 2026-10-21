@@ -2027,3 +2027,371 @@ button {
   font-family: var(--mono);
   font-size: 10px;
 }
+
+/* ── Chats ──────────────────────────────────────────── */
+
+.segmented {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.segmented button.active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.segmented button .icon {
+  color: inherit;
+}
+
+/* Tabs: chats after the steps, then New chat and History at the end of the row. */
+
+.chat-tab {
+  padding-right: 6px;
+  cursor: pointer;
+}
+
+.chat-tab .chat-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-tab.colored .icon {
+  color: var(--chat);
+}
+
+.chat-tab.colored {
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--chat) 70%, transparent);
+}
+
+.chat-tab.idle .chat-name {
+  color: var(--faint);
+}
+
+.chat-tab.dropping,
+.chat-terminal.dropping {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.chat-tab .card-field {
+  width: 160px;
+  height: 24px;
+  margin: 0;
+}
+
+.tab-close {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--faint);
+  opacity: 0;
+}
+
+.chat-tab:hover .tab-close,
+.chat-tab.active .tab-close,
+.tab-close:focus-visible {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.step-tab .pin-mark {
+  margin-right: 4px;
+}
+
+.step-tab .attention {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tab-spacer {
+  flex: 1;
+}
+
+.tab-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin-bottom: 4px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted);
+}
+
+.tab-action:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.tab-action.more {
+  margin-left: -4px;
+  padding: 0 6px;
+}
+
+/* The pane: a bar over the terminal, filling the rest of the window. */
+
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  height: max(380px, calc(100vh - 300px));
+}
+
+.chat-page .chat-pane {
+  height: max(380px, calc(100vh - 200px));
+}
+
+.chat-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-bar .icon {
+  color: var(--accent);
+}
+
+.chat-bar .spacer {
+  flex: 1;
+}
+
+.chat-where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+}
+
+.chat-state::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.chat-state.running::before {
+  background: var(--ok);
+}
+
+.btn.small {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.btn.long {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  color: var(--warn);
+}
+
+.chat-terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.chat-terminal .xterm {
+  height: 100%;
+}
+
+.chat-terminal .xterm-viewport {
+  background: transparent !important;
+}
+
+.chat-ended {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.chat-ended > span:first-child {
+  margin-right: 6px;
+}
+
+.chat-stopped {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 12px;
+  flex: 1;
+  padding: 22px 24px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.chat-stopped p {
+  margin: 0;
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-busy {
+  color: var(--faint);
+}
+
+.earlier-sessions {
+  width: min(640px, 100%);
+}
+
+.earlier-sessions .section-label {
+  margin: 10px 0 6px;
+}
+
+.earlier-sessions ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.earlier-sessions button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  text-align: left;
+}
+
+.earlier-sessions button:hover {
+  background: var(--hover);
+}
+
+.earlier-sessions .icon {
+  color: var(--faint);
+}
+
+.earlier-sessions .label {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.earlier-sessions .when {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* History and other menus with a detail column. */
+
+.menu .menu-label {
+  flex: 1;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu .menu-detail {
+  margin-left: 16px;
+  color: var(--faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.menu button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.menu button:disabled:hover {
+  background: transparent;
+}
+
+/* Nav: a spark on projects and chat entries with running chats. */
+
+.chat-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11px;
+  flex: none;
+}
+
+.chat-mark + .project-marks {
+  margin-left: 6px;
+}
+
+.chat-mark.attention {
+  color: var(--accent);
+}
+
+/* Home: chats whose project is gone. */
+
+.other-chats li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.other-chats li > button:first-child {
+  flex: 1;
+}
+
+.dialog.confirm .body p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.btn.primary.danger {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}

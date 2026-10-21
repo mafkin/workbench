@@ -1,12 +1,28 @@
-import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search } from 'lucide-react'
+import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search, X } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { folderRoots, getItem, NOTE_EXT, stepsOf, type ItemAddr, type NavItem, type ProfileState, type SearchHit } from '../../shared/config-schema.ts'
+import {
+  chatName,
+  entrySlot,
+  folderRoots,
+  getItem,
+  NOTE_EXT,
+  projectHost,
+  stepsOf,
+  type Chat,
+  type ItemAddr,
+  type NavItem,
+  type Profile,
+  type ProfileState,
+  type SearchHit,
+} from '../../shared/config-schema.ts'
+import { useChats } from '../lib/chats.ts'
 import { nameOf } from '../lib/files.ts'
 import { findEntry, FILES_KEY, NOTE_KEY, parseKey, type Selection } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { ago, type Recent } from '../lib/recent.ts'
+import { ChatPane } from './ChatPane.tsx'
 import { DailyView } from './DailyView.tsx'
-import { EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
+import { agentIcon, EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
 import { NotesFolderHint } from './NotesFolderHint.tsx'
 import { NoteView } from './NoteView.tsx'
@@ -94,6 +110,11 @@ export function MainPane(props: Props) {
                 <span className="current">{entry.item.label}</span>
               )}
             </>
+          ) : selected?.kind === 'chat' ? (
+            <>
+              <span className="sep">/</span>
+              <span>Chats</span>
+            </>
           ) : selected && selected.kind !== 'entry' ? (
             <>
               <span className="sep">/</span>
@@ -147,6 +168,8 @@ export function MainPane(props: Props) {
           <PathNote key={selected.path} path={selected.path} />
         ) : selected?.kind === 'files' ? (
           <Browser key={`${active.id}:${selected.path}`} top={selected.path} kicker="Files" heading={nameOf(selected.path)} pane={props} />
+        ) : selected?.kind === 'chat' ? (
+          <LoneChat key={selected.id} id={selected.id} />
         ) : (
           <Home active={active} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />
         )}
@@ -218,6 +241,7 @@ function Home({
           </span>
         </button>
       )}
+      <OtherChats profile={profile} />
       <h2 className="section-label">Recent</h2>
       {rows.length === 0 ? (
         <p className="none">Nothing opened yet. Pick a project on the left.</p>
@@ -235,6 +259,62 @@ function Home({
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+/** Chats whose project or chat entry is gone (removed, or its path changed), so none runs out of sight. */
+function OtherChats({ profile }: { profile: Profile }) {
+  const chats = useChats()
+  const hosts = new Set<string>()
+  const visit = (item: NavItem) => {
+    if (item.type === 'folder') hosts.add(projectHost(item.path))
+    if (item.type === 'chat') hosts.add(entrySlot(item))
+    if (item.type === 'group') item.items.forEach(visit)
+  }
+  for (const s of profile.sections) s.items.forEach(visit)
+  const others = chats.list.filter((c) => !hosts.has(c.host))
+  if (!others.length) return null
+  return (
+    <>
+      <h2 className="section-label">Other chats</h2>
+      <ul className="recent-list other-chats">
+        {others.map((c) => {
+          const Icon = agentIcon(c.agent)
+          return (
+            <li key={c.id}>
+              <button onClick={() => chats.open(c)}>
+                <Icon size={15} className="icon" />
+                <span className="label">{chatName(c)}</span>
+                <span className="where">{c.cwd}</span>
+                <span className="when">{c.state === 'running' ? 'running' : c.state}</span>
+              </button>
+              <button className="icon-btn" aria-label={`Close ${chatName(c)}`} title="Close" onClick={() => chats.close(c)}>
+                <X size={13} />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
+}
+
+/** A chat on its own page: one whose project or entry is gone. */
+function LoneChat({ id }: { id: string }) {
+  const chats = useChats()
+  const chat = chats.list.find((c) => c.id === id)
+  if (!chats.loaded) return null
+  if (!chat) return <div className="empty-state">This chat has been closed.</div>
+  return <ChatPage chat={chat} kicker="Chat" />
+}
+
+function ChatPage({ chat, kicker, start, historyPath, title }: { chat: Chat | null; kicker: string; start?: (resume?: string) => Promise<Chat | null>; historyPath?: string; title?: React.ReactNode }) {
+  return (
+    <div className="page wide chat-page">
+      <div className="page-kicker">{kicker}</div>
+      <h1 className="page-title">{title ?? (chat ? chatName(chat) : '')}</h1>
+      <ChatPane chat={chat} start={start} historyPath={historyPath} />
     </div>
   )
 }
@@ -339,6 +419,8 @@ function EntryView({
 
   if (item.type === 'daily') return <DailyView item={item} kicker={kicker} />
 
+  if (item.type === 'chat') return <ChatEntry addr={addr} item={item} kicker={kicker} />
+
   if (item.type === 'folder') {
     return (
       <ProjectView
@@ -359,4 +441,24 @@ function EntryView({
 
   // Groups, links and launchers never open in the centre.
   return null
+}
+
+/** A chat entry: its one chat, started the first time it is opened. */
+function ChatEntry({ addr, item, kicker }: { addr: ItemAddr; item: Extract<NavItem, { type: 'chat' }>; kicker: string }) {
+  const chats = useChats()
+  const chat = chats.list.find((c) => c.slot === entrySlot(item)) ?? null
+  return (
+    <ChatPage
+      chat={chat}
+      kicker={`${kicker} · ${TYPE_LABEL.chat}`}
+      title={
+        <>
+          <EntryIcon type="chat" agent={item.agent} icon={item.icon} size={22} />
+          {item.label}
+        </>
+      }
+      start={(resume) => chats.start({ at: addr, resume })}
+      historyPath={item.path ?? '~'}
+    />
+  )
 }

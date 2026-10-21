@@ -113,11 +113,11 @@ test('the entry dialog has no Project type; the step dialog offers six kinds', a
   await page.getByRole('button', { name: 'Edit navigation' }).click()
   await page.getByRole('button', { name: 'Add entry to Tools' }).click()
   const add = page.getByRole('form', { name: 'Add entry' })
-  await expect(add.getByRole('radio')).toHaveText(['Folder', 'Note', 'Daily', 'Link', 'Launcher', 'Group'])
+  await expect(add.getByRole('radio')).toHaveText(['Folder', 'Note', 'Daily', 'Chat', 'Link', 'Launcher', 'Group'])
   await add.getByRole('button', { name: 'Cancel' }).click()
   await page.getByRole('button', { name: 'Edit navigation' }).click()
 
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('button', { name: 'Add step' }).click()
-  await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['Folder', 'Note', 'Report', 'File', 'Launcher', 'Link'])
+  await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['Folder', 'Note', 'Report', 'File', 'Chat', 'Launcher', 'Link'])
 })

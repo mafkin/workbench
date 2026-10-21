@@ -11,7 +11,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import serialize from '@xterm/addon-serialize'
 import headless from '@xterm/headless'
-import pty from 'node-pty'
+import type { IPty } from 'node-pty'
 import { displayPath, type Agent, type Chat } from '../shared/config-schema.ts'
 import { countPrompts, sessionFile } from './claude-sessions.ts'
 import { StoreError } from './config-store.ts'
@@ -63,7 +63,7 @@ interface View {
 }
 
 interface Live {
-  proc: pty.IPty | null
+  proc: IPty | null
   term: headless.Terminal
   ser: serialize.SerializeAddon
   burstStart: number | null
@@ -90,6 +90,19 @@ const HANDOFF_PROMPT =
 const NESTED_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_EXECPATH', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_PID']
 
 const cleanTitle = (t: string) => t.replace(/^[^\p{L}\p{N}]+/u, '').trim() || null
+
+// node-pty is built on install (gcc, make, python3). It loads with the first
+// chat, so a failed build leaves the rest of the app working.
+let ptyModule: Promise<typeof import('node-pty')> | null = null
+async function loadPty() {
+  ptyModule ??= import('node-pty')
+  try {
+    return await ptyModule
+  } catch (err) {
+    ptyModule = null
+    throw new StoreError(`Chats need node-pty, which did not load (${(err as Error).message}); run npm install, which builds it with gcc, make and python3`, 500)
+  }
+}
 
 function executable(file: string): boolean {
   try {
@@ -186,7 +199,7 @@ export class Chats extends EventEmitter {
     }
     this.#meta.set(id, { args: spec.args, dir: spec.cwd, cols: 100, rows: 30 })
     try {
-      this.#spawn(chat, { resume: !!spec.resume, prompt: spec.prompt })
+      await this.#spawn(chat, { resume: !!spec.resume, prompt: spec.prompt })
     } catch (err) {
       this.#meta.delete(id)
       throw err
@@ -211,7 +224,7 @@ export class Chats extends EventEmitter {
         resume = fs.existsSync(sessionFile(this.#home, this.#meta.get(id)!.dir, chat.session))
       }
     }
-    this.#spawn(chat, { resume })
+    await this.#spawn(chat, { resume })
     this.#changed(chat)
     if (resume) void this.#count(chat)
     return { ...chat }
@@ -386,7 +399,8 @@ export class Chats extends EventEmitter {
     return env
   }
 
-  #spawn(chat: Chat, { resume, prompt }: { resume: boolean; prompt?: string }) {
+  async #spawn(chat: Chat, { resume, prompt }: { resume: boolean; prompt?: string }) {
+    const pty = await loadPty()
     const meta = this.#meta.get(chat.id)!
     if (!fs.statSync(meta.dir, { throwIfNoEntry: false })?.isDirectory()) throw new StoreError(`The folder ${chat.cwd} does not exist`, 422)
     const cmd = this.#program(chat.agent)
@@ -397,7 +411,7 @@ export class Chats extends EventEmitter {
     const term = new headless.Terminal({ cols: meta.cols, rows: meta.rows, scrollback: 5000, allowProposedApi: true })
     const ser = new serialize.SerializeAddon()
     term.loadAddon(ser)
-    let proc: pty.IPty
+    let proc: IPty
     try {
       proc = pty.spawn(cmd, argv, { name: 'xterm-256color', cols: meta.cols, rows: meta.rows, cwd: meta.dir, env: this.#env(cmd) })
     } catch (err) {

@@ -2,10 +2,27 @@
 // preview of the selected file beside it. Folders list lazily and again when
 // they change on disk. Operations go through the service, which confines them
 // to the profile's folders; deletes go to the Trash.
-import { ArrowDown, ArrowUp, ChevronRight, Copy, ExternalLink, Eye, FilePlus, FileText, FolderOpen, FolderPlus, ListFilter, PencilLine, Trash2 } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  Eye,
+  FilePlus,
+  FileText,
+  FolderOpen,
+  FolderPlus,
+  ListFilter,
+  PencilLine,
+  Sparkles,
+  SquareTerminal,
+  Trash2,
+} from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { expandHome, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
+import { expandHome, type Agent, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
+import { PATHS_TYPE } from '../lib/chats.ts'
 import { onFilesEvent } from '../lib/events.ts'
 import { formatDate, formatSize, isMarkdown, nameOf, parentOf, segments, uniqueName } from '../lib/files.ts'
 import { useLocal } from '../lib/local.ts'
@@ -32,6 +49,8 @@ interface Props {
   /** Make another folder the top: the path bar, or opening a subfolder. */
   onNavigate: (path: string) => void
   toast: (t: ToastInput) => void
+  /** In a project: start claude or the shell in a folder (Chat here, Shell here). */
+  onChat?: (dir: string, agent: Agent) => void
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -45,7 +64,7 @@ function sorted(entries: FileEntry[], key: SortKey, dir: 1 | -1): FileEntry[] {
 }
 
 /** The toolbar, tree and preview; the page around it supplies the heading. */
-export function FileBrowser({ top, roots, home, onNavigate, toast }: Props) {
+export function FileBrowser({ top, roots, home, onNavigate, toast, onChat }: Props) {
   const notes = useNotes()
   const profile = notes.profile
   const [listings, setListings] = useState<Record<string, Listing>>({})
@@ -337,6 +356,14 @@ export function FileBrowser({ top, roots, home, onNavigate, toast }: Props) {
     },
   })
 
+  const chatEntries = (dir: string): MenuEntry[] =>
+    onChat
+      ? [
+          { label: 'Chat here', icon: <Sparkles size={14} />, run: () => onChat(dir, 'claude') },
+          { label: 'Shell here', icon: <SquareTerminal size={14} />, run: () => onChat(dir, 'shell') },
+        ]
+      : []
+
   function rowMenu(e: React.MouseEvent, entry: FileEntry) {
     e.preventDefault()
     e.stopPropagation()
@@ -352,6 +379,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast }: Props) {
       items.push(
         { label: 'Open folder in Files', icon: <FolderOpen size={14} />, run: () => void openDefault(dir ? entry.path : parentOf(entry.path)) },
         { label: 'Copy path', icon: <Copy size={14} />, run: () => void copyPath(entry.path) },
+        ...chatEntries(dir ? entry.path : parentOf(entry.path)),
         'sep',
         { label: 'Rename', icon: <PencilLine size={14} />, run: () => setRenaming(entry.path) },
         { label: 'New folder', icon: <FolderPlus size={14} />, run: () => void create('mkdir', entry) },
@@ -375,6 +403,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast }: Props) {
         'sep',
         { label: showHidden ? 'Hide hidden files' : 'Show hidden files', icon: <Eye size={14} />, run: () => setShowHidden((v) => !v) },
         { label: 'Open folder in Files', icon: <FolderOpen size={14} />, run: () => void openDefault(top) },
+        ...chatEntries(top),
       ],
     })
   }
@@ -541,8 +570,10 @@ export function FileBrowser({ top, roots, home, onNavigate, toast }: Props) {
                 onDragStart={(e) => {
                   const paths = selected.includes(entry.path) ? selected : [entry.path]
                   dragging.current = paths
-                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.effectAllowed = 'copyMove'
                   e.dataTransfer.setData('text/plain', paths.map((p) => expandHome(p, home)).join('\n'))
+                  // Dropped on a chat, the paths are typed into its prompt.
+                  e.dataTransfer.setData(PATHS_TYPE, JSON.stringify(paths.map((p) => expandHome(p, home))))
                 }}
                 onDragEnd={() => {
                   dragging.current = null

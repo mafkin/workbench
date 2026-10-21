@@ -13,6 +13,9 @@ export const NOTES = path.join(HOME, 'notes')
 export const ALPHA = path.join(HOME, 'alpha')
 /** Where the fake `gio trash` puts files, outside the fake home. */
 export const TRASH = path.join(DIR, 'trash')
+/** Stand-ins for claude and the login shell; chats in tests never run the real ones. */
+export const FAKE_CLAUDE = path.resolve(import.meta.dirname, '../tests/fixtures/fake-claude.mjs')
+export const FAKE_SHELL = path.resolve(import.meta.dirname, '../tests/fixtures/fake-shell.mjs')
 
 export const WORK = `# fixture: work profile
 name: Work
@@ -152,5 +155,16 @@ export async function resetFixture() {
   for (const [rel, text] of Object.entries(NOTE_FILES)) {
     await fsp.mkdir(path.dirname(path.join(HOME, rel)), { recursive: true })
     await fsp.writeFile(path.join(HOME, rel), text)
+  }
+}
+
+/** Close every chat the service holds, so each test starts without any. */
+export async function closeChats() {
+  const headers = { 'x-workbench': '1' }
+  for (const profile of ['work', 'personal']) {
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/chats?profile=${profile}`, { headers })
+    for (const chat of (await res.json()) as { id: string }[]) {
+      await fetch(`http://127.0.0.1:${PORT}/api/chats/${chat.id}`, { method: 'DELETE', headers })
+    }
   }
 }

@@ -1,12 +1,17 @@
-import { Archive, ArchiveRestore, ExternalLink, FilePlus, FolderOpen, Pencil, Pin, Play, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ExternalLink, FilePlus, FolderOpen, Pencil, Pin, Play, Sparkles, SquareTerminal, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  chatName,
+  entrySlot,
   expandHome,
   getItem,
   itemKey,
   joinNotes,
   noteFileName,
+  projectHost,
+  type Agent,
   type AppState,
+  type Chat,
   type ItemAddr,
   type ItemInput,
   type ListAddr,
@@ -14,6 +19,7 @@ import {
   type NoteSummary,
   type Op,
 } from '../shared/config-schema.ts'
+import { ConfirmDialog } from './components/ConfirmDialog.tsx'
 import { ContextMenu } from './components/ContextMenu.tsx'
 import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
@@ -22,10 +28,12 @@ import { NewNoteDialog } from './components/NewNoteDialog.tsx'
 import type { ProjectActions } from './components/ProjectView.tsx'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
-import { followState, type Connection } from './lib/events.ts'
+import { CHAT_TAB, ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
+import { followState, onChatsEvent, type Connection } from './lib/events.ts'
 import { nameOf } from './lib/files.ts'
 import { readLocal, useLocal, writeLocal } from './lib/local.ts'
 import {
+  CHAT_KEY,
   cx,
   FILES_KEY,
   findEntry,
@@ -182,7 +190,7 @@ export function App() {
       const p = activeRef.current?.profile
       if (!p) return
       const want = normalizePath(expandHome(path, homeRef.current))
-      const addr = findEntry(p, type, (item) => 'path' in item && normalizePath(expandHome(item.path, homeRef.current)) === want)
+      const addr = findEntry(p, type, (item) => 'path' in item && !!item.path && normalizePath(expandHome(item.path, homeRef.current)) === want)
       navigate(addr ? itemKey(addr) : (type === 'note' ? NOTE_KEY : FILES_KEY) + path)
     },
     [navigate],
@@ -305,6 +313,142 @@ export function App() {
     [navigate],
   )
 
+  // Chats of the active profile. The service keeps the programs; this is the
+  // list, fetched again on each `chats` event.
+  const [chatList, setChatList] = useState<{ profile: string; list: Chat[] } | null>(null)
+  const [closing, setClosing] = useState<Chat | null>(null)
+
+  const refreshChats = useCallback(() => {
+    const id = activeRef.current?.id
+    if (!id) return
+    api.listChats(id).then(
+      (list) => activeRef.current?.id === id && setChatList({ profile: id, list }),
+      () => {},
+    )
+  }, [])
+
+  useEffect(() => {
+    refreshChats()
+    return onChatsEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshChats())
+  }, [active?.id, refreshChats])
+
+  /** Put a chat the service just returned into the list, so its tab shows before the next event. */
+  const upsertChat = useCallback((chat: Chat) => {
+    setChatList((cur) => (cur?.profile === chat.profile ? { ...cur, list: [...cur.list.filter((c) => c.id !== chat.id), chat] } : cur))
+  }, [])
+
+  /** Show a chat: its tab in its project, its chat entry, or a page of its own. */
+  const openChat = useCallback(
+    (chat: Chat) => {
+      const a = activeRef.current
+      const p = a?.profile
+      if (!a || !p) return
+      const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(item.path) === chat.host)
+      const item = project && getItem(p, project)
+      if (project && item?.type === 'folder') {
+        showProjectTab(a.id, item.path, chat.slot ? slotStep(chat.slot) : CHAT_TAB + chat.id)
+        return navigate(itemKey(project))
+      }
+      const entry = findEntry(p, 'chat', (it) => it.type === 'chat' && entrySlot(it) === chat.host)
+      navigate(entry ? itemKey(entry) : CHAT_KEY + chat.id)
+    },
+    [navigate],
+  )
+
+  // Desktop notifications for a chat that needs you while the window is not looked at;
+  // permission is asked on the first chat started (a click).
+  const askedNotify = useRef(false)
+  const askNotifications = () => {
+    if (askedNotify.current || typeof Notification === 'undefined' || Notification.permission !== 'default') return
+    askedNotify.current = true
+    void Notification.requestPermission().catch(() => {})
+  }
+  const attention = useRef(new Map<string, boolean>())
+  useEffect(() => {
+    if (!chatList) return
+    for (const c of chatList.list) {
+      const was = attention.current.get(c.id)
+      attention.current.set(c.id, c.attention)
+      if (!c.attention || was !== false) continue
+      if ((document.hasFocus() && !document.hidden) || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
+      const n = new Notification(`${chatName(c)} needs you`, { body: c.cwd, tag: c.id })
+      n.onclick = () => {
+        window.focus()
+        openChat(c)
+        n.close()
+      }
+    }
+  }, [chatList, openChat])
+
+  const closeChat = useCallback(
+    async (chat: Chat) => {
+      try {
+        await api.closeChat(chat.id)
+      } catch (err) {
+        return fail(err)
+      }
+      setChatList((cur) => (cur ? { ...cur, list: cur.list.filter((c) => c.id !== chat.id) } : cur))
+      toasts.push({ message: chat.agent === 'claude' && chat.session ? `Closed ${chatName(chat)}; its session stays in History` : `Closed ${chatName(chat)}` })
+    },
+    [fail, toasts.push],
+  )
+
+  const chatsApi = useMemo<ChatsApi | null>(() => {
+    if (!active) return null
+    const loaded = chatList?.profile === active.id
+    async function attempt<T>(p: Promise<T>): Promise<T | null> {
+      try {
+        return await p
+      } catch (err) {
+        fail(err)
+        return null
+      }
+    }
+    const keep = (chat: Chat | null) => {
+      if (chat) upsertChat(chat)
+      return chat
+    }
+    return {
+      profile: active.id,
+      list: loaded ? chatList.list : [],
+      loaded,
+      start: (req) => {
+        askNotifications()
+        const a = activeRef.current
+        if (!a) return Promise.resolve(null)
+        return attempt(api.startChat(a.id, a.rev, req)).then(keep)
+      },
+      restart: (chat, fresh) => attempt(api.restartChat(chat.id, fresh)).then((c) => void keep(c)),
+      update: (chat, patch) => attempt(api.updateChat(chat.id, patch)).then((c) => void keep(c)),
+      handoff: (chat) => attempt(api.handoffChat(chat.id)).then(keep),
+      close: (chat) => (chat.state === 'running' ? setClosing(chat) : void closeChat(chat)),
+      history: (path) => api.chatHistory(active.id, path).catch(() => []),
+      open: openChat,
+    }
+  }, [active, chatList, fail, upsertChat, openChat, closeChat])
+  const chatsRef = useRef(chatsApi)
+  chatsRef.current = chatsApi
+
+  const newChatIn = useCallback(
+    async (addr: ItemAddr, agent: Agent) => {
+      const chat = await chatsRef.current?.start({ at: addr, agent })
+      if (chat) openChat(chat)
+    },
+    [openChat],
+  )
+
+  // Running chats (and any that need you) per project or chat entry, for the nav.
+  const chatMarks = useMemo(() => {
+    const marks = new Map<string, { running: number; attention: boolean }>()
+    for (const c of chatsApi?.list ?? []) {
+      const m = marks.get(c.host) ?? { running: 0, attention: false }
+      if (c.state === 'running') m.running++
+      if (c.attention) m.attention = true
+      marks.set(c.host, m)
+    }
+    return marks
+  }, [chatsApi?.list])
+
   const projectActions = useMemo<ProjectActions>(
     () => ({
       run,
@@ -336,6 +480,8 @@ export function App() {
         const status = item.status ?? 'active'
         entries.push(
           { label: 'Open in Files', icon: <FolderOpen size={14} />, run: () => openExternally(addr, item) },
+          { label: 'New chat', icon: <Sparkles size={14} />, run: () => void newChatIn(addr, 'claude') },
+          { label: 'New shell', icon: <SquareTerminal size={14} />, run: () => void newChatIn(addr, 'shell') },
           'sep',
           { label: item.pinned ? 'Unpin' : 'Pin', icon: <Pin size={14} />, run: () => card('pinned', item.pinned ? null : true) },
           ...(['active', 'paused', 'done'] as const)
@@ -368,7 +514,7 @@ export function App() {
       )
       return entries
     },
-    [openExternally, run],
+    [openExternally, run, newChatIn],
   )
 
   const submitDialog = useCallback(
@@ -432,6 +578,7 @@ export function App() {
     const key = selected[active.id]
     if (key?.startsWith(NOTE_KEY)) return { kind: 'note', path: key.slice(NOTE_KEY.length) }
     if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
+    if (key?.startsWith(CHAT_KEY)) return { kind: 'chat', id: key.slice(CHAT_KEY.length) }
     const addr = parseKey(key)
     const item = addr ? getItem(active.profile, addr) : undefined
     if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
@@ -456,7 +603,7 @@ export function App() {
     }
   }, [active, setRoot, notesList, openNote, missingNote, notesChanged, toasts.push, fresh])
 
-  if (!state || !active || !notesApi) {
+  if (!state || !active || !notesApi || !chatsApi) {
     return (
       <div className="empty-state">
         {connection === 'offline' ? 'The Workbench service is not running. Start it with bin/workbench.' : 'Loading…'}
@@ -466,6 +613,7 @@ export function App() {
 
   return (
     <NotesCtx.Provider value={notesApi}>
+      <ChatsCtx.Provider value={chatsApi}>
       <div className={cx('app', resizing && 'resizing')} style={{ '--nav-w': `${navWidth}px` } as React.CSSProperties}>
         <NavPanel
           profiles={state.profiles}
@@ -481,6 +629,7 @@ export function App() {
           openDialog={setDialog}
           openMenu={setMenu}
           itemMenu={itemMenu}
+          chatMarks={chatMarks}
           notify={(message, kind) => toasts.push({ message, kind })}
           onSwitch={switchProfile}
           onResizeStart={onResizeStart}
@@ -511,8 +660,24 @@ export function App() {
           dialog && <ItemDialog dialog={dialog} onClose={() => setDialog(null)} onSubmit={submitDialog} />
         )}
         {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+        {closing && (
+          <ConfirmDialog
+            title={`Close ${chatName(closing)}?`}
+            action="Close"
+            onCancel={() => setClosing(null)}
+            onConfirm={() => {
+              setClosing(null)
+              void closeChat(closing)
+            }}
+          >
+            {closing.agent === 'claude'
+              ? 'claude stops. The conversation stays in History, where you can resume it.'
+              : 'The shell, and anything running in it, stops.'}
+          </ConfirmDialog>
+        )}
         <Toasts list={toasts.list} dismiss={toasts.dismiss} />
       </div>
+      </ChatsCtx.Provider>
     </NotesCtx.Provider>
   )
 }

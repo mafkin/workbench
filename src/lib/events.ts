@@ -12,10 +12,17 @@ export interface FilesEvent {
   path: string
 }
 
+export interface ChatsEvent {
+  /** The profile whose chats changed. */
+  profile: string
+}
+
 // Open notes and file browsers listen here: to changes on disk, and to
-// reconnects (the service may have restarted and stopped watching).
+// reconnects (the service may have restarted and stopped watching). The chat
+// list listens for chats starting, stopping or wanting attention.
 const noteListeners = new Set<(e: NoteEvent | 'reconnected') => void>()
 const filesListeners = new Set<(e: FilesEvent | 'reconnected') => void>()
+const chatsListeners = new Set<(e: ChatsEvent | 'reconnected') => void>()
 
 export function onNoteEvent(fn: (e: NoteEvent | 'reconnected') => void): () => void {
   noteListeners.add(fn)
@@ -28,6 +35,13 @@ export function onFilesEvent(fn: (e: FilesEvent | 'reconnected') => void): () =>
   filesListeners.add(fn)
   return () => {
     filesListeners.delete(fn)
+  }
+}
+
+export function onChatsEvent(fn: (e: ChatsEvent | 'reconnected') => void): () => void {
+  chatsListeners.add(fn)
+  return () => {
+    chatsListeners.delete(fn)
   }
 }
 
@@ -50,6 +64,7 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
         if (connectedBefore) {
           for (const fn of noteListeners) fn('reconnected')
           for (const fn of filesListeners) fn('reconnected')
+          for (const fn of chatsListeners) fn('reconnected')
         }
         connectedBefore = true
         delay = 500
@@ -75,6 +90,9 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
             } else if (event === 'files') {
               const e = JSON.parse(data) as FilesEvent
               for (const fn of filesListeners) fn(e)
+            } else if (event === 'chats') {
+              const e = JSON.parse(data) as ChatsEvent
+              for (const fn of chatsListeners) fn(e)
             } else {
               onState(JSON.parse(data))
             }
