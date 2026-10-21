@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
 import Fastify from 'fastify'
 import { z } from 'zod'
-import { expandHome, FileOp, getItem, ItemAddr, Op } from '../shared/config-schema.ts'
+import { expandHome, FileOp, getItem, ItemAddr, Op, stepEntry, stepsOf } from '../shared/config-schema.ts'
 import { describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
 import { Files, type FilesEvent } from './files.ts'
@@ -32,7 +32,7 @@ export interface ServerOptions {
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
 const RevBody = z.object({ rev: z.string() })
 const ActiveBody = z.object({ profile: z.string() })
-const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr })
+const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr, step: z.int().nonnegative().optional() })
 const PathQuery = z.object({ profile: z.string(), path: z.string() })
 const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string().nullable(), text: z.string() })
 const ProfileQuery = z.object({ profile: z.string() })
@@ -101,14 +101,21 @@ export async function buildServer(opts: ServerOptions) {
     return { ok: true }
   })
 
-  // Opens an entry from the config by its address; requests never carry a command.
+  // Opens an entry, or a project's workflow step, from the config by its address;
+  // requests never carry a command.
   app.post('/api/open', async (req) => {
-    const { profile: id, rev, at } = parse(OpenBody, req.body)
+    const { profile: id, rev, at, step } = parse(OpenBody, req.body)
     const p = store.profile(id)
     if (p.rev !== rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
     const item = getItem(p.profile, at)
     if (!item) throw new StoreError('No such entry', 404)
-    await openItem(item, home, opts.spawn)
+    if (step === undefined) {
+      await openItem(item, home, opts.spawn)
+      return { ok: true }
+    }
+    const s = stepsOf(p.profile, item)[step]
+    if (!s || item.type !== 'folder') throw new StoreError('No such step', 404)
+    await openItem(stepEntry(item.path, s), home, opts.spawn)
     return { ok: true }
   })
 

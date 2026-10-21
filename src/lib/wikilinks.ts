@@ -1,5 +1,7 @@
 // Links inside notes: [[wiki links]], relative links between notes, and heading anchors.
-import { NOTE_EXT, type NoteSummary } from '../../shared/config-schema.ts'
+import { normalizePath, NOTE_EXT, type NoteSummary } from '../../shared/config-schema.ts'
+
+export { normalizePath }
 
 export interface WikiLink {
   target: string
@@ -83,19 +85,6 @@ export function resolveWiki(target: string, notes: NoteSummary[], from?: string)
   const rank = (n: NoteSummary) => (near !== null && dirOf(n.path) === near ? 0 : n.rel !== null ? 1 : 2)
   matches.sort((a, b) => rank(a) - rank(b) || a.path.length - b.path.length || a.path.localeCompare(b.path))
   return matches[0] ?? null
-}
-
-/** Collapse `.` and `..` in a `~/…` or absolute path; a `..` that cannot be collapsed is kept for the service to resolve. */
-export function normalizePath(p: string): string {
-  const absolute = p.startsWith('/')
-  const out: string[] = []
-  for (const part of p.split('/')) {
-    if (!part || part === '.') continue
-    const last = out[out.length - 1]
-    if (part === '..' && last !== undefined && last !== '..' && last !== '~') out.pop()
-    else out.push(part)
-  }
-  return (absolute ? '/' : '') + out.join('/')
 }
 
 /** Where a link or image in a note points, relative to the note's folder; null for URLs and in-page anchors. */

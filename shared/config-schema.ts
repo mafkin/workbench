@@ -10,12 +10,8 @@ const base = {
   icon: z.string().optional(),
 }
 
-export const FolderItem = z.object({ ...base, type: z.literal('folder'), path: z.string().trim().min(1, 'Path is required') })
+const folderFields = { ...base, type: z.literal('folder'), path: z.string().trim().min(1, 'Path is required') }
 export const NoteItem = z.object({ ...base, type: z.literal('note'), path: z.string().trim().min(1, 'Path is required') })
-export const ProjectItem = z.object({ ...base, type: z.literal('project'), project: z.string().trim().min(1, 'Project id is required') })
-export const LinkItem = z.object({ ...base, type: z.literal('link'), url: z.url('Not a valid URL') })
-/** Today's note in the profile's notes folder: `<notes>/<folder>/YYYY-MM-DD.md`. */
-export const DailyItem = z.object({ ...base, type: z.literal('daily'), folder: z.string().optional(), template: z.string().optional() })
 export const LaunchItem = z.object({
   ...base,
   type: z.literal('launch'),
@@ -23,6 +19,28 @@ export const LaunchItem = z.object({
   args: list(z.string()),
   cwd: z.string().optional(),
 })
+
+/**
+ * A step in a project's workflow ("assets", "modeling", "design"): a folder, a
+ * note or a launcher, with the same fields as a nav entry. Relative paths are
+ * inside the project folder, which is also a launcher's working folder.
+ */
+export const StepItem = z.discriminatedUnion('type', [z.object(folderFields), NoteItem, LaunchItem])
+export const STEP_TYPES = ['folder', 'note', 'launch'] as const
+
+/** A project folder. Without `steps:` it uses the profile's `workflow:`; an empty `steps:` means none. */
+export const FolderItem = z.object({
+  ...folderFields,
+  steps: z
+    .array(StepItem)
+    .nullable()
+    .transform((v) => v ?? [])
+    .optional(),
+})
+export const ProjectItem = z.object({ ...base, type: z.literal('project'), project: z.string().trim().min(1, 'Project id is required') })
+export const LinkItem = z.object({ ...base, type: z.literal('link'), url: z.url('Not a valid URL') })
+/** Today's note in the profile's notes folder: `<notes>/<folder>/YYYY-MM-DD.md`. */
+export const DailyItem = z.object({ ...base, type: z.literal('daily'), folder: z.string().optional(), template: z.string().optional() })
 
 export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ProjectItem, LinkItem, LaunchItem])
 
@@ -49,6 +67,8 @@ export const Profile = z.object({
   home: z.string().optional(),
   /** Folder for new notes, daily notes, search and wiki links. */
   notes: z.string().trim().regex(/^(~|\/)/, 'Notes folder must start with ~ or /').optional(),
+  /** The steps every project starts with. */
+  workflow: list(StepItem),
   sections: list(Section),
 })
 
@@ -58,6 +78,7 @@ export const Settings = z.object({
 })
 
 export type LeafItem = z.output<typeof LeafItem>
+export type StepItem = z.output<typeof StepItem>
 export type GroupItem = z.output<typeof GroupItem>
 export type NavItem = z.output<typeof NavItem>
 export type Section = z.output<typeof Section>
@@ -104,6 +125,16 @@ export const Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('moveItem'), from: ItemAddr, to: ListAddr, index }),
   // An empty value removes an optional key (home, notes).
   z.object({ op: z.literal('setProfileField'), key: z.enum(PROFILE_FIELDS), value: z.string() }),
+  // Workflow steps of the folder entry at `at`. The first change to a project
+  // using the profile's workflow copies it into the project's own steps.
+  z.object({ op: z.literal('addStep'), at: ItemAddr, step: itemInput, index: index.optional() }),
+  z.object({ op: z.literal('updateStep'), at: ItemAddr, index, step: itemInput }),
+  z.object({ op: z.literal('deleteStep'), at: ItemAddr, index }),
+  z.object({ op: z.literal('moveStep'), at: ItemAddr, from: index, to: index }),
+  // Back to the profile's workflow.
+  z.object({ op: z.literal('resetSteps'), at: ItemAddr }),
+  // Make this project's steps the profile's workflow, and use it here too.
+  z.object({ op: z.literal('setWorkflow'), at: ItemAddr }),
 ])
 export type Op = z.output<typeof Op>
 
@@ -217,6 +248,38 @@ export function joinNotes(root: string, rel: string): string {
   return clean ? `${root.replace(/\/+$/, '')}/${clean}` : root
 }
 
+// Workflow steps
+
+/** A project's steps: its own, or the profile's workflow. */
+export function stepsOf(profile: Profile, item: NavItem): StepItem[] {
+  if (item.type !== 'folder') return []
+  return item.steps ?? profile.workflow
+}
+
+/** Collapse `.` and `..` in a `~/…` or absolute path; a `..` that cannot be collapsed is kept. */
+export function normalizePath(p: string): string {
+  const absolute = p.startsWith('/')
+  const out: string[] = []
+  for (const part of p.split('/')) {
+    if (!part || part === '.') continue
+    const last = out[out.length - 1]
+    if (part === '..' && last !== undefined && last !== '..' && last !== '~') out.pop()
+    else out.push(part)
+  }
+  return (absolute ? '/' : '') + out.join('/')
+}
+
+/** A step's path: `~/…` and `/…` as they are, anything else inside the project folder. */
+export function stepPath(project: string, p: string): string {
+  return normalizePath(/^(~|\/)/.test(p) ? p : `${project}/${p}`)
+}
+
+/** A step as an entry of its own: paths resolved, and a launcher running in the project folder by default. */
+export function stepEntry(project: string, step: StepItem): LeafItem {
+  if (step.type === 'launch') return { ...step, cwd: stepPath(project, step.cwd ?? '.') }
+  return { ...step, path: stepPath(project, step.path) } as LeafItem
+}
+
 // File browser (part 3)
 
 /**
@@ -228,11 +291,18 @@ export function folderRoots(profile: Profile): { label: string; path: string }[]
   const out: { label: string; path: string }[] = []
   if (profile.home) out.push({ label: 'Home', path: profile.home })
   if (profile.notes) out.push({ label: 'Notes', path: profile.notes })
+  const project = (item: NavItem) => {
+    if (item.type !== 'folder') return
+    out.push({ label: item.label, path: item.path })
+    // A folder step can sit outside its project, e.g. a shared assets folder.
+    for (const step of stepsOf(profile, item)) {
+      if (step.type === 'folder') out.push({ label: `${item.label} › ${step.label}`, path: stepPath(item.path, step.path) })
+    }
+  }
   for (const section of profile.sections) {
     for (const item of section.items) {
-      if (item.type === 'folder') out.push({ label: item.label, path: item.path })
-      if (item.type !== 'group') continue
-      for (const child of item.items) if (child.type === 'folder') out.push({ label: child.label, path: child.path })
+      project(item)
+      if (item.type === 'group') item.items.forEach(project)
     }
   }
   return out

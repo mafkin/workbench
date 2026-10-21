@@ -9,6 +9,8 @@ import path from 'node:path'
 import {
   displayPath,
   NOTE_EXT,
+  stepPath,
+  stepsOf,
   type NavItem,
   type NoteFile,
   type NoteSummary,
@@ -59,12 +61,16 @@ interface Found extends NoteSummary {
 
 const baseName = (file: string) => path.parse(file).name
 
+/** Note entries and projects' note steps: files the config names, whatever their extension. */
 function noteEntries(profile: Profile): string[] {
   const out: string[] = []
   const visit = (items: NavItem[]) => {
     for (const item of items) {
       if (item.type === 'note') out.push(item.path)
       else if (item.type === 'group') visit(item.items)
+      else if (item.type === 'folder') {
+        for (const step of stepsOf(profile, item)) if (step.type === 'note') out.push(stepPath(item.path, step.path))
+      }
     }
   }
   for (const s of profile.sections) visit(s.items)

@@ -6,7 +6,9 @@ import {
   NavItem,
   Profile,
   PROFILE_FIELDS,
+  STEP_TYPES,
   TYPE_FIELDS,
+  type ItemAddr,
   type ItemInput,
   type ListAddr,
   type Op,
@@ -119,6 +121,42 @@ function updateItemNode(doc: Document, node: YAMLMap, input: ItemInput) {
   else node.delete('icon')
 }
 
+/** The folder entry at `at`; steps belong to folder entries. */
+function folderAt(doc: Document, at: ItemAddr): YAMLMap {
+  const node = nth(listAt(doc, at), at.index, 'Entry')
+  if (!isMap(node) || node.get('type') !== 'folder') throw new OpError('Only folder entries have workflow steps')
+  return node
+}
+
+/** The project's own steps. The first change to a project using the profile's workflow copies it in. */
+function ownSteps(doc: Document, at: ItemAddr): YAMLSeq {
+  const node = folderAt(doc, at)
+  if (node.has('steps')) {
+    const steps = node.get('steps', true)
+    if (isSeq(steps)) return steps
+  }
+  const workflow = doc.get('workflow', true)
+  const seq = isSeq(workflow) ? (workflow.clone() as YAMLSeq) : (doc.createNode([]) as YAMLSeq)
+  node.set('steps', seq)
+  return seq
+}
+
+function checkStep(input: ItemInput) {
+  if (!(STEP_TYPES as readonly string[]).includes(input.type)) throw new OpError('A step is a folder, note or launcher')
+}
+
+/** Set a top-level key, adding it just before `sections` when it is new. */
+function setTopLevel(doc: Document, key: string, value: unknown) {
+  const map = doc.contents
+  if (!isMap(map)) throw new OpError('The profile is not a mapping')
+  if (map.has(key)) {
+    map.set(key, value)
+    return
+  }
+  const at = map.items.findIndex((pair) => (isScalar(pair.key) ? pair.key.value : pair.key) === 'sections')
+  map.items.splice(at < 0 ? map.items.length : at, 0, doc.createPair(key, value))
+}
+
 /** Set a top-level profile key in place; a new key goes after the keys that precede it in PROFILE_FIELDS. */
 function setProfileField(doc: Document, key: (typeof PROFILE_FIELDS)[number], raw: string) {
   const map = doc.contents
@@ -195,6 +233,41 @@ function applyOp(doc: Document, op: Op) {
     case 'setProfileField':
       setProfileField(doc, op.key, op.value)
       return
+    case 'addStep': {
+      checkStep(op.step)
+      const seq = ownSteps(doc, op.at)
+      seq.items.splice(clamp(op.index, seq.items.length), 0, doc.createNode(newItemData(op.step)))
+      return
+    }
+    case 'updateStep': {
+      checkStep(op.step)
+      const node = nth(ownSteps(doc, op.at), op.index, 'Step')
+      if (!isMap(node)) throw new OpError(`Step ${op.index} is not a mapping`)
+      updateItemNode(doc, node, op.step)
+      return
+    }
+    case 'deleteStep': {
+      const seq = ownSteps(doc, op.at)
+      nth(seq, op.index, 'Step')
+      seq.items.splice(op.index, 1)
+      return
+    }
+    case 'moveStep': {
+      const seq = ownSteps(doc, op.at)
+      nth(seq, op.from, 'Step')
+      const [node] = seq.items.splice(op.from, 1)
+      seq.items.splice(clamp(op.to, seq.items.length), 0, node)
+      return
+    }
+    case 'resetSteps':
+      folderAt(doc, op.at).delete('steps')
+      return
+    case 'setWorkflow': {
+      const node = folderAt(doc, op.at)
+      setTopLevel(doc, 'workflow', ownSteps(doc, op.at).clone())
+      node.delete('steps')
+      return
+    }
   }
 }
 
