@@ -31,7 +31,7 @@ test('profile switch swaps nav, accent and title', async ({ page }) => {
 test('selecting a folder shows its view', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await expect(page.locator('.page-title')).toHaveText('Alpha')
-  await expect(page.locator('.status.ok')).toHaveText('Found')
+  await expect(page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name: 'README.md' })).toBeVisible()
   await expect(entry(page, 'Alpha')).toHaveClass(/selected/)
   await page.screenshot({ path: 'test-results/folder.png' })
 })

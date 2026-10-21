@@ -79,6 +79,17 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - A **daily** entry opens today's note, `<notes>/daily/YYYY-MM-DD.md`, creating it from `<notes>/templates/daily.md` the first time (`{{date}}` and `{{title}}` are filled in). The arrows step to other days.
 - Without `notes:` in a profile, the app offers to set it to `<home>/notes` with one click. The folder is created with the first note.
 
+### Files
+
+- A **folder** entry opens a file browser: a tree with sizes and dates, and a preview of the selected file on the right. The **Folders** chips on Home, and the chips above the tree, open the profile's home, its notes folder and its folder entries.
+- Click the arrow to expand a folder in place; **double-click** (or **Enter**) to make it the top. The path bar jumps back up, and so does **Backspace** or **Alt+←**.
+- **Filter by name** narrows the tree to matching names in the folders you have open. Click a column header to sort.
+- Dotfiles are hidden; **Ctrl+H** shows them. In a git repository, files `.gitignore` excludes (`node_modules`, `dist`, logs) are shown dimmed.
+- Previews: images, PDF, video and audio, Markdown formatted, and other text as plain text (the first 200 KB). **Open as note** (or Enter) opens Markdown in the notes view, where you can edit it.
+- **F2** renames in place, **Delete** moves the selection to the GNOME Trash (`gio trash`; restore it from Trash in Files), and the toolbar makes a new folder or file. Drag files onto a folder, a path-bar step or a chip to move them. Rename and move have **Undo**; nothing is ever overwritten.
+- Right-click for the rest: open in the default app, open the folder in Files, copy the path.
+- The tree follows changes on disk while it is open.
+
 ## Security
 
 The service binds to loopback only. It accepts a request only if:
@@ -95,13 +106,15 @@ Notes can only touch:
 - the files of that profile's note entries,
 - images inside those places, read-only.
 
+The file browser can open the profile's `home:`, its `notes:` folder and its folder entries, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file, and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header.
+
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else.
 
 ## Development
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, HTTP API
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, HTTP API
 npm run e2e        # Playwright against a throwaway config; programs are not started
 npm run build      # type check + production build
 ```
@@ -114,15 +127,16 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/config-ops.ts` | edits applied to the YAML document |
 | `server/config-store.ts` | loading, validation, atomic writes, watching and undo |
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
+| `server/files.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; the folders a profile may reach; folder watching |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API |
-| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily) |
+| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser |
 
 ## Roadmap
 
 | Part | What it adds |
 | --- | --- |
 | 2 | Markdown notes (done) |
-| 3 | File browser |
+| 3 | File browser (done) |
 | 4 | Project cards |
 | 5 | Agent chats (real `claude` CLI in xterm.js, so `/remote-control` keeps working) |
 | 6 | Skills & MCP panel |

@@ -23,7 +23,18 @@ import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
 import { followState, type Connection } from './lib/events.ts'
 import { useLocal } from './lib/local.ts'
-import { cx, findNoteEntry, listLength, NOTE_KEY, parseKey, type DialogState, type MenuEntry, type MenuState, type Selection } from './lib/nav.ts'
+import {
+  cx,
+  FILES_KEY,
+  findEntry,
+  listLength,
+  NOTE_KEY,
+  parseKey,
+  type DialogState,
+  type MenuEntry,
+  type MenuState,
+  type Selection,
+} from './lib/nav.ts'
 import { NotesCtx, type NotesApi } from './lib/notes-ctx.ts'
 import { normalizePath } from './lib/wikilinks.ts'
 
@@ -145,17 +156,19 @@ export function App() {
     setSelected((s) => ({ ...s, [a.id]: h[h.length - 1] }))
   }, [search.open, setSelected])
 
-  /** Open a note by path; a note that is also a nav entry opens as that entry. */
-  const openNote = useCallback(
-    (path: string) => {
+  /** Open a note or folder by path; one that is also a nav entry opens as that entry. */
+  const openPath = useCallback(
+    (type: 'note' | 'folder', path: string) => {
       const p = activeRef.current?.profile
       if (!p) return
       const want = normalizePath(expandHome(path, homeRef.current))
-      const addr = findNoteEntry(p, (entryPath) => normalizePath(expandHome(entryPath, homeRef.current)) === want)
-      navigate(addr ? itemKey(addr) : NOTE_KEY + path)
+      const addr = findEntry(p, type, (entryPath) => normalizePath(expandHome(entryPath, homeRef.current)) === want)
+      navigate(addr ? itemKey(addr) : (type === 'note' ? NOTE_KEY : FILES_KEY) + path)
     },
     [navigate],
   )
+  const openNote = useCallback((path: string) => openPath('note', path), [openPath])
+  const openFolder = useCallback((path: string) => openPath('folder', path), [openPath])
 
   const refreshNotes = useCallback(() => {
     const id = activeRef.current?.id
@@ -340,6 +353,7 @@ export function App() {
     if (!active?.profile) return null
     const key = selected[active.id]
     if (key?.startsWith(NOTE_KEY)) return { kind: 'note', path: key.slice(NOTE_KEY.length) }
+    if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
     const addr = parseKey(key)
     const item = addr ? getItem(active.profile, addr) : undefined
     if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
@@ -402,6 +416,9 @@ export function App() {
           searchRef={searchRef}
           canGoBack={search.open || history.length > 0}
           onBack={back}
+          openFolder={openFolder}
+          toast={toasts.push}
+          home={state.home}
           onHome={goHome}
           activate={activate}
           openExternally={openExternally}

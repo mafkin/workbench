@@ -39,20 +39,27 @@ export type DialogState =
   | { mode: 'edit'; at: ItemAddr; item: NavItem; context: string }
   | { mode: 'note'; list: ListAddr; context: string }
 
-/** What the main pane shows: a nav entry, or a note opened by path (a link or a search result). */
-export type Selection = { kind: 'entry'; addr: ItemAddr; item: NavItem } | { kind: 'note'; path: string }
+/**
+ * What the main pane shows: a nav entry, a note opened by path (a link or a
+ * search result), or a folder opened by path (a chip, the path bar, a subfolder).
+ */
+export type Selection =
+  | { kind: 'entry'; addr: ItemAddr; item: NavItem }
+  | { kind: 'note'; path: string }
+  | { kind: 'files'; path: string }
 
-/** Selection key prefix for a note opened by path; other keys are entry addresses. */
+/** Selection key prefixes for a note or folder opened by path; other keys are entry addresses. */
 export const NOTE_KEY = 'note:'
+export const FILES_KEY = 'files:'
 
-/** The first note entry whose path matches, searching headings and groups. */
-export function findNoteEntry(profile: Profile, matches: (path: string) => boolean): ItemAddr | null {
+/** The first note or folder entry whose path matches, searching headings and groups. */
+export function findEntry(profile: Profile, type: 'note' | 'folder', matches: (path: string) => boolean): ItemAddr | null {
   for (const [si, section] of profile.sections.entries()) {
     for (const [i, item] of section.items.entries()) {
-      if (item.type === 'note' && matches(item.path)) return { section: si, index: i }
+      if (item.type === type && matches(item.path)) return { section: si, index: i }
       if (item.type !== 'group') continue
       for (const [ci, child] of item.items.entries()) {
-        if (child.type === 'note' && matches(child.path)) return { section: si, group: i, index: ci }
+        if (child.type === type && matches(child.path)) return { section: si, group: i, index: ci }
       }
     }
   }

@@ -1,14 +1,16 @@
-import { ArrowLeft, ExternalLink, FileText, FolderOpen, Pencil, Search } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { NOTE_EXT, type ItemAddr, type NavItem, type ProfileState, type SearchHit } from '../../shared/config-schema.ts'
-import { stat } from '../lib/api.ts'
+import { ArrowLeft, ExternalLink, FileText, Folder, Pencil, Search } from 'lucide-react'
+import { useRef } from 'react'
+import { folderRoots, NOTE_EXT, type ItemAddr, type NavItem, type ProfileState, type SearchHit } from '../../shared/config-schema.ts'
+import { nameOf } from '../lib/files.ts'
 import { opensExternally, type Selection } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { DailyView } from './DailyView.tsx'
 import { EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
+import { FileBrowser } from './FileBrowser.tsx'
 import { NotesFolderHint } from './NotesFolderHint.tsx'
 import { NoteView } from './NoteView.tsx'
 import { SearchView } from './SearchView.tsx'
+import type { ToastInput } from './Toast.tsx'
 
 export interface SearchState {
   open: boolean
@@ -23,6 +25,10 @@ interface Props {
   searchRef: React.RefObject<HTMLInputElement | null>
   canGoBack: boolean
   onBack: () => void
+  /** Open a folder in the browser; one that is a folder entry opens as that entry. */
+  openFolder: (path: string) => void
+  toast: (t: ToastInput) => void
+  home: string
   onHome: () => void
   activate: (addr: ItemAddr, item: NavItem) => void
   openExternally: (addr: ItemAddr, item: NavItem) => void
@@ -31,7 +37,8 @@ interface Props {
 
 const noteName = (path: string) => (path.split('/').pop() ?? path).replace(NOTE_EXT, '')
 
-export function MainPane({ active, selected, search, setSearch, searchRef, canGoBack, onBack, onHome, activate, openExternally, startEditing }: Props) {
+export function MainPane(props: Props) {
+  const { active, selected, search, setSearch, searchRef, canGoBack, onBack, onHome, activate, startEditing } = props
   const notes = useNotes()
   const firstHit = useRef<string | null>(null)
   const profile = active.profile
@@ -72,13 +79,13 @@ export function MainPane({ active, selected, search, setSearch, searchRef, canGo
               <span className="sep">/</span>
               <span className="current">{entry.item.label}</span>
             </>
-          ) : selected?.kind === 'note' ? (
+          ) : selected && selected.kind !== 'entry' ? (
             <>
               <span className="sep">/</span>
-              <span>Notes</span>
+              <span>{selected.kind === 'note' ? 'Notes' : 'Files'}</span>
               <span className="sep">/</span>
               <span className="current" title={selected.path}>
-                {noteName(selected.path)}
+                {selected.kind === 'note' ? noteName(selected.path) : nameOf(selected.path)}
               </span>
             </>
           ) : null}
@@ -113,11 +120,13 @@ export function MainPane({ active, selected, search, setSearch, searchRef, canGo
         ) : search.open ? (
           <SearchView query={search.query} onResults={(hits: SearchHit[]) => (firstHit.current = hits[0]?.path ?? null)} />
         ) : entry ? (
-          <EntryView key={`${active.id}:${entry.item.label}`} addr={entry.addr} item={entry.item} kicker={section?.title ?? ''} openExternally={openExternally} />
+          <EntryView key={`${active.id}:${entry.item.label}`} addr={entry.addr} item={entry.item} kicker={section?.title ?? ''} pane={props} />
         ) : selected?.kind === 'note' ? (
           <PathNote key={selected.path} path={selected.path} />
+        ) : selected?.kind === 'files' ? (
+          <Browser key={`${active.id}:${selected.path}`} top={selected.path} kicker="Files" heading={nameOf(selected.path)} pane={props} />
         ) : (
-          <Home active={active} activate={activate} startEditing={startEditing} />
+          <Home active={active} activate={activate} openFolder={props.openFolder} startEditing={startEditing} />
         )}
       </div>
     </main>
@@ -137,8 +146,19 @@ function BrokenProfile({ active }: { active: ProfileState }) {
   )
 }
 
-function Home({ active, activate, startEditing }: { active: ProfileState; activate: Props['activate']; startEditing: () => void }) {
+function Home({
+  active,
+  activate,
+  openFolder,
+  startEditing,
+}: {
+  active: ProfileState
+  activate: Props['activate']
+  openFolder: Props['openFolder']
+  startEditing: () => void
+}) {
   const profile = active.profile!
+  const roots = folderRoots(profile)
   const count = profile.sections.reduce((n, s) => n + s.items.reduce((m, i) => m + (i.type === 'group' ? i.items.length : 1), 0), 0)
 
   if (profile.sections.length === 0) {
@@ -183,6 +203,17 @@ function Home({ active, activate, startEditing }: { active: ProfileState; activa
         )}
       </p>
       {!profile.notes && <NotesFolderHint compact />}
+      {roots.length > 0 && (
+        <div className="chips home-chips" aria-label="Folders">
+          <span className="chips-label">Folders</span>
+          {roots.map((r) => (
+            <button key={`${r.label}:${r.path}`} className="chip" onClick={() => openFolder(r.path)} title={r.path}>
+              <Folder size={13} />
+              {r.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="overview">
         {profile.sections.map((s, si) => (
           <section className="card" key={si}>
@@ -215,19 +246,20 @@ function Home({ active, activate, startEditing }: { active: ProfileState; activa
   )
 }
 
-function PathStatus({ path, want }: { path: string; want: 'dir' | 'file' }) {
-  const [status, setStatus] = useState<{ exists: boolean; kind: string | null } | null>(null)
-  useEffect(() => {
-    let live = true
-    stat(path).then((s) => live && setStatus(s), () => live && setStatus(null))
-    return () => {
-      live = false
-    }
-  }, [path])
-  if (!status) return null
-  if (!status.exists) return <span className="status bad">Not found</span>
-  if (status.kind !== want) return <span className="status bad">{want === 'dir' ? 'Not a folder' : 'Not a file'}</span>
-  return <span className="status ok">Found</span>
+/** The file browser at `top`, for a folder entry or a folder opened by path. */
+function Browser({ top, kicker, heading, pane }: { top: string; kicker: string; heading: React.ReactNode; pane: Props }) {
+  const profile = pane.active.profile!
+  return (
+    <FileBrowser
+      top={top}
+      kicker={kicker}
+      heading={heading}
+      roots={folderRoots(profile)}
+      home={pane.home}
+      onNavigate={pane.openFolder}
+      toast={pane.toast}
+    />
+  )
 }
 
 /** A note opened by path: from a link or a search result, not from the nav. */
@@ -256,7 +288,8 @@ function PathNote({ path }: { path: string }) {
   )
 }
 
-function EntryView({ addr, item, kicker, openExternally }: { addr: ItemAddr; item: NavItem; kicker: string; openExternally: Props['openExternally'] }) {
+function EntryView({ addr, item, kicker, pane }: { addr: ItemAddr; item: NavItem; kicker: string; pane: Props }) {
+  const { openExternally } = pane
   if (item.type === 'note') {
     return (
       <NoteView
@@ -285,6 +318,23 @@ function EntryView({ addr, item, kicker, openExternally }: { addr: ItemAddr; ite
 
   if (item.type === 'daily') return <DailyView item={item} kicker={kicker} />
 
+  if (item.type === 'folder') {
+    return (
+      <Browser
+        key={item.path}
+        top={item.path}
+        kicker={`${kicker} · ${TYPE_LABEL.folder}`}
+        heading={
+          <>
+            <EntryIcon type="folder" icon={item.icon} size={22} />
+            {item.label}
+          </>
+        }
+        pane={pane}
+      />
+    )
+  }
+
   return (
     <div className="page">
       <div className="page-kicker">
@@ -294,23 +344,6 @@ function EntryView({ addr, item, kicker, openExternally }: { addr: ItemAddr; ite
         <EntryIcon type={item.type} icon={item.icon} size={22} />
         {item.label}
       </h1>
-
-      {item.type === 'folder' && (
-        <>
-          <div className="path-row">
-            <span className="path mono">{item.path}</span>
-            <PathStatus path={item.path} want="dir" />
-            <button className="btn" onClick={() => openExternally(addr, item)}>
-              <FolderOpen size={14} />
-              Open in Files
-            </button>
-          </div>
-          <div className="placeholder">
-            <h3>File browser: part 3</h3>
-            <p>The folder tree, quick-jump chips, filter and previews will open here.</p>
-          </div>
-        </>
-      )}
 
       {item.type === 'project' && (
         <>

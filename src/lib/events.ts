@@ -7,14 +7,27 @@ export interface NoteEvent {
   rev: string | null
 }
 
-// Open notes listen here: to changes on disk, and to reconnects (the service
-// may have restarted and stopped watching them).
+export interface FilesEvent {
+  /** A listed folder whose contents changed. */
+  path: string
+}
+
+// Open notes and file browsers listen here: to changes on disk, and to
+// reconnects (the service may have restarted and stopped watching).
 const noteListeners = new Set<(e: NoteEvent | 'reconnected') => void>()
+const filesListeners = new Set<(e: FilesEvent | 'reconnected') => void>()
 
 export function onNoteEvent(fn: (e: NoteEvent | 'reconnected') => void): () => void {
   noteListeners.add(fn)
   return () => {
     noteListeners.delete(fn)
+  }
+}
+
+export function onFilesEvent(fn: (e: FilesEvent | 'reconnected') => void): () => void {
+  filesListeners.add(fn)
+  return () => {
+    filesListeners.delete(fn)
   }
 }
 
@@ -34,7 +47,10 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
         const res = await fetch('/api/events', { headers: { 'x-workbench': '1' }, signal: abort.signal })
         if (!res.ok || !res.body) throw new Error(`events: ${res.status}`)
         onConnection('live')
-        if (connectedBefore) for (const fn of noteListeners) fn('reconnected')
+        if (connectedBefore) {
+          for (const fn of noteListeners) fn('reconnected')
+          for (const fn of filesListeners) fn('reconnected')
+        }
         connectedBefore = true
         delay = 500
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -56,6 +72,9 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
             if (event === 'note') {
               const e = JSON.parse(data) as NoteEvent
               for (const fn of noteListeners) fn(e)
+            } else if (event === 'files') {
+              const e = JSON.parse(data) as FilesEvent
+              for (const fn of filesListeners) fn(e)
             } else {
               onState(JSON.parse(data))
             }

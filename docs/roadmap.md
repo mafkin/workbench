@@ -34,8 +34,8 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | --- | --- | --- |
 | 1 | Shell, profiles, configurable nav | Done (`2a8811a`) |
 | 2 | Markdown notes | Done (branch `claude/inspiring-einstein-vwftq8`) |
-| 3 | File browser | Next in the suggested order |
-| 4 | Project cards | |
+| 3 | File browser | Done (branch `claude/inspiring-einstein-vwftq8`) |
+| 4 | Project cards | Next in the suggested order |
 | 5 | Agent chats | |
 | 6 | Skills & MCP panel | |
 | 7 | Context folders | |
@@ -62,24 +62,35 @@ The user may pick parts in a different order; ask. For each part, the "Ask" item
   - Back navigation, which part 3's file browser can reuse.
 - **Left for later:** see "Known gaps" in CLAUDE.md (no search index, `#heading` in wiki links, clickable checkboxes, links that follow a rename, code highlighting).
 
-### Part 3: File browser
+### Part 3: File browser (done)
 
 - **In Mr. Mak:**
   - A right-hand Files rail with Main folders / All files tabs, chips that jump to key folders, a path bar, and a filter by name.
   - A folder tree showing file sizes.
   - Drag to move, delete to the trash, "open in file manager", new item, refresh.
   - Previews for images, video, audio and Markdown.
-- **Hooks into:** `folder` entries (currently a placeholder with "Open in Files"), and each profile's `home:` as the default root.
-- **Ask:**
-  - Placement: the main pane, a rail, or both.
-  - Which quick-jump chips to show, and whether they're configurable per profile.
-  - Which operations: move, rename, delete to trash, new folder or file.
-  - Which previews: image, video, audio, PDF, text/code.
-  - Hidden files on or off, and whether to respect `.gitignore`.
-- **Notes:**
-  - Use `gio trash` or a trash library for deletes, never permanent deletes by default.
-  - Keep paths confined to the profile's roots plus explicit nav paths. `Notes.#resolve` in `server/notes.ts` is the pattern: `realish()` + allowed roots.
-  - Markdown previews can reuse `src/components/Markdown.tsx`, and image previews the `/api/notes/asset` approach.
+- **Hooks into:** `folder` entries (before this part, a placeholder with "Open in Files"), and each profile's `home:` as the default root.
+- **Decisions (2026-10-21):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Placement | The main pane |
+  | Chips | Built from the profile: home, notes folder, folder entries |
+  | Operations | All: trash, rename, new folder or file, drag to move |
+  | Previews | All: images, Markdown and text/code, PDF, video and audio |
+  | Folder view | Expandable tree |
+  | Hidden files | Dotfiles hidden (Ctrl+H), `.gitignore` matches dimmed |
+  | Reach | The profile's roots (home, notes, folder entries) |
+  | Markdown in the browser | Editable as notes |
+
+- **Built:**
+  - `server/files.ts`, with confinement in `server/paths.ts` shared with notes.
+  - `/raw/` tickets for media.
+  - `FolderWatcher` shared with notes.
+  - `FileBrowser` and `FilePreview` in the UI.
+  - `files:<path>` selections.
+  - Folder chips on Home.
+- **Left for later:** see "Known gaps" in CLAUDE.md (trash undo, cross-drive moves, copy, upload, folder sizes, virtualized rows).
 
 ### Part 4: Project cards
 
@@ -89,6 +100,7 @@ The user may pick parts in a different order; ask. For each part, the "Ask" item
   - Clicking the status dot changes status, category, pin or archive. Archived cards can be restored from search or "Show archive".
   - Tabs inside a card hold related iterations: HTML reports in an iframe, Markdown formatted, image previews.
 - **Hooks into:** `project` entries (`project: <id>`). The Home overview could also become or include the card dashboard.
+  - A card's tabs can reuse `FilePreview` (images, PDF, Markdown, text) and `NoteView` for notes. Any new file access goes through `browseRoots` in `server/paths.ts`.
 - **Ask:**
   - Where the registry lives: per profile in `~/.config/workbench/projects/<profile>.yaml`, or a file inside each project folder.
   - Which card fields and categories they want.

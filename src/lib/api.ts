@@ -1,4 +1,15 @@
-import type { AppState, ItemAddr, NoteFile, NoteSummary, Op, SearchHit } from '../../shared/config-schema.ts'
+import type {
+  AppState,
+  FileListing,
+  FileOp,
+  FileOpResult,
+  FileText,
+  ItemAddr,
+  NoteFile,
+  NoteSummary,
+  Op,
+  SearchHit,
+} from '../../shared/config-schema.ts'
 
 export class ApiError extends Error {
   status: number
@@ -54,6 +65,14 @@ export const writeNote = (profile: string, path: string, rev: string | null, tex
   })
 export const listNotes = (profile: string) => api<NoteSummary[]>(`/api/notes/list?${query({ profile })}`)
 export const searchNotes = (profile: string, q: string) => api<SearchHit[]>(`/api/notes/search?${query({ profile, q })}`)
+
+export const listFiles = (profile: string, path: string) => api<FileListing>(`/api/files/list?${query({ profile, path })}`)
+export const fileText = (profile: string, path: string) => api<FileText>(`/api/files/text?${query({ profile, path })}`)
+/** A short-lived URL for media elements, which cannot send the X-Workbench header. */
+export const fileTicket = (profile: string, path: string) => api<{ url: string }>('/api/files/ticket', { body: { profile, path } })
+export const fileOp = <T extends FileOpResult = FileOpResult>(profile: string, op: FileOp) =>
+  api<T>('/api/files/op', { body: { profile, op } })
+export const openFile = (profile: string, path: string) => api('/api/files/open', { body: { profile, path } })
 
 /** Images in notes go through fetch, because an <img> cannot send the X-Workbench header. */
 export async function noteImage(profile: string, path: string): Promise<Blob> {
