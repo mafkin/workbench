@@ -216,3 +216,68 @@ export function joinNotes(root: string, rel: string): string {
   const clean = rel.replace(/^\/+/, '').replace(/\/+$/, '')
   return clean ? `${root.replace(/\/+$/, '')}/${clean}` : root
 }
+
+// File browser (part 3)
+
+/**
+ * Folders the file browser may open, as written in the config: home, the notes
+ * folder and every folder entry. The service resolves and enforces them; the UI
+ * shows them as chips.
+ */
+export function folderRoots(profile: Profile): { label: string; path: string }[] {
+  const out: { label: string; path: string }[] = []
+  if (profile.home) out.push({ label: 'Home', path: profile.home })
+  if (profile.notes) out.push({ label: 'Notes', path: profile.notes })
+  for (const section of profile.sections) {
+    for (const item of section.items) {
+      if (item.type === 'folder') out.push({ label: item.label, path: item.path })
+      if (item.type !== 'group') continue
+      for (const child of item.items) if (child.type === 'folder') out.push({ label: child.label, path: child.path })
+    }
+  }
+  return out
+}
+
+export interface FileEntry {
+  name: string
+  /** `~/…` form, like note paths. */
+  path: string
+  kind: 'dir' | 'file' | 'other'
+  /** A symlink; `kind` is what it points to. */
+  link: boolean
+  size: number
+  mtime: number
+  /** A dotfile. */
+  hidden: boolean
+  /** Excluded by .gitignore. */
+  ignored: boolean
+}
+
+export interface FileListing {
+  path: string
+  entries: FileEntry[]
+}
+
+export interface FileText {
+  text: string
+  /** Only the first 200 KB was read. */
+  truncated: boolean
+  binary: boolean
+  size: number
+}
+
+export const FileOp = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('rename'), path: z.string(), name: z.string() }),
+  z.object({ op: z.literal('mkdir'), dir: z.string(), name: z.string() }),
+  z.object({ op: z.literal('touch'), dir: z.string(), name: z.string() }),
+  z.object({ op: z.literal('move'), paths: z.array(z.string()).min(1), to: z.string() }),
+  z.object({ op: z.literal('trash'), paths: z.array(z.string()).min(1) }),
+])
+export type FileOp = z.output<typeof FileOp>
+
+export interface MoveResult {
+  moved: { from: string; to: string }[]
+  skipped: { path: string; reason: string }[]
+}
+
+export type FileOpResult = { path: string } | MoveResult | { trashed: string[] }

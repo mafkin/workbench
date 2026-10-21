@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
 import Fastify from 'fastify'
 import { z } from 'zod'
-import { expandHome, getItem, ItemAddr, Op } from '../shared/config-schema.ts'
+import { expandHome, FileOp, getItem, ItemAddr, Op } from '../shared/config-schema.ts'
 import { describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
+import { Files, type FilesEvent } from './files.ts'
 import { makeGuard } from './guard.ts'
 import { LaunchError, openItem } from './launch.ts'
 import { Notes, type NoteEvent } from './notes.ts'
@@ -32,10 +33,11 @@ const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
 const RevBody = z.object({ rev: z.string() })
 const ActiveBody = z.object({ profile: z.string() })
 const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr })
-const NoteQuery = z.object({ profile: z.string(), path: z.string() })
+const PathQuery = z.object({ profile: z.string(), path: z.string() })
 const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string().nullable(), text: z.string() })
 const ProfileQuery = z.object({ profile: z.string() })
 const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
+const FileOpBody = z.object({ profile: z.string(), op: FileOp })
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body)
@@ -55,6 +57,7 @@ export async function buildServer(opts: ServerOptions) {
   await store.init({ watch: opts.watch ?? true })
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
+  const files = new Files(store, home, { spawn: opts.spawn })
   const state = () => ({ ...store.state(), home })
 
   const app = Fastify({ logger: false })
@@ -67,6 +70,7 @@ export async function buildServer(opts: ServerOptions) {
   app.addHook('onClose', async () => {
     store.close()
     notes.close()
+    files.close()
   })
 
   app.setErrorHandler((err, _req, reply) => {
@@ -117,7 +121,7 @@ export async function buildServer(opts: ServerOptions) {
 
   // Notes: paths are checked against the profile's notes folder and note entries (see notes.ts).
   app.get('/api/notes/file', async (req) => {
-    const { profile, path: p } = parse(NoteQuery, req.query)
+    const { profile, path: p } = parse(PathQuery, req.query)
     return notes.read(profile, p)
   })
 
@@ -135,7 +139,7 @@ export async function buildServer(opts: ServerOptions) {
   })
 
   app.get('/api/notes/asset', async (req, reply) => {
-    const { profile, path: p } = parse(NoteQuery, req.query)
+    const { profile, path: p } = parse(PathQuery, req.query)
     const image = await notes.asset(profile, p)
     return reply
       .header('content-type', image.type)
@@ -146,7 +150,44 @@ export async function buildServer(opts: ServerOptions) {
       .send(fs.createReadStream(image.real))
   })
 
-  // Server-sent events: the full state after every change, and changes to open notes.
+  // Files: paths are confined to the profile's folders (see files.ts and paths.ts).
+  app.get('/api/files/list', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    return files.list(profile, p)
+  })
+
+  app.get('/api/files/text', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    return files.text(profile, p)
+  })
+
+  app.post('/api/files/ticket', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.body)
+    return files.ticket(profile, p)
+  })
+
+  app.post('/api/files/op', async (req) => {
+    const { profile, op } = parse(FileOpBody, req.body)
+    return files.op(profile, op)
+  })
+
+  app.post('/api/files/open', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.body)
+    await files.open(profile, p)
+    return { ok: true }
+  })
+
+  // Media for previews. <video>, <audio> and the PDF viewer cannot send X-Workbench,
+  // so they use a ticket the app asked for with it; the Host and Origin checks still apply.
+  app.get<{ Params: { token: string } }>('/raw/:token/:name', (req, reply) => {
+    const file = files.raw(req.params.token)
+    if (!file) return reply.code(404).send({ error: 'Not found' })
+    reply.header('content-type', file.type).header('x-content-type-options', 'nosniff').header('cache-control', 'no-store')
+    if (file.type === 'image/svg+xml') reply.header('content-security-policy', 'sandbox')
+    return reply.sendFile(path.basename(file.real), path.dirname(file.real), { dotfiles: 'allow', acceptRanges: true })
+  })
+
+  // Server-sent events: the full state after every change, changes to open notes, and to listed folders.
   app.get('/api/events', (req, reply) => {
     reply.hijack()
     const res = reply.raw
@@ -157,27 +198,32 @@ export async function buildServer(opts: ServerOptions) {
     })
     const send = () => res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`)
     const sendNote = (e: NoteEvent) => res.write(`event: note\ndata: ${JSON.stringify(e)}\n\n`)
+    const sendFiles = (e: FilesEvent) => res.write(`event: files\ndata: ${JSON.stringify(e)}\n\n`)
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000)
     store.on('change', send)
     notes.on('note', sendNote)
+    files.on('files', sendFiles)
     send()
     req.raw.on('close', () => {
       clearInterval(ping)
       store.off('change', send)
       notes.off('note', sendNote)
+      files.off('files', sendFiles)
     })
   })
 
   const distDir = opts.distDir === undefined ? path.join(ROOT, 'dist') : opts.distDir
-  if (distDir && fs.existsSync(path.join(distDir, 'index.html'))) {
-    await app.register(fastifyStatic, { root: distDir })
+  const serveUi = !!distDir && fs.existsSync(path.join(distDir, 'index.html'))
+  // Registered even without a UI to serve: /raw uses reply.sendFile, which handles Range requests.
+  await app.register(fastifyStatic, serveUi ? { root: distDir } : { root: ROOT, serve: false })
+  if (serveUi) {
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html')
       return reply.code(404).send({ error: 'Not found' })
     })
   }
 
-  return { app, store, notes }
+  return { app, store, notes, files }
 }
 
 if (import.meta.main) {

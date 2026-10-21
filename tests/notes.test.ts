@@ -317,6 +317,56 @@ describe('saves are reported', () => {
   })
 })
 
+describe('Markdown in the file browser’s folders', () => {
+  const BROWSE = `name: Browse
+home: ~/workhome
+sections:
+  - title: Projects
+    items:
+      - { label: Proj, type: folder, path: ~/proj }
+`
+  let browseStore: ConfigStore
+  let browse: Notes
+
+  beforeEach(async () => {
+    await fsp.writeFile(path.join(dir, 'cfg/profiles/browse.yaml'), BROWSE)
+    await write('proj/docs/Guide.md', '# Guide\n')
+    await write('proj/data.txt', 'data\n')
+    await write('proj/pic.png', 'PNG')
+    await write('workhome/todo.md', '- a\n')
+    browseStore = new ConfigStore(path.join(dir, 'cfg'))
+    await browseStore.init({ watch: false })
+    browse = new Notes(browseStore, home)
+  })
+
+  afterEach(() => {
+    browse.close()
+    browseStore.close()
+  })
+
+  it('opens and saves .md anywhere in home and folder entries', async () => {
+    const note = await browse.read('browse', '~/proj/docs/Guide.md')
+    await browse.write('browse', '~/proj/docs/Guide.md', note.rev, '# Guide v2\n')
+    expect(await fsp.readFile(path.join(home, 'proj/docs/Guide.md'), 'utf8')).toBe('# Guide v2\n')
+    expect((await browse.read('browse', '~/workhome/todo.md')).text).toBe('- a\n')
+  })
+
+  it('still refuses other files there, and Markdown elsewhere', async () => {
+    expect(await status(browse.read('browse', '~/proj/data.txt'))).toBe(403)
+    expect(await status(browse.read('browse', '~/secret.md'))).toBe(403)
+    await fsp.symlink(path.join(home, 'secret.md'), path.join(home, 'proj/out.md'))
+    expect(await status(browse.read('browse', '~/proj/out.md'))).toBe(403)
+  })
+
+  it('serves images inside folder entries', async () => {
+    expect(await browse.asset('browse', '~/proj/pic.png')).toMatchObject({ type: 'image/png' })
+  })
+
+  it('keeps list and search to the notes folder and note entries', async () => {
+    expect(await browse.list('browse')).toEqual([])
+  })
+})
+
 describe('HTTP routes', () => {
   let server: Awaited<ReturnType<typeof buildServer>>
   const headers = { host: '127.0.0.1:7420', 'x-workbench': '1' }

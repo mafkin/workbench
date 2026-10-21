@@ -1,14 +1,13 @@
-// Notes: Markdown files the UI reads and writes. Every path is checked against
-// the profile's notes folder and its note entries after resolving symlinks, so
-// the service never touches any other file. Saves carry the rev they started
-// from, like profile edits, and a hand edit to an open note is reported live.
+// Notes: Markdown files the UI reads and writes. Every path is checked, after
+// resolving symlinks, against the profile's folders (home, notes folder, folder
+// entries) and its note entries, so the service never touches any other file.
+// Saves carry the rev they started from, like profile edits, and a hand edit to
+// an open note is reported live.
 import { EventEmitter } from 'node:events'
-import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import {
   displayPath,
-  expandHome,
   NOTE_EXT,
   type NavItem,
   type NoteFile,
@@ -19,6 +18,8 @@ import {
 } from '../shared/config-schema.ts'
 import { StoreError, type ConfigStore } from './config-store.ts'
 import { revOf, writeAtomic } from './fs-util.ts'
+import { absPath, browseRoots, inside, realish } from './paths.ts'
+import { FolderWatcher } from './watch.ts'
 
 const MAX_NOTE = 2 * 1024 * 1024
 const MAX_IMAGE = 20 * 1024 * 1024
@@ -56,31 +57,7 @@ interface Found extends NoteSummary {
   real: string
 }
 
-const inside = (child: string, parent: string) => {
-  const rel = path.relative(parent, child)
-  return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
-}
-
 const baseName = (file: string) => path.parse(file).name
-
-/** realpath of the longest existing prefix plus the rest; a dangling symlink is refused. */
-async function realish(p: string): Promise<string> {
-  const rest: string[] = []
-  let cur = p
-  for (;;) {
-    try {
-      return path.join(await fsp.realpath(cur), ...rest.reverse())
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err
-      if ((await fsp.lstat(cur).catch(() => null))?.isSymbolicLink()) throw new StoreError('Not allowed: broken symlink', 403)
-      const parent = path.dirname(cur)
-      if (parent === cur) return p
-      rest.push(path.basename(cur))
-      cur = parent
-    }
-  }
-}
 
 function noteEntries(profile: Profile): string[] {
   const out: string[] = []
@@ -126,11 +103,19 @@ export class Notes extends EventEmitter {
   readonly home: string
   #store: ConfigStore
   #queues = new Map<string, Promise<unknown>>()
-  /** Watched folders, oldest first. */
-  #watchers = new Map<string, fs.FSWatcher>()
   /** Real path of each opened note -> the `~` paths it was opened as, and its last known rev. */
   #open = new Map<string, { paths: Set<string>; rev: string | null }>()
   #timers = new Map<string, NodeJS.Timeout>()
+  // The folders of opened notes: editors and our own saves replace the file itself.
+  #folders = new FolderWatcher(MAX_WATCHED, {
+    change: (dir, name) => this.#changed(path.join(dir, name)),
+    replaced: (dir) => {
+      for (const file of this.#open.keys()) if (path.dirname(file) === dir) this.#changed(file)
+    },
+    dropped: (dir) => {
+      for (const file of this.#open.keys()) if (path.dirname(file) === dir) this.#open.delete(file)
+    },
+  })
 
   constructor(store: ConfigStore, home: string) {
     super()
@@ -139,9 +124,8 @@ export class Notes extends EventEmitter {
   }
 
   close() {
-    for (const w of this.#watchers.values()) w.close()
+    this.#folders.close()
     for (const t of this.#timers.values()) clearTimeout(t)
-    this.#watchers.clear()
     this.#timers.clear()
   }
 
@@ -211,7 +195,7 @@ export class Notes extends EventEmitter {
     return hits.sort((a, b) => Number(b.title) - Number(a.title)).slice(0, MAX_HITS)
   }
 
-  /** An image in the notes folder or next to a note entry, for rendering in a note. */
+  /** An image in the profile's folders or next to a note entry, for rendering in a note. */
   async asset(id: string, raw: string): Promise<{ real: string; type: string; size: number }> {
     const { real } = await this.#resolve(id, raw, 'image')
     const stat = await fsp.stat(real).catch(() => null)
@@ -226,24 +210,16 @@ export class Notes extends EventEmitter {
     return p.profile
   }
 
-  #abs(raw: string): string {
-    const value = raw.trim()
-    if (!value) throw new StoreError('path is required', 400)
-    const expanded = expandHome(value, this.home)
-    if (!path.isAbsolute(expanded)) throw new StoreError('Path must start with ~ or /', 400)
-    return path.resolve(expanded)
-  }
-
   async #roots(profile: Profile): Promise<Roots> {
     let root: Roots['root'] = null
     if (profile.notes) {
-      const lexical = this.#abs(profile.notes)
+      const lexical = absPath(profile.notes, this.home)
       root = { lexical, real: await realish(lexical) }
     }
     const entries = new Map<string, string>()
     for (const p of noteEntries(profile)) {
       try {
-        const lexical = this.#abs(p)
+        const lexical = absPath(p, this.home)
         const real = await realish(lexical)
         if (!entries.has(real)) entries.set(real, displayPath(lexical, this.home))
       } catch {
@@ -253,16 +229,17 @@ export class Notes extends EventEmitter {
     return { root, entries }
   }
 
+  /** Markdown (or an image) in the profile's folders, the file of a note entry, or an image next to one. */
   async #resolve(id: string, raw: string, kind: 'note' | 'image'): Promise<{ real: string; display: string }> {
     const profile = this.#profile(id)
-    const lexical = this.#abs(raw)
+    const lexical = absPath(raw, this.home)
     const real = await realish(lexical)
-    const { root, entries } = await this.#roots(profile)
-    const inRoot = !!root && inside(real, root.real)
+    const { entries } = await this.#roots(profile)
+    const inFolders = (await browseRoots(profile, this.home)).some((r) => inside(real, r.real))
     const ok =
       kind === 'note'
-        ? (inRoot && NOTE_EXT.test(real)) || entries.has(real)
-        : !!IMAGE_TYPES[path.extname(real).toLowerCase()] && (inRoot || [...entries.keys()].some((e) => inside(real, path.dirname(e))))
+        ? (inFolders && NOTE_EXT.test(real)) || entries.has(real)
+        : !!IMAGE_TYPES[path.extname(real).toLowerCase()] && (inFolders || [...entries.keys()].some((e) => inside(real, path.dirname(e))))
     if (!ok) throw new StoreError(kind === 'note' ? 'Not a note in this profile' : 'Not an image next to a note in this profile', 403)
     return { real, display: displayPath(lexical, this.home) }
   }
@@ -310,58 +287,11 @@ export class Notes extends EventEmitter {
     return run
   }
 
-  /** Watch the note's folder, not the file: editors and our own saves replace the file. */
   #watch(real: string, display: string) {
     const open = this.#open.get(real)
     if (open) open.paths.add(display)
     else this.#open.set(real, { paths: new Set([display]), rev: null })
-    const dir = path.dirname(real)
-    const existing = this.#watchers.get(dir)
-    if (existing) {
-      this.#watchers.delete(dir)
-      this.#watchers.set(dir, existing)
-      return
-    }
-    let watcher: fs.FSWatcher
-    try {
-      watcher = fs.watch(dir, (_event, name) => {
-        if (!name) return
-        if (name === path.basename(dir)) this.#replaced(dir)
-        else this.#changed(path.join(dir, name))
-      })
-    } catch {
-      return // The folder does not exist yet.
-    }
-    watcher.on('error', () => this.#unwatch(dir))
-    this.#watchers.set(dir, watcher)
-    if (this.#watchers.size > MAX_WATCHED) this.#unwatch(this.#watchers.keys().next().value!)
-  }
-
-  /**
-   * The watched folder itself was deleted or moved, and its watch has gone
-   * quiet without an error. Watch it again once it is back, and look at its open notes.
-   */
-  #replaced(dir: string) {
-    this.#watchers.get(dir)?.close()
-    this.#watchers.delete(dir)
-    clearTimeout(this.#timers.get(dir))
-    this.#timers.set(
-      dir,
-      setTimeout(() => {
-        this.#timers.delete(dir)
-        for (const [file, open] of this.#open) {
-          if (path.dirname(file) !== dir) continue
-          for (const p of open.paths) this.#watch(file, p)
-          this.#changed(file)
-        }
-      }, 200),
-    )
-  }
-
-  #unwatch(dir: string) {
-    this.#watchers.get(dir)?.close()
-    this.#watchers.delete(dir)
-    for (const file of this.#open.keys()) if (path.dirname(file) === dir) this.#open.delete(file)
+    this.#folders.watch(path.dirname(real))
   }
 
   #changed(file: string) {
