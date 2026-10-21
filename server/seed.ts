@@ -5,7 +5,7 @@ import path from 'node:path'
 
 const HEADER = `# Edit this file by hand or in Workbench (pencil at the top of the nav panel).
 # Your comments are kept when the app saves.
-# Entry types: folder, note, daily, project, link, launch, and group (one level of entries inside).
+# Entry types: folder (a project), note, daily, link, launch, and group (one level of entries inside).
 # notes: is the folder for new notes, daily notes, search and [[wiki links]].
 `
 
