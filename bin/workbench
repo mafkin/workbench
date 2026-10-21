@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Start the Workbench service if it is not running, then open the app window.
+#   bin/workbench              service + window
+#   bin/workbench --no-window  service only
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+PORT="${WORKBENCH_PORT:-7420}"
+URL="http://127.0.0.1:${PORT}/"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/workbench"
+
+up() { curl -fsS -m 1 -H 'X-Workbench: 1' "${URL}api/health" >/dev/null 2>&1; }
+
+if ! up; then
+  mkdir -p "$STATE_DIR"
+  if [ ! -f "$ROOT/dist/index.html" ]; then
+    (cd "$ROOT" && npx vite build --logLevel warn) >>"$STATE_DIR/build.log" 2>&1
+  fi
+  nohup node "$ROOT/server/main.ts" --port "$PORT" >>"$STATE_DIR/server.log" 2>&1 &
+  for _ in $(seq 50); do up && break; sleep 0.1; done
+  if ! up; then
+    msg="The service did not start; see $STATE_DIR/server.log"
+    notify-send Workbench "$msg" 2>/dev/null || true
+    echo "$msg" >&2
+    exit 1
+  fi
+fi
+
+[ "${1:-}" = "--no-window" ] && exit 0
+
+# A GNOME Web app installed for this address gives a window without browser chrome.
+for dir in "$HOME/.local/share/applications" "$HOME/.local/share/xdg-desktop-portal/applications"; do
+  for f in "$dir"/org.gnome.Epiphany.WebApp_*.desktop; do
+    if [ -f "$f" ] && grep -q "127.0.0.1:${PORT}" "$f"; then
+      exec gtk-launch "$(basename "$f" .desktop)"
+    fi
+  done
+done
+exec xdg-open "$URL"
