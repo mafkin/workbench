@@ -30,12 +30,15 @@ import {
 import { agentArgs, claudeAgents } from './agents.ts'
 import { Backgrounds } from './backgrounds.ts'
 import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
+import { frontmatter, readSetup } from './claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { makeGuard } from './guard.ts'
 import { LaunchError, openItem } from './launch.ts'
+import { maskText } from './mask.ts'
+import { checkServer } from './mcp-check.ts'
 import { Notes, type NoteEvent } from './notes.ts'
 import { absPath, browseRoots, realish, within } from './paths.ts'
 
@@ -57,6 +60,10 @@ export interface ServerOptions {
   chatCommands?: Partial<ChatCommands>
   /** How quickly a chat that went quiet after working needs you (tests). */
   chatTiming?: { quietMs: number; busyMs: number }
+  /** Claude's managed settings, `/etc/claude-code` (tests point elsewhere). */
+  managedDir?: string
+  /** How long an MCP check waits for a server. */
+  mcpTimeoutMs?: number
 }
 
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
@@ -89,6 +96,9 @@ const ChatPatch = z.object({
   pinned: z.boolean().optional(),
 })
 const ChatRestart = z.object({ fresh: z.boolean().default(false) })
+const SetupQuery = z.object({ profile: z.string(), path: z.string().optional() })
+const DocQuery = SetupQuery.extend({ id: z.string() })
+const CheckBody = SetupQuery.extend({ id: z.string(), confirm: z.boolean().optional() })
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body)
@@ -386,6 +396,43 @@ export async function buildServer(opts: ServerOptions) {
     const p = store.profile(id)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
     return sessionsIn(await chatFolder(p.profile, raw, true), home)
+  })
+
+  // Claude setup: what claude loads, for everywhere or for a folder of the
+  // profile. Read-only and masked; a check names a server by id and the command
+  // comes from the config files, read again, never from the request.
+  async function setupFor(id: string, raw: string | undefined) {
+    const p = store.profile(id)
+    if (!p.profile) throw new StoreError('The profile file is broken', 423)
+    const folder = raw ? await chatFolder(p.profile, raw, true) : null
+    return { folder, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
+  }
+
+  app.get('/api/claude/setup', async (req) => {
+    const q = parse(SetupQuery, req.query)
+    return (await setupFor(q.profile, q.path)).read.setup
+  })
+
+  app.get('/api/claude/doc', async (req) => {
+    const q = parse(DocQuery, req.query)
+    const file = (await setupFor(q.profile, q.path)).read.files.get(q.id)
+    if (!file) throw new StoreError('Not one of the listed skills, agents or commands', 404)
+    const text = await fs.promises.readFile(file, 'utf8').catch(() => {
+      throw new StoreError('Cannot read it', 404)
+    })
+    const { body } = frontmatter(text)
+    return { body: maskText(body.length > 200_000 ? `${body.slice(0, 200_000)}\n\n…` : body) }
+  })
+
+  app.post('/api/claude/check', async (req) => {
+    const b = parse(CheckBody, req.body)
+    const { folder, read } = await setupFor(b.profile, b.path)
+    const server = read.servers.get(b.id)
+    if (!server) throw new StoreError('No such MCP server here', 404)
+    const { entry } = server
+    if (entry.uncheckable) throw new StoreError(entry.uncheckable, 422)
+    if (entry.confirm && !b.confirm) throw new StoreError(`${entry.name} is not approved in claude yet; checking runs it`, 409, { confirm: true })
+    return checkServer({ transport: entry.transport, config: server.config, pluginRoot: server.pluginRoot }, { cwd: folder ?? home, timeoutMs: opts.mcpTimeoutMs })
   })
 
   // A chat's terminal. Frames to the view: `r` + the whole screen, `o` + output.

@@ -4,6 +4,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expandHome, type AgentProfile } from '../shared/config-schema.ts'
 import { claudeDir } from './claude-sessions.ts'
+import { frontmatter } from './claude-setup.ts'
 
 export interface AgentStart {
   args: string[]
@@ -46,9 +47,8 @@ async function agentNames(dir: string): Promise<string[]> {
   const out: string[] = []
   for (const f of files) {
     const text = await fsp.readFile(path.join(dir, f), 'utf8').catch(() => '')
-    const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? ''
-    const name = /^name:\s*["']?([^"'\r\n]+?)["']?\s*$/m.exec(front)?.[1]
-    out.push(name ?? path.basename(f, '.md'))
+    const name = frontmatter(text).data.name
+    out.push(typeof name === 'string' && name.trim() ? name.trim() : path.basename(f, '.md'))
   }
   return out
 }
