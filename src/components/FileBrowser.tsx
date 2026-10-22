@@ -15,12 +15,10 @@ import {
   FolderPlus,
   ListFilter,
   PencilLine,
-  Sparkles,
-  SquareTerminal,
   Trash2,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { expandHome, type Agent, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
+import { expandHome, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { PATHS_TYPE } from '../lib/chats.ts'
 import { onFilesEvent } from '../lib/events.ts'
@@ -49,8 +47,8 @@ interface Props {
   /** Make another folder the top: the path bar, or opening a subfolder. */
   onNavigate: (path: string) => void
   toast: (t: ToastInput) => void
-  /** In a project: start claude or the shell in a folder (Chat here, Shell here). */
-  onChat?: (dir: string, agent: Agent) => void
+  /** In a project: menu entries to start a chat in a folder (Chat here, Chat here as…, Shell here). */
+  chatMenu?: (dir: string) => MenuEntry[]
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -64,7 +62,7 @@ function sorted(entries: FileEntry[], key: SortKey, dir: 1 | -1): FileEntry[] {
 }
 
 /** The toolbar, tree and preview; the page around it supplies the heading. */
-export function FileBrowser({ top, roots, home, onNavigate, toast, onChat }: Props) {
+export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: Props) {
   const notes = useNotes()
   const profile = notes.profile
   const [listings, setListings] = useState<Record<string, Listing>>({})
@@ -356,13 +354,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, onChat }: Pro
     },
   })
 
-  const chatEntries = (dir: string): MenuEntry[] =>
-    onChat
-      ? [
-          { label: 'Chat here', icon: <Sparkles size={14} />, run: () => onChat(dir, 'claude') },
-          { label: 'Shell here', icon: <SquareTerminal size={14} />, run: () => onChat(dir, 'shell') },
-        ]
-      : []
+  const chatEntries = (dir: string): MenuEntry[] => chatMenu?.(dir) ?? []
 
   function rowMenu(e: React.MouseEvent, entry: FileEntry) {
     e.preventDefault()

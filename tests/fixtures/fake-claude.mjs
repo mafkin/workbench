@@ -12,8 +12,15 @@ const flag = (name) => {
   const i = argv.indexOf(name)
   return i >= 0 ? argv[i + 1] : undefined
 }
-const VALUED = new Set(['--session-id', '--resume', '-r', '--model', '--add-dir', '-n', '--name'])
-const positional = argv.filter((a, i) => !a.startsWith('-') && !VALUED.has(argv[i - 1]))
+// Flags that take one value, and lists that take every word up to the next flag.
+const VALUED = new Set(['--session-id', '--resume', '-r', '--model', '-n', '--name', '--agent', '--effort', '--permission-mode', '--append-system-prompt'])
+const LISTS = new Set(['--add-dir', '--allowedTools', '--disallowedTools', '--mcp-config'])
+const positional = []
+for (let i = 0; i < argv.length; i++) {
+  if (VALUED.has(argv[i])) i++
+  else if (LISTS.has(argv[i])) while (argv[i + 1] !== undefined && !argv[i + 1].startsWith('-')) i++
+  else if (!argv[i].startsWith('-')) positional.push(argv[i])
+}
 const resume = flag('--resume')
 const session = resume ?? flag('--session-id') ?? 'none'
 const cwd = process.cwd()

@@ -2,6 +2,7 @@ import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search
 import { useRef, useState } from 'react'
 import {
   chatName,
+  chatProgram,
   entrySlot,
   folderRoots,
   getItem,
@@ -453,7 +454,7 @@ function ChatEntry({ addr, item, kicker }: { addr: ItemAddr; item: Extract<NavIt
       kicker={`${kicker} · ${TYPE_LABEL.chat}`}
       title={
         <>
-          <EntryIcon type="chat" agent={item.agent} icon={item.icon} size={22} />
+          <EntryIcon type="chat" agent={chatProgram(item.agent)} icon={item.icon} size={22} />
           {item.label}
         </>
       }

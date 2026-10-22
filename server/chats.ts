@@ -47,6 +47,11 @@ export interface ChatSpec {
   prompt?: string
   label?: string | null
   color?: string | null
+  /** The agent profile its flags (in `args`) came from. */
+  agentProfile?: string | null
+  bypass?: boolean
+  /** The agent profile's first prompt: sent on a new session, not on a resume. */
+  firstPrompt?: string
 }
 
 /** Receives frames for one view: `r` + the whole screen (reset), `o` + output. */
@@ -73,12 +78,13 @@ interface Live {
 
 interface Meta {
   args: string[]
+  firstPrompt?: string
   dir: string
   cols: number
   rows: number
 }
 
-type Saved = Omit<Chat, 'state' | 'exitCode' | 'attention'> & { args: string[]; dir: string }
+type Saved = Omit<Chat, 'state' | 'exitCode' | 'attention'> & { args: string[]; firstPrompt?: string; dir: string }
 
 const HANDOFF_PROMPT =
   'Write a handoff summary of this conversation for a fresh session that will continue the work: the goal, ' +
@@ -137,6 +143,7 @@ export class Chats extends EventEmitter {
   #handing = new Set<string>()
   #emitting = new Set<string>()
   #saveTimer?: ReturnType<typeof setTimeout>
+  #saving: Promise<void> = Promise.resolve()
 
   constructor(opts: ChatsOptions) {
     super()
@@ -157,9 +164,16 @@ export class Chats extends EventEmitter {
     }
     for (const s of saved) {
       if (typeof s?.id !== 'string' || typeof s.dir !== 'string') continue
-      const { args, dir, ...chat } = s
-      this.#chats.set(s.id, { ...chat, state: 'stopped', exitCode: null, attention: false })
-      this.#meta.set(s.id, { args: Array.isArray(args) ? args.map(String) : [], dir, cols: 100, rows: 30 })
+      const { args, dir, firstPrompt, ...chat } = s
+      // Lists saved before agent profiles have no agentProfile or bypass.
+      this.#chats.set(s.id, { ...chat, agentProfile: chat.agentProfile ?? null, bypass: chat.bypass ?? false, state: 'stopped', exitCode: null, attention: false })
+      this.#meta.set(s.id, {
+        args: Array.isArray(args) ? args.map(String) : [],
+        firstPrompt: typeof firstPrompt === 'string' ? firstPrompt : undefined,
+        dir,
+        cols: 100,
+        rows: 30,
+      })
     }
   }
 
@@ -185,6 +199,8 @@ export class Chats extends EventEmitter {
       host: spec.host,
       slot: spec.slot,
       agent: spec.agent,
+      agentProfile: spec.agentProfile ?? null,
+      bypass: spec.bypass ?? false,
       cwd: displayPath(spec.cwd, this.#home),
       label: spec.label ?? null,
       title: null,
@@ -197,9 +213,10 @@ export class Chats extends EventEmitter {
       messages: 0,
       createdAt: Date.now(),
     }
-    this.#meta.set(id, { args: spec.args, dir: spec.cwd, cols: 100, rows: 30 })
+    this.#meta.set(id, { args: spec.args, firstPrompt: spec.firstPrompt, dir: spec.cwd, cols: 100, rows: 30 })
     try {
-      await this.#spawn(chat, { resume: !!spec.resume, prompt: spec.prompt })
+      // A resumed session goes on where it was; a new one gets the profile's first prompt.
+      await this.#spawn(chat, { resume: !!spec.resume, prompt: spec.resume ? undefined : (spec.prompt ?? spec.firstPrompt) })
     } catch (err) {
       this.#meta.delete(id)
       throw err
@@ -215,16 +232,18 @@ export class Chats extends EventEmitter {
     const chat = this.#need(id)
     if (chat.state === 'running') throw new StoreError('This chat is running', 409)
     let resume = false
+    let prompt: string | undefined
     if (chat.agent === 'claude') {
       if (fresh || !chat.session) {
         chat.session = randomUUID()
         chat.messages = 0
+        prompt = this.#meta.get(id)!.firstPrompt
       } else {
         // A session nobody typed in has no transcript, and claude cannot resume it.
         resume = fs.existsSync(sessionFile(this.#home, this.#meta.get(id)!.dir, chat.session))
       }
     }
-    await this.#spawn(chat, { resume })
+    await this.#spawn(chat, { resume, prompt })
     this.#changed(chat)
     if (resume) void this.#count(chat)
     return { ...chat }
@@ -345,6 +364,9 @@ export class Chats extends EventEmitter {
         prompt: `Continue from this handoff of an earlier session (${chat.session}):\n\n${summary}`,
         label: chat.label,
         color: chat.color,
+        agentProfile: chat.agentProfile,
+        bypass: chat.bypass,
+        firstPrompt: meta.firstPrompt,
       })
       if (chat.slot) await this.close(id)
       return next
@@ -496,10 +518,11 @@ export class Chats extends EventEmitter {
     void this.#count(chat)
   }
 
+  // Runs in the background (`void`), so it must never reject.
   async #count(chat: Chat) {
     const meta = this.#meta.get(chat.id)
     if (chat.agent !== 'claude' || !chat.session || !meta) return
-    const n = await countPrompts(sessionFile(this.#home, meta.dir, chat.session))
+    const n = await countPrompts(sessionFile(this.#home, meta.dir, chat.session)).catch(() => chat.messages)
     if (n === chat.messages || !this.#chats.has(chat.id)) return
     chat.messages = n
     this.#changed(chat)
@@ -529,10 +552,17 @@ export class Chats extends EventEmitter {
     })
   }
 
-  async #save() {
+  /** Saves run one after another: two at once would share the temp file. Each writes the list as it is then. */
+  #save(): Promise<void> {
+    const run = this.#saving.then(() => this.#write())
+    this.#saving = run.catch(() => {})
+    return run
+  }
+
+  async #write() {
     const chats: Saved[] = [...this.#chats.values()].map(({ state: _s, exitCode: _e, attention: _a, ...c }) => {
       const meta = this.#meta.get(c.id)!
-      return { ...c, args: meta.args, dir: meta.dir }
+      return { ...c, args: meta.args, firstPrompt: meta.firstPrompt, dir: meta.dir }
     })
     await fsp.mkdir(path.dirname(this.#file), { recursive: true, mode: 0o700 })
     await writeAtomic(this.#file, `${JSON.stringify({ chats }, null, 2)}\n`, 0o600)

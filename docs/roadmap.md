@@ -38,6 +38,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 3½ | Workflow steps, no repeated nav | Done (same branch); see below |
 | 4 | Project cards | Done (same branch) |
 | 5 | Agent chats | Done (same branch) |
+| 5½ | Agent profiles | Done (same branch); see below |
 | 6 | Skills & MCP panel | Next in the suggested order |
 | 7 | Context folders | |
 | 8 | Polish | |
@@ -172,6 +173,23 @@ Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the en
   - `/api/chats` routes by address, the `/pty/:id` socket with a per-start token in `Sec-WebSocket-Protocol`, guarded in `preValidation`.
   - `ChatPane`, the lazy `ChatTerminal`, chat tabs, New chat and History in `ProjectView`, Chat here in the browser, the chat entry page, Other chats on Home, nav marks, notifications.
 - **Left for later:** following `/clear` or `/resume` inside a chat (the tab resumes the session it started with); keeping a running chat when its step is renamed; switching tabs while dragging over them.
+
+### After part 5: agent profiles (done)
+
+The user asked for "agent profiles I can prepare and choose when initiating sessions inside projects or specific folders".
+
+| Question | Answer |
+| --- | --- |
+| What a profile sets | Model and effort, permission mode, instructions (and a first prompt), folders, tools and MCP. "Model and effort can be bypassed if an orchestrator agent is being used" |
+| Orchestrator | A profile can name a Claude Code agent (`--agent`); then model and effort are left to it |
+| Editing | In the app, saved under `agents:` in the profile YAML |
+| Choosing | A menu by New chat (also Chat here as…, New chat as… in the nav) |
+| Defaults | A project names its default (`agent:` on the folder entry, set from a chip in the card); chat steps and entries name theirs |
+| Permissions | All modes; bypass warns in the editor and marks its chats with a shield |
+
+- **Built:** `AgentProfile` and `agents:` in the schema, `chatProgram`, `findAgent`, `agentSummary`; the `setAgent` op (rename updates references, a delete is refused while in use); `server/agents.ts` (`agentArgs`, `claudeAgents`); start-time resolution in `POST /api/chats` (request, else step or entry, else project default); `GET /api/chats/claude-agents`; `AgentProfilesDialog`, `agentEntries` menus, the agent chip, bypass marks.
+- **Fixed on the way:** a comment after `key:` whose value is a block map or list now stays on the key's line through app edits (`applyOps` gets the source text); saves of `chats.json` are serialized (two at once collided on the temp file); `countPrompts` never rejects.
+- **Left for later:** a chat started with a profile keeps its flags when the profile changes (by design); no per-folder rules (a profile can't claim `~/Projects/games/**`).
 
 ### Part 6: Skills & MCP panel
 

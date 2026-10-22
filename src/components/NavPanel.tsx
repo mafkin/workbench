@@ -15,7 +15,7 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from '@dnd-kit/utilities'
 import { ArrowUpRight, ChevronDown, FilePlus, GripVertical, Pencil, Pin, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { entrySlot, itemKey, projectHost, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import { chatProgram, entrySlot, itemKey, projectHost, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import type { Connection } from '../lib/events.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx, describeTarget, opensExternally, sameList, type DialogState, type DragData, type DropData, type MenuEntry, type MenuState } from '../lib/nav.ts'
@@ -527,7 +527,7 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
           <GripVertical size={13} />
         </span>
       )}
-      <EntryIcon type={item.type} icon={item.icon} agent={item.type === 'chat' ? item.agent : undefined} />
+      <EntryIcon type={item.type} icon={item.icon} agent={item.type === 'chat' ? chatProgram(item.agent) : undefined} />
       <span className="label">{item.label}</span>
       {!ctx.editing && opensExternally(item) && <ArrowUpRight size={12} className="kind" />}
       {!ctx.editing && <ChatMark item={item} />}

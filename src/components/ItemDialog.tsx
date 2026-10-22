@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ITEM_TYPES, NavItem, StepItem, STEP_TYPES, stepPath, type Agent, type AnyType, type ItemInput } from '../../shared/config-schema.ts'
+import { chatProgram, ITEM_TYPES, NavItem, StepItem, STEP_TYPES, stepPath, type AnyType, type ItemInput } from '../../shared/config-schema.ts'
 import { stat } from '../lib/api.ts'
 import { cx, type DialogState } from '../lib/nav.ts'
 import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
@@ -31,11 +31,13 @@ const PATH_TYPES: AnyType[] = ['folder', 'note', 'report', 'file']
 
 interface Props {
   dialog: Exclude<DialogState, { mode: 'note' }>
+  /** The profile's agent profiles, offered for a chat. */
+  agents: string[]
   onClose: () => void
   onSubmit: (item: ItemInput) => Promise<boolean>
 }
 
-export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
+export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
   const step = dialog.mode === 'step' ? dialog : null
   const initial = dialog.mode === 'edit' ? dialog.item : step?.item
   const adding = dialog.mode === 'add' || (step !== null && step.index === undefined)
@@ -50,7 +52,11 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
   const [url, setUrl] = useState(initial?.type === 'link' ? initial.url : '')
   const [command, setCommand] = useState(initial?.type === 'launch' ? initial.command : '')
   const [argsText, setArgsText] = useState(initial?.type === 'launch' || initial?.type === 'chat' ? initial.args.join('\n') : '')
-  const [agent, setAgent] = useState<Agent>(initial?.type === 'chat' ? (initial.agent ?? 'claude') : 'claude')
+  // claude, shell or an agent profile's name.
+  const [agent, setAgent] = useState<string>(initial?.type === 'chat' ? (initial.agent ?? 'claude') : 'claude')
+  const shell = chatProgram(agent) === 'shell'
+  // A name the file has but no agent profile matches still shows, so saving keeps it.
+  const agentChoices = ['claude', 'shell', ...agents, ...(['claude', 'shell', ...agents].includes(agent) ? [] : [agent])]
   const [cwd, setCwd] = useState(initial?.type === 'launch' ? (initial.cwd ?? '') : '')
   const [folder, setFolder] = useState(initial?.type === 'daily' ? (initial.folder ?? '') : '')
   const [template, setTemplate] = useState(initial?.type === 'daily' ? (initial.template ?? '') : '')
@@ -102,7 +108,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
         return {
           ...base,
           type,
-          agent: agent === 'shell' ? 'shell' : undefined,
+          agent: agent === 'claude' ? undefined : agent,
           path: path.trim() || undefined,
           args: argsText.split('\n').map((a) => a.trim()).filter(Boolean),
         }
@@ -226,14 +232,15 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
             <>
               <div className="field">
                 <span>Agent</span>
-                <div className="segmented" role="radiogroup" aria-label="Agent">
-                  {(['claude', 'shell'] as const).map((a) => (
+                <div className="segmented wrap" role="radiogroup" aria-label="Agent">
+                  {agentChoices.map((a) => (
                     <button key={a} type="button" role="radio" aria-checked={agent === a} className={cx(agent === a && 'active')} onClick={() => setAgent(a)}>
-                      <EntryIcon type="chat" agent={a} size={14} />
-                      {a === 'claude' ? 'Claude' : 'Shell'}
+                      <EntryIcon type="chat" agent={chatProgram(a)} size={14} />
+                      {a === 'claude' ? 'Claude' : a === 'shell' ? 'Shell' : a}
                     </button>
                   ))}
                 </div>
+                {agents.length === 0 && <span className="hint">Agent profiles you add (New chat ▾ › Agent profiles…) show up here.</span>}
               </div>
               <label className="field">
                 <span>Folder (optional)</span>
@@ -242,8 +249,8 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
               </label>
               <label className="field">
                 <span>Arguments (optional)</span>
-                <textarea value={argsText} onChange={(e) => setArgsText(e.target.value)} placeholder={agent === 'claude' ? '--model\nopus' : ''} name="args" />
-                <span className="hint">One per line, added to {agent === 'claude' ? 'claude' : 'the shell'}.</span>
+                <textarea value={argsText} onChange={(e) => setArgsText(e.target.value)} placeholder={shell ? '' : '--model\nopus'} name="args" />
+                <span className="hint">One per line, added to {shell ? 'the shell' : 'claude'}.</span>
               </label>
             </>
           )}
@@ -279,7 +286,7 @@ export function ItemDialog({ dialog, onClose, onSubmit }: Props) {
             <span>Icon (optional)</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ display: 'inline-grid', placeItems: 'center', width: 30 }}>
-                <EntryIcon type={type} icon={icon.trim()} agent={agent} size={16} />
+                <EntryIcon type={type} icon={icon.trim()} agent={chatProgram(agent)} size={16} />
               </span>
               <input className="mono" value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="lucide name, e.g. rocket" name="icon" />
             </div>

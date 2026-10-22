@@ -9,7 +9,6 @@ import {
   joinNotes,
   noteFileName,
   projectHost,
-  type Agent,
   type AppState,
   type Chat,
   type ItemAddr,
@@ -19,6 +18,8 @@ import {
   type NoteSummary,
   type Op,
 } from '../shared/config-schema.ts'
+import { agentEntries } from './components/AgentMenu.tsx'
+import { AgentProfilesDialog } from './components/AgentProfilesDialog.tsx'
 import { ConfirmDialog } from './components/ConfirmDialog.tsx'
 import { ContextMenu } from './components/ContextMenu.tsx'
 import { ItemDialog } from './components/ItemDialog.tsx'
@@ -58,6 +59,12 @@ export function App() {
   const [editing, setEditing] = useState(false)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  // Where the last nav menu opened, so a follow-up menu (New chat as…) opens there too.
+  const lastMenuAt = useRef({ x: 0, y: 0 })
+  const openMenu = useCallback((m: MenuState) => {
+    lastMenuAt.current = { x: m.x, y: m.y }
+    setMenu(m)
+  }, [])
   const [resizing, setResizing] = useState(false)
   const [selected, setSelected] = useLocal<Record<string, string | undefined>>('selected', {})
   const [collapsed, setCollapsed] = useLocal<Record<string, boolean>>('collapsed', {})
@@ -317,6 +324,8 @@ export function App() {
   // list, fetched again on each `chats` event.
   const [chatList, setChatList] = useState<{ profile: string; list: Chat[] } | null>(null)
   const [closing, setClosing] = useState<Chat | null>(null)
+  // The agent profile editor, with the folder whose Claude Code agents it suggests.
+  const [agentsFor, setAgentsFor] = useState<string | null>(null)
 
   const refreshChats = useCallback(() => {
     const id = activeRef.current?.id
@@ -424,13 +433,16 @@ export function App() {
       close: (chat) => (chat.state === 'running' ? setClosing(chat) : void closeChat(chat)),
       history: (path) => api.chatHistory(active.id, path).catch(() => []),
       open: openChat,
+      agents: active.profile?.agents ?? {},
+      editAgents: (folder) => setAgentsFor(folder ?? active.profile?.home ?? '~'),
     }
   }, [active, chatList, fail, upsertChat, openChat, closeChat])
   const chatsRef = useRef(chatsApi)
   chatsRef.current = chatsApi
 
+  /** A chat in a project: `agent` from a menu, or the project's default. */
   const newChatIn = useCallback(
-    async (addr: ItemAddr, agent: Agent) => {
+    async (addr: ItemAddr, agent?: string) => {
       const chat = await chatsRef.current?.start({ at: addr, agent })
       if (chat) openChat(chat)
     },
@@ -480,7 +492,25 @@ export function App() {
         const status = item.status ?? 'active'
         entries.push(
           { label: 'Open in Files', icon: <FolderOpen size={14} />, run: () => openExternally(addr, item) },
-          { label: 'New chat', icon: <Sparkles size={14} />, run: () => void newChatIn(addr, 'claude') },
+          { label: 'New chat', icon: <Sparkles size={14} />, run: () => void newChatIn(addr) },
+          ...(Object.keys(activeRef.current?.profile?.agents ?? {}).length
+            ? [
+                {
+                  label: 'New chat as…',
+                  icon: <Sparkles size={14} />,
+                  // A second menu where the first one was.
+                  run: () =>
+                    setMenu({
+                      ...lastMenuAt.current,
+                      entries: agentEntries(activeRef.current?.profile?.agents, {
+                        current: item.agent,
+                        run: (agent) => void newChatIn(addr, agent),
+                        edit: () => setAgentsFor(item.path),
+                      }),
+                    }),
+                },
+              ]
+            : []),
           { label: 'New shell', icon: <SquareTerminal size={14} />, run: () => void newChatIn(addr, 'shell') },
           'sep',
           { label: item.pinned ? 'Unpin' : 'Pin', icon: <Pin size={14} />, run: () => card('pinned', item.pinned ? null : true) },
@@ -627,7 +657,7 @@ export function App() {
           activate={activate}
           run={run}
           openDialog={setDialog}
-          openMenu={setMenu}
+          openMenu={openMenu}
           itemMenu={itemMenu}
           chatMarks={chatMarks}
           notify={(message, kind) => toasts.push({ message, kind })}
@@ -657,9 +687,12 @@ export function App() {
         {dialog?.mode === 'note' ? (
           <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
         ) : (
-          dialog && <ItemDialog dialog={dialog} onClose={() => setDialog(null)} onSubmit={submitDialog} />
+          dialog && <ItemDialog dialog={dialog} agents={Object.keys(profile?.agents ?? {})} onClose={() => setDialog(null)} onSubmit={submitDialog} />
         )}
         {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+        {agentsFor !== null && profile && (
+          <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
+        )}
         {closing && (
           <ConfirmDialog
             title={`Close ${chatName(closing)}?`}

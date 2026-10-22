@@ -2395,3 +2395,199 @@ button {
   border-color: color-mix(in srgb, var(--danger) 50%, transparent);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
+
+/* ── Agent profiles ─────────────────────────────────── */
+
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  margin-left: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.agent-chip.empty {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--faint);
+}
+
+.agent-chip:hover {
+  border-color: var(--accent);
+}
+
+.bypass-mark {
+  color: var(--warn);
+  flex: none;
+}
+
+.bypass-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warn);
+}
+
+.chat-agent {
+  color: var(--text);
+}
+
+.chat-agent .detail {
+  color: var(--faint);
+}
+
+.segmented.wrap {
+  flex-wrap: wrap;
+}
+
+.field select {
+  width: 100%;
+  height: 33px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.field input:disabled,
+.field select:disabled {
+  color: var(--faint);
+  opacity: 0.6;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.warn-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.warn-line svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.agents-dialog {
+  width: min(900px, calc(100vw - 32px));
+}
+
+.scrim:has(.agents-dialog) {
+  padding-top: 6vh;
+}
+
+.agents-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  border-top: 1px solid var(--border);
+}
+
+.agents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 76vh;
+  padding: 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+.agents-list button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  text-align: left;
+}
+
+.agents-list button:hover {
+  background: var(--hover);
+}
+
+.agents-list button.active {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.agents-list .icon {
+  color: var(--accent);
+}
+
+.agents-list .name {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-list .summary {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-list .add .name {
+  color: var(--muted);
+}
+
+.agent-form {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agent-fields {
+  display: grid;
+  gap: 12px;
+  max-height: calc(76vh - 56px);
+  padding: 14px 18px;
+  overflow-y: auto;
+}
+
+.agent-fields > .hint {
+  margin-top: -6px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.agent-form footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.agent-form footer .spacer {
+  flex: 1;
+}
+
+.btn.danger-text:hover {
+  color: var(--danger);
+}

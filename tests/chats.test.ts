@@ -196,6 +196,14 @@ describe('chats', { timeout: 15_000 }, () => {
     }, 'the program to end')
   })
 
+  test('saves of the chat list never overlap, even when they come together', async () => {
+    const chat = await chats.start(spec())
+    await chats.update(chat.id, { label: 'one' })
+    await Promise.all([chats.shutdown(), chats.shutdown(), chats.shutdown()])
+    const saved = JSON.parse(await fsp.readFile(path.join(dir, 'state/chats.json'), 'utf8'))
+    expect(saved.chats.map((c: { label: string }) => c.label)).toEqual(['one'])
+  })
+
   test('emits a change per profile', async () => {
     const seen: string[] = []
     chats.on('chats', (e: { profile: string }) => seen.push(e.profile))

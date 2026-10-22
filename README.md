@@ -44,6 +44,19 @@ workflow:                       # the steps every project (folder entry) starts 
   - { label: shell, type: chat, agent: shell, path: src }                          # your login shell, in src/
 categories:                     # optional colours for project categories
   game: "#8fa58a"
+agents:                         # agent profiles: how claude starts when you pick one
+  Reviewer:
+    model: opus                 # optional, like effort: low | medium | high | xhigh | max
+    permission: plan            # acceptEdits | auto | plan | dontAsk | bypassPermissions
+    instructions: |             # added to claude's system prompt
+      You review code. Don't edit files.
+    prompt: Review the latest changes   # first prompt of a new session
+    folders: [~/Projects/shared-assets] # extra folders (--add-dir)
+    allowedTools: [Read, Grep]
+    disallowedTools: [Bash]
+    mcp: ~/mcp/review.json              # an MCP config file
+  Orchestrator:
+    agent: orchestrator         # a Claude Code agent; it decides model and effort
 sections:
   - title: Projects
     collapsed: false
@@ -56,6 +69,7 @@ sections:
         status: paused          # active (the default) | paused | done | archived
         category: game
         pinned: true
+        agent: Reviewer         # what New chat starts here (default: plain Claude)
         steps:                  # this project's own steps instead of the workflow
           - { label: sprites, type: folder, path: assets/sprites }
           - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
@@ -125,6 +139,16 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - In the terminal, **Ctrl+C** interrupts as usual, **Ctrl+Shift+C** copies the selection and **Ctrl+Shift+V** pastes. Links open in your browser.
 - Tab names, colours and pins live with the service's chat list (`~/.local/state/workbench/chats.json`), not in your YAML: they belong to a running session. A chat you want in every project is a chat step.
 
+### Agent profiles
+
+- An agent profile is a way to start claude: model and effort, permission mode, instructions added to its system prompt, a first prompt, extra folders, allowed and blocked tools, and an MCP config file. Prepare them in **New chat ▾ › Agent profiles…**; they're saved under `agents:` in the profile's YAML (comments kept), and you can write them by hand too.
+- A profile can name one of your **Claude Code agents** (`~/.claude/agents` or the project's `.claude/agents`), such as an orchestrator. Then its model and effort are left to that agent.
+- Pick one when you start a chat: **New chat ▾** lists Claude, your agent profiles and Shell; **Chat here as…** in the file browser and **New chat as…** in the nav menu do the same for a folder or a project.
+- **New chat** itself starts the project's default: click the agent chip next to the category in the project header to set it (`agent:` on the folder entry). Chat steps and chat entries name theirs in `agent:` (`claude`, `shell` or a profile's name).
+- The chat's bar shows the profile it started with (`Reviewer · opus · plan`). **Bypass permissions** shows a warning in the editor and a shield on its chats' tabs and bar.
+- A chat keeps the settings it started with: **Resume** uses them, **New session** uses the profile as it is now (and sends its first prompt again), and Summarize and continue keeps the flags but not the first prompt.
+- Renaming a profile updates everything that names it. A profile still in use can't be deleted; the message says where it's used.
+
 ### Notes
 
 - A **note** entry opens formatted (GitHub-flavoured Markdown: tables, task lists, images next to the note). **Edit** or **Ctrl+E** switches to the editor in the same place, and back.
@@ -167,7 +191,7 @@ The file browser can open the profile's `home:`, its `notes:` folder, its folder
 
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else.
 
-A chat is shell access, so its terminal socket (`/pty/`) needs more: browsers can't add the `X-Workbench` header to a WebSocket, so it must come from Workbench's own `Origin`, and it carries a random token that changes every time the service starts, which only the app can read through the API. Chats start from an entry or step in your config, by its position; a request never carries a command or arguments, and **Chat here** only works inside the profile's folders. Claude's transcripts in `~/.claude/projects/` are read for History, never written.
+Agent profiles only choose flags for claude (`--model`, `--permission-mode` and the rest), from your YAML; a request names a profile, never flags. A chat is shell access, so its terminal socket (`/pty/`) needs more: browsers can't add the `X-Workbench` header to a WebSocket, so it must come from Workbench's own `Origin`, and it carries a random token that changes every time the service starts, which only the app can read through the API. Chats start from an entry or step in your config, by its position; a request never carries a command or arguments, and **Chat here** only works inside the profile's folders. Claude's transcripts in `~/.claude/projects/` are read for History, never written.
 
 ## Development
 
@@ -187,7 +211,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/config-store.ts` | loading, validation, atomic writes, watching and undo |
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; the folders a profile may reach; folder watching |
-| `server/chats.ts`, `server/claude-sessions.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list; reading claude's transcripts for History |
+| `server/chats.ts`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list; reading claude's transcripts for History; agent profiles as claude flags |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
 | `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats |
 

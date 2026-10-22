@@ -79,4 +79,10 @@ describe('claude sessions', () => {
     expect(await countPrompts(file)).toBe(2)
     expect(await countPrompts(path.join(home, 'missing.jsonl'))).toBe(0)
   })
+
+  test('a transcript that cannot be read counts as none, never a rejected promise', async () => {
+    // A folder in its place fails the read the way a file deleted mid-read does.
+    await fsp.mkdir(path.join(home, 'odd.jsonl'))
+    await expect(countPrompts(path.join(home, 'odd.jsonl'))).resolves.toBe(0)
+  })
 })

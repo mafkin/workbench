@@ -1,5 +1,4 @@
 import type {
-  Agent,
   AppState,
   Chat,
   ClaudeSession,
@@ -85,8 +84,8 @@ export interface ChatStart {
   at: ItemAddr
   /** A chat step of the project at `at`. */
   step?: number
-  /** New chat in a project: claude or the shell, in `path` (default the project folder). */
-  agent?: Agent
+  /** New chat in a project: claude, shell or an agent profile (default the project's), in `path` (default the project folder). */
+  agent?: string
   path?: string
   /** A Claude session from History. */
   resume?: string
@@ -100,6 +99,8 @@ export const seenChat = (id: string) => api(`/api/chats/${id}/seen`, { body: {} 
 export const handoffChat = (id: string) => api<Chat>(`/api/chats/${id}/handoff`, { body: {} })
 export const closeChat = (id: string) => api(`/api/chats/${id}`, { method: 'DELETE' })
 export const chatHistory = (profile: string, path: string) => api<ClaudeSession[]>(`/api/chats/history?${query({ profile, path })}`)
+/** Claude Code agents an agent profile can name, from yours and the folder's `.claude/agents`. */
+export const claudeAgents = (profile: string, path: string) => api<string[]>(`/api/chats/claude-agents?${query({ profile, path })}`)
 /** The token a chat's terminal socket needs; new each time the service starts. */
 export const chatToken = () => api<{ token: string }>('/api/chats/token').then((r) => r.token)
 

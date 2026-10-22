@@ -2,9 +2,9 @@
 // continue) over its terminal. A stopped chat (after a restart of the service)
 // offers Resume instead of starting by itself; a chat step or entry also offers
 // the earlier Claude sessions in its folder.
-import { FastForward, Play, RotateCcw, Sparkles } from 'lucide-react'
+import { FastForward, Play, RotateCcw, ShieldAlert, Sparkles } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import type { Chat, ClaudeSession } from '../../shared/config-schema.ts'
+import { agentSummary, findAgent, type Chat, type ClaudeSession } from '../../shared/config-schema.ts'
 import { useChats } from '../lib/chats.ts'
 import { cx } from '../lib/nav.ts'
 import { ago } from '../lib/recent.ts'
@@ -78,6 +78,9 @@ export function ChatPane({ chat, start, historyPath }: Props) {
   const Icon = agentIcon(chat.agent)
   const program = claude ? 'claude' : 'The shell'
   const state = chat.state === 'running' ? 'Running' : chat.state === 'exited' ? `Exited${chat.exitCode ? ` (code ${chat.exitCode})` : ''}` : 'Stopped'
+  // The agent profile as it is now; the chat keeps the settings it started with.
+  const profile = chat.agentProfile ? findAgent({ agents: chats.agents }, chat.agentProfile) : null
+  const summary = profile ? agentSummary(profile[1]) : ''
 
   const again = (
     <>
@@ -103,6 +106,17 @@ export function ChatPane({ chat, start, historyPath }: Props) {
     <div className="chat-pane">
       <div className="chat-bar">
         <Icon size={14} className="icon" />
+        {chat.agentProfile && (
+          <span className="chat-agent" title={summary ? `${chat.agentProfile}: ${summary}` : chat.agentProfile}>
+            {chat.agentProfile}
+            {summary && <span className="detail"> · {summary}</span>}
+          </span>
+        )}
+        {chat.bypass && (
+          <span className="bypass-note" title="Started with permissions bypassed: claude runs every tool without asking" aria-label="Permissions bypassed">
+            <ShieldAlert size={13} />
+          </span>
+        )}
         <span className="mono chat-where" title={chat.cwd}>
           {chat.cwd}
         </span>

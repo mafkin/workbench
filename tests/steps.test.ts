@@ -124,10 +124,12 @@ describe('chat steps and entries', () => {
     expect(stepEntry('~/wargame', shell)).toMatchObject({ agent: 'shell', path: '~/wargame/src', args: ['--norc'] })
   })
 
-  it('a chat can be a nav entry, inside a group too; the agent must be claude or shell', () => {
+  it('a chat can be a nav entry, inside a group too; its agent is claude, shell or an agent profile', () => {
     expect(NavItem.parse({ label: 'Scratch', type: 'chat', path: '~' })).toEqual({ label: 'Scratch', type: 'chat', path: '~', args: [] })
     expect(NavItem.safeParse({ label: 'X', type: 'group', items: [{ label: 'c', type: 'chat' }] }).success).toBe(true)
-    expect(NavItem.safeParse({ label: 'X', type: 'chat', agent: 'codex' }).success).toBe(false)
+    // A name that is no agent profile is refused when the chat starts (agents-http.test.ts).
+    expect(NavItem.safeParse({ label: 'X', type: 'chat', agent: 'Reviewer' }).success).toBe(true)
+    expect(NavItem.safeParse({ label: 'X', type: 'chat', agent: '' }).success).toBe(false)
   })
 
   it('keys chats by path and label, not by place in the nav', () => {

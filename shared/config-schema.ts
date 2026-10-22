@@ -20,20 +20,101 @@ export const LaunchItem = z.object({
   cwd: z.string().optional(),
 })
 export const LinkItem = z.object({ ...base, type: z.literal('link'), url: z.url('Not a valid URL') })
+/** The programs a chat can run. */
 export const AGENTS = ['claude', 'shell'] as const
 export type Agent = (typeof AGENTS)[number]
+
+/** The program behind a chat's `agent:`: `shell`, or claude (itself, or with an agent profile). */
+export const chatProgram = (agent: string | undefined): Agent => (agent?.toLowerCase() === 'shell' ? 'shell' : 'claude')
+
 /**
- * A chat: `claude` (or your login shell) in a terminal in the app. As a nav entry
- * its folder defaults to home; as a step it is inside the project. `args` come
- * only from the config, never from a request.
+ * A chat: `claude` (or your login shell) in a terminal in the app. `agent` is
+ * claude, shell or the name of an agent profile. As a nav entry its folder
+ * defaults to home; as a step it is inside the project. `args` come only from
+ * the config, never from a request.
  */
 export const ChatItem = z.object({
   ...base,
   type: z.literal('chat'),
-  agent: z.enum(AGENTS, 'Agent must be claude or shell').optional(),
+  agent: z.string().trim().min(1).optional(),
   path: z.string().trim().min(1).optional(),
   args: list(z.string()),
 })
+
+// Agent profiles: how claude starts, prepared once and picked for a chat.
+
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+/** Claude's permission modes; leaving the field out is claude's own default (it asks). */
+export const PERMISSION_MODES = ['acceptEdits', 'auto', 'plan', 'dontAsk', 'bypassPermissions'] as const
+export type PermissionMode = (typeof PERMISSION_MODES)[number]
+export const PERMISSION_LABEL: Record<PermissionMode, string> = {
+  acceptEdits: 'accept edits',
+  auto: 'auto',
+  plan: 'plan',
+  dontAsk: "don't ask",
+  bypassPermissions: 'bypass',
+}
+
+/**
+ * An agent profile. With `agent` (a Claude Code agent, e.g. an orchestrator)
+ * the model and effort are left to that agent.
+ */
+export const AgentProfile = z.object({
+  agent: z.string().trim().min(1).optional(),
+  model: z.string().trim().min(1).optional(),
+  effort: z.enum(EFFORTS, 'Effort must be low, medium, high, xhigh or max').optional(),
+  permission: z.enum(PERMISSION_MODES, 'Permission must be acceptEdits, auto, plan, dontAsk or bypassPermissions').optional(),
+  /** Added to claude's system prompt. */
+  instructions: z.string().optional(),
+  /** The first prompt of a new session. */
+  prompt: z.string().optional(),
+  /** Extra folders claude may use; relative ones are inside the chat's folder. */
+  folders: list(z.string()),
+  allowedTools: list(z.string()),
+  disallowedTools: list(z.string()),
+  /** An MCP config file. */
+  mcp: z.string().trim().min(1).optional(),
+})
+export type AgentProfile = z.output<typeof AgentProfile>
+/** The fields of an agent profile the app manages, in the order they are written. */
+export const AGENT_FIELDS = ['agent', 'model', 'effort', 'permission', 'instructions', 'prompt', 'folders', 'allowedTools', 'disallowedTools', 'mcp'] as const
+
+export const AGENT_NAME = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,39}$/u
+export const AGENT_NAME_RULE = 'An agent profile name is letters, digits, spaces, - and _ (up to 40)'
+/** Names a chat's `agent:` already means. */
+export const isReservedAgent = (name: string) => AGENTS.includes(name.trim().toLowerCase() as Agent)
+
+// `Reviewer:` with nothing under it is an agent profile with no settings.
+const AgentEntry = z.preprocess((v) => v ?? {}, AgentProfile)
+const Agents = z
+  .record(
+    z
+      .string()
+      .regex(AGENT_NAME, AGENT_NAME_RULE)
+      .refine((n) => !isReservedAgent(n), 'claude and shell are built in'),
+    AgentEntry,
+  )
+  .superRefine((agents, ctx) => {
+    const seen = new Set<string>()
+    for (const name of Object.keys(agents)) {
+      if (seen.has(name.toLowerCase())) ctx.addIssue({ code: 'custom', message: `Two agent profiles are named ${name}`, path: [name] })
+      seen.add(name.toLowerCase())
+    }
+  })
+
+/** An agent profile by name, ignoring case: [its name as written, the profile]. */
+export function findAgent(profile: { agents?: Record<string, AgentProfile> }, name: string): [string, AgentProfile] | null {
+  const want = name.trim().toLowerCase()
+  for (const [key, value] of Object.entries(profile.agents ?? {})) if (key.toLowerCase() === want) return [key, value]
+  return null
+}
+
+/** A short line for menus: `opus · high · plan`, or `agent orchestrator · auto`. */
+export function agentSummary(a: AgentProfile): string {
+  const parts = a.agent ? [`agent ${a.agent}`] : [a.model, a.effort]
+  if (a.permission) parts.push(PERMISSION_LABEL[a.permission])
+  return parts.filter(Boolean).join(' · ')
+}
 
 // Only as workflow steps: an HTML report shown in its tab, and one file shown large.
 const ReportStep = z.object({ ...base, type: z.literal('report'), path: z.string().trim().min(1, 'Path is required') })
@@ -52,10 +133,11 @@ export const STATUSES = ['active', 'paused', 'done', 'archived'] as const
 export type Status = (typeof STATUSES)[number]
 
 /** The card fields of a project; set from the project header and the nav menu. */
-export const CARD_FIELDS = ['description', 'status', 'category', 'pinned'] as const
+export const CARD_FIELDS = ['description', 'status', 'category', 'pinned', 'agent'] as const
 
 /**
- * A project folder, with its card (description, status, category, pinned).
+ * A project folder, with its card (description, status, category, pinned) and
+ * the agent profile New chat starts there (`agent`, default plain claude).
  * Without `steps:` it uses the profile's `workflow:`; an empty `steps:` means none.
  */
 export const FolderItem = z.object({
@@ -64,6 +146,7 @@ export const FolderItem = z.object({
   status: z.enum(STATUSES, 'Status must be active, paused, done or archived').optional(),
   category: z.string().trim().min(1).optional(),
   pinned: z.boolean().optional(),
+  agent: z.string().trim().min(1).optional(),
   steps: z
     .array(StepItem)
     .nullable()
@@ -102,6 +185,8 @@ export const Profile = z.object({
   workflow: list(StepItem),
   /** Colours for project categories; others get one from a palette. */
   categories: z.record(z.string(), z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb')).optional(),
+  /** Agent profiles for chats, by name. */
+  agents: Agents.optional(),
   sections: list(Section),
 })
 
@@ -175,6 +260,14 @@ export const Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('setWorkflow'), at: ItemAddr }),
   // A card field of the project at `at`; null (or an empty description) removes it.
   z.object({ op: z.literal('setCard'), at: ItemAddr, field: z.enum(CARD_FIELDS), value: z.union([z.string(), z.boolean()]).nullable() }),
+  // An agent profile: create or update it (and rename it, with everything that
+  // names it), or with null delete it, which is refused while something names it.
+  z.object({
+    op: z.literal('setAgent'),
+    name: z.string(),
+    agent: z.custom<z.input<typeof AgentProfile>>((v) => typeof v === 'object' && !Array.isArray(v), 'Agent profile must be an object').nullable(),
+    rename: z.string().optional(),
+  }),
 ])
 export type Op = z.output<typeof Op>
 
@@ -434,6 +527,10 @@ export interface Chat {
   /** The chat step or chat entry this chat belongs to; null for one started with New chat. */
   slot: string | null
   agent: Agent
+  /** The agent profile it started with; null for plain claude or the shell. */
+  agentProfile: string | null
+  /** Started with permissions bypassed. */
+  bypass: boolean
   /** Working folder, `~/…` form. */
   cwd: string
   /** Your name for it. */
@@ -471,8 +568,8 @@ export const projectHost = (projectPath: string) => `project:${normalizePath(pro
 export const stepSlot = (projectPath: string, label: string) => `step:${normalizePath(projectPath)}|${label}`
 export const entrySlot = (item: { label: string; path?: string }) => `entry:${normalizePath(item.path ?? '~')}|${item.label}`
 
-/** What a chat tab is called: your name, else the program's title without its spinner, else the agent. */
-export function chatName(chat: Pick<Chat, 'label' | 'title' | 'agent'>): string {
+/** What a chat tab is called: your name, else the program's title without its spinner, else its agent profile or program. */
+export function chatName(chat: Pick<Chat, 'label' | 'title' | 'agent'> & { agentProfile?: string | null }): string {
   const title = chat.title?.replace(/^[^\p{L}\p{N}]+/u, '').trim()
-  return chat.label || title || (chat.agent === 'shell' ? 'Shell' : 'Claude')
+  return chat.label || title || chat.agentProfile || (chat.agent === 'shell' ? 'Shell' : 'Claude')
 }

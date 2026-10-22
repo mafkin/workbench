@@ -20,6 +20,7 @@ import {
   RefreshCw,
   RotateCcw,
   Share2,
+  ShieldAlert,
   Sparkles,
   SquareTerminal,
   Tag,
@@ -32,6 +33,7 @@ import {
   categoryColor,
   CHAT_COLORS,
   chatName,
+  chatProgram,
   expandHome,
   folderRoots,
   normalizePath,
@@ -40,7 +42,6 @@ import {
   stepPath,
   stepSlot,
   stepsOf,
-  type Agent,
   type CARD_FIELDS,
   type Chat,
   type ItemAddr,
@@ -56,6 +57,7 @@ import { nameOf, parentOf, previewKind } from '../lib/files.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx, type DialogState, type MenuEntry, type MenuState } from '../lib/nav.ts'
 import { ago } from '../lib/recent.ts'
+import { agentEntries } from './AgentMenu.tsx'
 import { ChatPane } from './ChatPane.tsx'
 import { ContextMenu } from './ContextMenu.tsx'
 import { agentIcon, EntryIcon } from './EntryIcon.tsx'
@@ -123,6 +125,9 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const [renaming, setRenaming] = useState<string | null>(null)
   const [dropChat, setDropChat] = useState<string | null>(null)
   const dragging = useRef<number | null>(null)
+  // Where the last right-click on this page was, for follow-up menus (Chat here as…).
+  const lastPoint = useRef({ x: 0, y: 0 })
+  const hasAgents = Object.keys(profile.agents ?? {}).length > 0
   const status = item.status ?? 'active'
   const crumb = activeChat ? chatName(activeChat) : (active?.label ?? null)
 
@@ -147,11 +152,45 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     setBrowse(null)
   }
 
-  /** New chat in the project, or with `path` in a folder inside it (Chat here). */
-  const newChat = async (agent: Agent, path?: string) => {
+  /**
+   * New chat in the project, or with `path` in a folder inside it (Chat here).
+   * `agent` comes from a menu; without one the project's default starts.
+   */
+  const newChat = async (agent?: string, path?: string) => {
     const chat = await chats.start({ at: addr, agent, path })
     if (chat) selectChat(chat)
   }
+
+  /** The agent menu for New chat ▾: Claude, the agent profiles (the default marked), Shell. */
+  const startMenu = (e: React.MouseEvent) =>
+    menuBelow(e, agentEntries(profile.agents, { current: item.agent, shell: true, run: (a) => void newChat(a), edit: () => chats.editAgents(item.path) }))
+
+  /** The agent New chat starts in this project; Claude is the default and written by leaving the field out. */
+  const defaultAgentMenu = (e: React.MouseEvent) =>
+    menuBelow(
+      e,
+      agentEntries(profile.agents, {
+        current: item.agent,
+        mark: 'this project',
+        run: (a) => setCard('agent', a === 'claude' ? null : a, `New chat in ${item.label} starts ${a === 'claude' ? 'Claude' : a}`),
+        edit: () => chats.editAgents(item.path),
+      }),
+    )
+
+  /** Chat here, Chat here as… and Shell here, for the file browser's menus. */
+  const folderChatMenu = (dir: string): MenuEntry[] => [
+    { label: 'Chat here', icon: <Sparkles size={14} />, run: () => void newChat(undefined, dir) },
+    ...(hasAgents
+      ? [
+          {
+            label: 'Chat here as…',
+            icon: <Sparkles size={14} />,
+            run: () => setMenu({ ...lastPoint.current, entries: agentEntries(profile.agents, { current: item.agent, run: (a) => void newChat(a, dir) }) }),
+          },
+        ]
+      : []),
+    { label: 'Shell here', icon: <SquareTerminal size={14} />, run: () => void newChat('shell', dir) },
+  ]
 
   const handoff = async (chat: Chat) => {
     const next = await chats.handoff(chat)
@@ -313,7 +352,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   }
 
   return (
-    <div className="page wide project-page">
+    <div className="page wide project-page" onContextMenuCapture={(e) => (lastPoint.current = { x: e.clientX, y: e.clientY })}>
       <div className="page-kicker card-kicker">
         {kicker}
         <span className="sep">·</span>
@@ -334,6 +373,17 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
             title="Category"
           >
             {item.category ?? 'Category'}
+          </button>
+        )}
+        {(hasAgents || item.agent) && (
+          <button
+            className={cx('agent-chip', !item.agent && 'empty')}
+            onClick={defaultAgentMenu}
+            title="The agent New chat starts in this project"
+            aria-label={`Agent for New chat: ${item.agent ?? 'Claude'}`}
+          >
+            <Sparkles size={11} />
+            {item.agent ?? 'Claude'}
           </button>
         )}
       </div>
@@ -427,8 +477,9 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
               onClick={() => (opensOutside(step) ? actions.launchStep(addr, i, step.label, step.type as 'launch' | 'link') : select(step))}
               onContextMenu={(e) => stepMenu(e, step, i)}
             >
-              <EntryIcon type={step.type} icon={step.icon} agent={step.type === 'chat' ? step.agent : undefined} size={14} />
+              <EntryIcon type={step.type} icon={step.icon} agent={step.type === 'chat' ? chatProgram(step.agent) : undefined} size={14} />
               {step.label}
+              {stepChat?.bypass && <ShieldAlert size={12} className="bypass-mark" aria-label="Permissions bypassed" />}
               {step.type === 'link' && <ExternalLink size={11} className="outside-mark" />}
               {stepChat?.attention && active !== step && <span className="attention" aria-label="Needs you" />}
             </button>
@@ -449,7 +500,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
               aria-selected={on}
               className={cx('step-tab chat-tab', on && 'active', chat.color && 'colored', dropChat === chat.id && 'dropping', chat.state !== 'running' && 'idle')}
               style={chat.color ? ({ '--chat': chat.color } as React.CSSProperties) : undefined}
-              title={`${chatName(chat)} · ${chat.cwd}`}
+              title={[chatName(chat), chat.agentProfile, chat.cwd].filter(Boolean).join(' · ')}
               onClick={() => selectChat(chat)}
               onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && selectChat(chat)}
               onContextMenu={(e) => chatMenu(e, chat)}
@@ -468,6 +519,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
               ) : (
                 <span className="chat-name">{chatName(chat)}</span>
               )}
+              {chat.bypass && <ShieldAlert size={12} className="bypass-mark" aria-label="Permissions bypassed" />}
               {chat.attention && !on && <span className="attention" aria-label="Needs you" />}
               {chat.pinned ? (
                 <Pin size={11} className="pin-mark" aria-label="Pinned" />
@@ -488,19 +540,14 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           )
         })}
         <span className="tab-spacer" />
-        <button className="tab-action" onClick={() => void newChat('claude')} title="New Claude chat in the project folder">
+        <button className="tab-action" onClick={() => void newChat()} title={`Start ${item.agent ?? 'Claude'} in the project folder`}>
           <MessageSquarePlus size={14} />
           New chat
         </button>
         <button
           className="tab-action more"
           aria-label="More kinds of chat"
-          onClick={(e) =>
-            menuBelow(e, [
-              { label: 'Claude chat', icon: <Sparkles size={14} />, run: () => void newChat('claude') },
-              { label: 'Shell', icon: <SquareTerminal size={14} />, run: () => void newChat('shell') },
-            ])
-          }
+          onClick={startMenu}
         >
           <ChevronDown size={13} />
         </button>
@@ -549,7 +596,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           onNavigate={navigate}
           toast={toast}
           within={within}
-          onChat={(dir, agent) => void newChat(agent, dir)}
+          chatMenu={folderChatMenu}
         />
       )}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
@@ -568,7 +615,7 @@ function StepFolder({
   onNavigate,
   toast,
   within,
-  onChat,
+  chatMenu,
 }: {
   path: string
   creatable: boolean
@@ -579,7 +626,7 @@ function StepFolder({
   onNavigate: (p: string) => void
   toast: (t: ToastInput) => void
   within: (p: string, dir: string) => boolean
-  onChat: (dir: string, agent: Agent) => void
+  chatMenu: (dir: string) => MenuEntry[]
 }) {
   const [exists, setExists] = useState<boolean | null>(creatable ? null : true)
 
@@ -625,7 +672,7 @@ function StepFolder({
       </div>
     )
   }
-  return <FileBrowser top={path} roots={folderRoots(profile)} home={home} onNavigate={onNavigate} toast={toast} onChat={onChat} />
+  return <FileBrowser top={path} roots={folderRoots(profile)} home={home} onNavigate={onNavigate} toast={toast} chatMenu={chatMenu} />
 }
 
 /** A report: its HTML page in a sandboxed frame, loading the files next to it through a folder ticket. */

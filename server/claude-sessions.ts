@@ -98,23 +98,25 @@ export async function sessionsIn(dir: string, home: string, limit = 50): Promise
   return out
 }
 
-/** How many prompts you typed in a session; 0 when there is no transcript yet. */
+/**
+ * How many prompts you typed in a session; 0 when there is no transcript yet.
+ * Never rejects: it runs in the background, and the file can go mid-read.
+ */
 export async function countPrompts(file: string): Promise<number> {
-  let stream: fs.ReadStream
+  let n = 0
   try {
     await fsp.access(file)
-    stream = fs.createReadStream(file, 'utf8')
+    const stream = fs.createReadStream(file, 'utf8')
+    for await (const line of readline.createInterface({ input: stream, crlfDelay: Infinity })) {
+      if (!line.includes('"user"')) continue
+      try {
+        if (promptText(JSON.parse(line)) !== null) n++
+      } catch {
+        // a line being written
+      }
+    }
+    return n
   } catch {
     return 0
   }
-  let n = 0
-  for await (const line of readline.createInterface({ input: stream, crlfDelay: Infinity })) {
-    if (!line.includes('"user"')) continue
-    try {
-      if (promptText(JSON.parse(line)) !== null) n++
-    } catch {
-      // a line being written
-    }
-  }
-  return n
 }

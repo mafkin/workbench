@@ -2,7 +2,7 @@
 // pages. The service keeps the programs; this is the list and what can be done
 // with a chat. Helpers for dropping paths onto a chat live here too.
 import { createContext, useContext } from 'react'
-import type { Chat, ClaudeSession } from '../../shared/config-schema.ts'
+import type { AgentProfile, Chat, ClaudeSession } from '../../shared/config-schema.ts'
 import type { ChatStart } from './api.ts'
 import { readLocal, writeLocal } from './local.ts'
 
@@ -22,6 +22,10 @@ export interface ChatsApi {
   history: (path: string) => Promise<ClaudeSession[]>
   /** Show a chat: its tab in its project, its entry, or a page of its own. */
   open: (chat: Chat) => void
+  /** The profile's agent profiles, by name. */
+  agents: Record<string, AgentProfile>
+  /** Open the agent profile editor; `folder` adds that folder's Claude Code agents to its suggestions. */
+  editAgents: (folder?: string) => void
 }
 
 export const ChatsCtx = createContext<ChatsApi | null>(null)

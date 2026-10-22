@@ -10,12 +10,14 @@ import websocket from '@fastify/websocket'
 import Fastify from 'fastify'
 import { z } from 'zod'
 import {
-  AGENTS,
   CHAT_COLORS,
+  chatProgram,
   entrySlot,
   expandHome,
   FileOp,
+  findAgent,
   getItem,
+  isReservedAgent,
   ItemAddr,
   Op,
   projectHost,
@@ -25,6 +27,7 @@ import {
   stepsOf,
   type Profile,
 } from '../shared/config-schema.ts'
+import { agentArgs, claudeAgents } from './agents.ts'
 import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { describeIssue } from './config-ops.ts'
@@ -70,7 +73,8 @@ const ChatStart = z.object({
   rev: z.string(),
   at: ItemAddr,
   step: z.int().nonnegative().optional(),
-  agent: z.enum(AGENTS).optional(),
+  /** claude, shell or an agent profile's name (the New chat menu); else the step's, entry's or project's. */
+  agent: z.string().trim().min(1).max(64).optional(),
   path: z.string().optional(),
   resume: z.string().regex(SESSION_ID, 'Not a session id').optional(),
 })
@@ -283,6 +287,15 @@ export async function buildServer(opts: ServerOptions) {
 
   app.get('/api/chats/token', async () => ({ token: ptyToken }))
 
+  /** What a chat's `agent:` starts: the shell, plain claude, or claude with an agent profile's flags. */
+  function agentFor(profile: Profile, name: string | undefined, cwd: string, args: string[]) {
+    if (!name || isReservedAgent(name)) return { agent: chatProgram(name), args, agentProfile: null, bypass: false }
+    const found = findAgent(profile, name)
+    if (!found) throw new StoreError(`No agent profile named ${name}`, 422)
+    const start = agentArgs(found[1], home, cwd)
+    return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found[0], bypass: start.bypass, firstPrompt: start.prompt }
+  }
+
   app.post('/api/chats', async (req) => {
     const body = parse(ChatStart, req.body)
     const p = store.profile(body.profile)
@@ -292,22 +305,18 @@ export async function buildServer(opts: ServerOptions) {
     let spec: ChatSpec
     if (item.type === 'chat') {
       const slot = entrySlot(item)
-      spec = { profile: body.profile, host: slot, slot, agent: item.agent ?? 'claude', cwd: await chatFolder(p.profile, item.path ?? '~', false), args: item.args }
+      const cwd = await chatFolder(p.profile, item.path ?? '~', false)
+      spec = { profile: body.profile, host: slot, slot, cwd, ...agentFor(p.profile, item.agent, cwd, item.args) }
     } else if (item.type === 'folder' && body.step !== undefined) {
       const step = stepsOf(p.profile, item)[body.step]
       if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
       const entry = stepEntry(item.path, step) as typeof step
-      spec = {
-        profile: body.profile,
-        host: projectHost(item.path),
-        slot: stepSlot(item.path, step.label),
-        agent: step.agent ?? 'claude',
-        cwd: await chatFolder(p.profile, entry.path ?? item.path, false),
-        args: step.args,
-      }
+      const cwd = await chatFolder(p.profile, entry.path ?? item.path, false)
+      spec = { profile: body.profile, host: projectHost(item.path), slot: stepSlot(item.path, step.label), cwd, ...agentFor(p.profile, step.agent, cwd, step.args) }
     } else if (item.type === 'folder') {
       const cwd = body.path === undefined ? await chatFolder(p.profile, item.path, false) : await chatFolder(p.profile, body.path, true)
-      spec = { profile: body.profile, host: projectHost(item.path), slot: null, agent: body.agent ?? 'claude', cwd, args: [] }
+      // The New chat menu's pick, else the project's default.
+      spec = { profile: body.profile, host: projectHost(item.path), slot: null, cwd, ...agentFor(p.profile, body.agent ?? item.agent, cwd, []) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -337,6 +346,14 @@ export async function buildServer(opts: ServerOptions) {
   app.delete<{ Params: { id: string } }>('/api/chats/:id', async (req) => {
     await chats.close(req.params.id)
     return { ok: true }
+  })
+
+  // Claude Code agents an agent profile can name (the editor's suggestions).
+  app.get('/api/chats/claude-agents', async (req) => {
+    const { profile: id, path: raw } = parse(PathQuery, req.query)
+    const p = store.profile(id)
+    if (!p.profile) throw new StoreError('The profile file is broken', 423)
+    return claudeAgents(home, await chatFolder(p.profile, raw, true))
   })
 
   app.get('/api/chats/history', async (req) => {

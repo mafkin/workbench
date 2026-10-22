@@ -280,3 +280,12 @@ describe('project cards', () => {
     expect(() => run([{ op: 'addItem', to: { section: 1 }, item: { label: 'Card', type: 'project', project: 'x' } as never }])).toThrow(OpError)
   })
 })
+
+describe('comments on a key line', () => {
+  it('stay on the line of a key whose value is a block list or map', () => {
+    const source = SOURCE.replace('sections:\n', 'sections: # headings, in nav order\n')
+    const doc = parseDocument(source)
+    applyOps(doc, [{ op: 'addSection', title: 'Tools' }], source)
+    expect(doc.toString()).toContain('sections: # headings, in nav order\n  # Things I build\n')
+  })
+})

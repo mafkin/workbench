@@ -127,7 +127,7 @@ export class ConfigStore extends EventEmitter {
       const e = await this.#current(id, rev)
       const doc = parseDocument(e.text)
       try {
-        applyOps(doc, ops)
+        applyOps(doc, ops, e.text)
       } catch (err) {
         if (err instanceof OpError) throw new StoreError(err.message, 400)
         throw err
