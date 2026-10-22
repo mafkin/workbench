@@ -6,7 +6,9 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronRight,
+  ClipboardPaste,
   Copy,
+  CopyPlus,
   ExternalLink,
   Eye,
   FilePlus,
@@ -17,10 +19,12 @@ import {
   Inbox,
   ListFilter,
   PencilLine,
+  Search,
+  Sigma,
   Trash2,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { expandHome, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
+import { expandHome, type CopyResult, type FileEntry, type FileFind, type FileOp, type FileOpResult, type FolderSize, type MoveResult, type RestoreResult } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { PATHS_TYPE } from '../lib/chats.ts'
 import { useContextFolders } from '../lib/context.ts'
@@ -38,7 +42,26 @@ import type { ToastInput } from './Toast.tsx'
 
 type Listing = { status: 'loading' } | { status: 'ok'; entries: FileEntry[] } | { status: 'error'; message: string }
 
-type Row = { kind: 'entry'; entry: FileEntry; depth: number; open: boolean } | { kind: 'note'; depth: number; text: string; error?: boolean }
+type Row = { kind: 'entry'; entry: FileEntry; depth: number; open: boolean; where?: string } | { kind: 'note'; depth: number; text: string; error?: boolean }
+
+/** Past this many rows, only those in view are drawn. Rows are ROW px tall. */
+const VIRTUAL_AT = 400
+const ROW = 28
+
+// Copied with Ctrl+C (or the menu): pasted with Ctrl+V into any browser in the app.
+let clipboard: string[] = []
+
+/** The nearest scrolling ancestor; the page itself when there is none. */
+function scrollerOf(el: HTMLElement): HTMLElement {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY
+    if (o === 'auto' || o === 'scroll') return p
+  }
+  return document.scrollingElement as HTMLElement
+}
+
+/** Files dragged in from the desktop or Files, rather than rows of this browser. */
+const fromDesktop = (e: React.DragEvent) => e.dataTransfer.types.includes('Files')
 
 type SortKey = 'name' | 'size' | 'mtime'
 
@@ -84,6 +107,9 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [sizes, setSizes] = useState<Record<string, FolderSize | 'busy'>>({})
+  const [found, setFound] = useState<{ q: string; result: FileFind | null } | null>(null)
+  const [range, setRange] = useState<[number, number]>([0, 160])
   const dragging = useRef<string[] | null>(null)
   const treeRef = useRef<HTMLDivElement>(null)
 
@@ -171,8 +197,37 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       }
       return out
     }
+    // Search all folders: the hits as a flat list, each with the folder it is in.
+    if (found?.result && found.q === q) {
+      const topNorm = norm(top)
+      return sorted(found.result.hits, sort.key, sort.dir).map(
+        (entry): Row => ({ kind: 'entry', entry, depth: 0, open: false, where: norm(parentOf(entry.path)).slice(topNorm.length + 1) || '.' }),
+      )
+    }
     return walk(top, 0)
-  }, [listings, top, expanded, showHidden, sort, q])
+  }, [listings, top, expanded, showHidden, sort, q, found, norm])
+
+  // Huge folders: only the rows in view (and a margin) are drawn.
+  const virtual = rows.length > VIRTUAL_AT
+  useEffect(() => {
+    const tree = treeRef.current
+    if (!virtual || !tree) return
+    const scroller = scrollerOf(tree)
+    const update = () => {
+      const view = scroller.getBoundingClientRect()
+      const offset = view.top - tree.getBoundingClientRect().top - 32
+      const first = Math.max(0, Math.floor(offset / ROW) - 40)
+      setRange([first, first + Math.ceil(view.height / ROW) + 80])
+    }
+    update()
+    scroller.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      scroller.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [virtual, rows.length])
+  const [from, to] = virtual ? [Math.min(range[0], rows.length), Math.min(range[1], rows.length)] : [0, rows.length]
 
   const entryRows = rows.filter((r): r is Extract<Row, { kind: 'entry' }> => r.kind === 'entry')
   const byPath = new Map(entryRows.map((r) => [r.entry.path, r.entry]))
@@ -180,8 +235,15 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
   const current = chosen.at(-1) ?? null
 
   useEffect(() => {
-    if (!current) return
-    treeRef.current?.querySelector(`[data-path="${CSS.escape(current.path)}"]`)?.scrollIntoView({ block: 'nearest' })
+    if (!current || !treeRef.current) return
+    const el = treeRef.current.querySelector(`[data-path="${CSS.escape(current.path)}"]`)
+    if (el) return el.scrollIntoView({ block: 'nearest' })
+    // Not drawn: scroll its place into view, and it will be.
+    const i = rows.findIndex((r) => r.kind === 'entry' && r.entry.path === current.path)
+    if (i < 0) return
+    const scroller = scrollerOf(treeRef.current)
+    const y = treeRef.current.getBoundingClientRect().top - scroller.getBoundingClientRect().top + 32 + i * ROW
+    scroller.scrollTop += y - scroller.clientHeight / 2
   }, [current?.path])
 
   const toggle = (dir: string) => {
@@ -294,7 +356,79 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
     for (const p of paths) refresh(parentOf(p))
     setSelected([])
     const what = paths.length === 1 ? nameOf(paths[0]) : `${paths.length} items`
-    toast({ message: `Moved ${what} to Trash. Restore it from Trash in Files.` })
+    toast({ message: `Moved ${what} to Trash`, action: { label: 'Undo', run: () => void restore(res.trashed) } })
+  }
+
+  async function restore(paths: string[]) {
+    const res = await run<RestoreResult>({ op: 'restore', paths })
+    if (!res) return
+    for (const p of res.restored) refresh(parentOf(p))
+    if (res.skipped.length) toast({ message: res.skipped.map((s) => `${nameOf(s.path)}: ${s.reason}`).join('; '), kind: 'error' })
+  }
+
+  /** Copies into `to`; in the same folder they are duplicates (`x copy.txt`). */
+  async function copyTo(paths: string[], to: string) {
+    const res = await run<CopyResult>({ op: 'copy', paths, to })
+    if (!res) return
+    refresh(to)
+    if (res.copied.length) {
+      const what = res.copied.length === 1 ? nameOf(res.copied[0].to) : `${res.copied.length} items`
+      toast({ message: `Copied ${what} to ${nameOf(to)}`, action: { label: 'Undo', run: () => void trash(res.copied.map((c) => c.to)) } })
+      if (res.copied.length === 1) pick(res.copied[0].to)
+    }
+    if (res.skipped.length) toast({ message: res.skipped.map((s) => `${nameOf(s.path)}: ${s.reason}`).join('; '), kind: 'error' })
+  }
+
+  /** Files dropped from the desktop, uploaded one by one into `dir`. */
+  async function upload(e: React.DragEvent, dir: string) {
+    const items = [...e.dataTransfer.items].filter((i) => i.kind === 'file')
+    const folders = items.filter((i) => i.webkitGetAsEntry?.()?.isDirectory).length
+    const filesIn = [...e.dataTransfer.files].filter((_, i) => !items[i]?.webkitGetAsEntry?.()?.isDirectory)
+    if (folders) toast({ message: 'Folders cannot be dropped here; drop the files inside them', kind: 'error' })
+    let done = 0
+    for (const f of filesIn) {
+      try {
+        await api.uploadFile(profile, dir, f)
+        done++
+      } catch (err) {
+        toast({ message: `${f.name}: ${message(err)}`, kind: 'error' })
+      }
+    }
+    refresh(dir)
+    if (done) toast({ message: `Added ${done === 1 ? filesIn[0].name : `${done} files`} to ${nameOf(dir)}` })
+  }
+
+  async function computeSize(dir: string) {
+    setSizes((s) => ({ ...s, [dir]: 'busy' }))
+    try {
+      const size = await api.folderSize(profile, dir)
+      setSizes((s) => ({ ...s, [dir]: size }))
+    } catch (err) {
+      setSizes(({ [dir]: _gone, ...s }) => s)
+      toast({ message: message(err), kind: 'error' })
+    }
+  }
+
+  async function computeSizes() {
+    const l = listingsRef.current[top]
+    if (l?.status !== 'ok') return
+    for (const e of l.entries) if (e.kind === 'dir' && (showHidden || !e.hidden)) await computeSize(e.path)
+  }
+
+  async function searchAll() {
+    setFound({ q, result: null })
+    try {
+      const result = await api.findFiles(profile, top, q, showHidden)
+      setFound((f) => (f?.q === q ? { q, result } : f))
+    } catch (err) {
+      setFound(null)
+      toast({ message: message(err), kind: 'error' })
+    }
+  }
+
+  const copySelection = (paths: string[]) => {
+    clipboard = paths
+    toast({ message: `Copied ${paths.length === 1 ? nameOf(paths[0]) : `${paths.length} items`}; paste with Ctrl+V` })
   }
 
   async function move(paths: string[], to: string) {
@@ -330,34 +464,43 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
     }
   }
 
-  // Drag rows onto a folder or a path-bar step to move them there.
-  const canDrop = (target: string) => {
+  // Drag rows onto a folder or a path-bar step to move them there (with Ctrl, to copy them);
+  // files from the desktop are copied in.
+  const canDrop = (target: string, copy = false) => {
     const paths = dragging.current
     if (!paths?.length || !reachable(target)) return false
     const t = norm(target)
     return paths.every((p) => {
       const a = norm(p)
-      return t !== a && !t.startsWith(`${a}/`) && norm(parentOf(p)) !== t
+      return t !== a && !t.startsWith(`${a}/`) && (copy || norm(parentOf(p)) !== t)
     })
   }
 
   const dropProps = (target: string) => ({
     onDragOver: (e: React.DragEvent) => {
-      if (!canDrop(target)) return
+      const desktop = !dragging.current && fromDesktop(e) && reachable(target)
+      if (!desktop && !canDrop(target, e.ctrlKey)) return
       e.preventDefault()
       e.stopPropagation()
-      e.dataTransfer.dropEffect = 'move'
+      e.dataTransfer.dropEffect = desktop || e.ctrlKey ? 'copy' : 'move'
       if (dropTarget !== target) setDropTarget(target)
     },
     onDragLeave: () => setDropTarget((d) => (d === target ? null : d)),
     onDrop: (e: React.DragEvent) => {
       const paths = dragging.current
-      const ok = canDrop(target)
+      const copy = e.ctrlKey
+      const ok = canDrop(target, copy)
       dragging.current = null
       setDropTarget(null)
+      if (!paths && fromDesktop(e) && reachable(target)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return void upload(e, target)
+      }
       if (!ok || !paths) return
       e.preventDefault()
-      void move(paths, target)
+      e.stopPropagation()
+      void (copy ? copyTo(paths, target) : move(paths, target))
     },
   })
 
@@ -385,12 +528,19 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
         ...chatEntries(dir ? entry.path : parentOf(entry.path)),
         'sep',
         { label: 'Rename', icon: <PencilLine size={14} />, run: () => setRenaming(entry.path) },
+        { label: 'Duplicate', icon: <CopyPlus size={14} />, run: () => void copyTo([entry.path], parentOf(entry.path)) },
+        ...(dir ? [{ label: 'Compute size', icon: <Sigma size={14} />, run: () => void computeSize(entry.path) }] : []),
         { label: 'New folder', icon: <FolderPlus size={14} />, run: () => void create('mkdir', entry) },
         { label: 'New file', icon: <FilePlus size={14} />, run: () => void create('touch', entry) },
         'sep',
       )
     }
-    items.push({ label: many ? `Move ${paths.length} items to Trash` : 'Move to Trash', icon: <Trash2 size={14} />, danger: true, run: () => void trash(paths) })
+    items.push(
+      { label: many ? `Copy ${paths.length} items` : 'Copy', icon: <Copy size={14} />, run: () => copySelection(paths) },
+      ...(clipboard.length && dir && !many ? [{ label: `Paste ${clipboard.length === 1 ? nameOf(clipboard[0]) : `${clipboard.length} items`}`, icon: <ClipboardPaste size={14} />, run: () => void copyTo(clipboard, entry.path) }] : []),
+      ...(many ? [{ label: `Duplicate ${paths.length} items`, icon: <CopyPlus size={14} />, run: () => void copyTo(paths, parentOf(paths[0])) }] : []),
+      { label: many ? `Move ${paths.length} items to Trash` : 'Move to Trash', icon: <Trash2 size={14} />, danger: true, run: () => void trash(paths) },
+    )
     setMenu({ x: e.clientX, y: e.clientY, entries: items })
   }
 
@@ -403,6 +553,8 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       entries: [
         { label: 'New folder', icon: <FolderPlus size={14} />, run: () => void create('mkdir') },
         { label: 'New file', icon: <FilePlus size={14} />, run: () => void create('touch') },
+        ...(clipboard.length ? [{ label: `Paste ${clipboard.length === 1 ? nameOf(clipboard[0]) : `${clipboard.length} items`}`, icon: <ClipboardPaste size={14} />, run: () => void copyTo(clipboard, top) }] : []),
+        { label: 'Compute folder sizes', icon: <Sigma size={14} />, run: () => void computeSizes() },
         'sep',
         { label: showHidden ? 'Hide hidden files' : 'Show hidden files', icon: <Eye size={14} />, run: () => setShowHidden((v) => !v) },
         { label: 'Open folder in Files', icon: <FolderOpen size={14} />, run: () => void openDefault(top) },
@@ -450,6 +602,14 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       case 'a':
         if (!e.ctrlKey) return
         setSelected(paths)
+        break
+      case 'c':
+        if (!e.ctrlKey || !chosen.length) return
+        copySelection(chosen.map((c) => c.path))
+        break
+      case 'v':
+        if (!e.ctrlKey || !clipboard.length) return
+        void copyTo(clipboard, targetDir())
         break
       default:
         return
@@ -511,6 +671,9 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
         <button className="icon-btn" onClick={() => void create('touch')} title="New file" aria-label="New file">
           <FilePlus size={15} />
         </button>
+        <button className="icon-btn" onClick={() => void computeSizes()} title="Compute folder sizes" aria-label="Compute folder sizes">
+          <Sigma size={15} />
+        </button>
         <button
           className={cx('icon-btn', showHidden && 'on')}
           onClick={() => setShowHidden((v) => !v)}
@@ -535,13 +698,16 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
           tabIndex={0}
           onKeyDown={onKeyDown}
           onContextMenu={backgroundMenu}
+          {...dropProps(top)}
         >
           <div className="file-head">
             <button onClick={() => sortBy('name')}>Name {sortMark('name')}</button>
             <button onClick={() => sortBy('size')}>Size {sortMark('size')}</button>
             <button onClick={() => sortBy('mtime')}>Modified {sortMark('mtime')}</button>
           </div>
-          {rows.map((row, i) => {
+          {from > 0 && <div style={{ height: from * ROW }} aria-hidden />}
+          {rows.slice(from, to).map((row, j) => {
+            const i = from + j
             if (row.kind === 'note') {
               return (
                 <div key={`note${i}`} className={cx('file-row note', row.error && 'error')} style={{ '--depth': row.depth } as React.CSSProperties}>
@@ -608,13 +774,32 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
                     <span className="label">{entry.name}</span>
                   )}
                   {entry.link && <span className="link-mark" title="Symbolic link">↗</span>}
+                  {row.where && <span className="file-where mono">{row.where}</span>}
                 </span>
-                <span className="file-size">{entry.kind === 'file' ? formatSize(entry.size) : '—'}</span>
+                <span className="file-size">{entry.kind === 'file' ? formatSize(entry.size) : sizeLabel(sizes[entry.path])}</span>
                 <span className="file-date">{formatDate(entry.mtime)}</span>
               </div>
             )
           })}
-          {topListing?.status === 'ok' && entryRows.length === 0 && (
+          {to < rows.length && <div style={{ height: (rows.length - to) * ROW }} aria-hidden />}
+          {q && (found?.q !== q || !found.result) && (
+            <button className="file-row find-all" onClick={() => void searchAll()} disabled={found?.q === q}>
+              <span className="file-name">
+                <Search size={13} /> {found?.q === q ? `Searching all folders for “${filter.trim()}”…` : `Search all folders for “${filter.trim()}”`}
+              </span>
+            </button>
+          )}
+          {found?.q === q && found.result && (
+            <div className="file-row note">
+              <span className="file-name">
+                {found.result.hits.length} found in all folders{found.result.complete ? '' : ' (stopped early: narrow the search)'} ·{' '}
+                <button className="link-btn" onClick={() => setFound(null)}>
+                  Back to the tree
+                </button>
+              </span>
+            </div>
+          )}
+          {topListing?.status === 'ok' && entryRows.length === 0 && !(found?.q === q && found.result) && (
             <div className="file-empty">
               {q ? 'Nothing matches the filter' : topListing.entries.length ? 'Only hidden files here (Ctrl+H shows them)' : 'Empty folder'}
             </div>
@@ -636,6 +821,13 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
 }
 
 /** Inline rename: Enter or leaving the field saves, Esc cancels. The name before the extension is selected. */
+/** A folder's computed size: "1.2 MB", "≥ 3 GB" when the count stopped early, "…" while counting. */
+function sizeLabel(s: FolderSize | 'busy' | undefined): string {
+  if (!s) return '—'
+  if (s === 'busy') return '…'
+  return `${s.complete ? '' : '≥ '}${formatSize(s.bytes)}`
+}
+
 function RenameInput({ name, onDone }: { name: string; onDone: (value: string | null) => void }) {
   const ref = useRef<HTMLInputElement>(null)
   const done = useRef(false)

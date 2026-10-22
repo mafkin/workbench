@@ -6,6 +6,7 @@ import { Eye, FilePlus, Pencil } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { NoteFile } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
+import { toggleTaskLine } from '../lib/tasks.ts'
 import { onNoteEvent, type NoteEvent } from '../lib/events.ts'
 import { cx } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
@@ -196,6 +197,14 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
     }
   }
 
+  /** Tick a task in View: the text changes and saves as an edit would. */
+  function toggleTask(line: number) {
+    const next = toggleTaskLine(r.current.draft, line)
+    if (next === null) return
+    setDraft(next)
+    void save()
+  }
+
   function toggle() {
     if (editing) void save()
     else setAtEnd(false)
@@ -316,7 +325,7 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
           <div className="note-surface">
             {draft.trim() ? (
               <Suspense fallback={null}>
-                <Markdown text={draft} notePath={base?.path ?? path} />
+                <Markdown text={draft} notePath={base?.path ?? path} onToggleTask={conflict ? undefined : toggleTask} />
               </Suspense>
             ) : (
               <p className="note-empty">This note is empty. Press Edit (Ctrl+E) to write.</p>

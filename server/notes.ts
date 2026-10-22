@@ -112,6 +112,8 @@ export class Notes extends EventEmitter {
   /** Real path of each opened note -> the `~` paths it was opened as, and its last known rev. */
   #open = new Map<string, { paths: Set<string>; rev: string | null }>()
   #timers = new Map<string, NodeJS.Timeout>()
+  /** Search's copy of each note's text, by real path, with the mtime and size it was read at. */
+  #texts = new Map<string, { mtime: number; size: number; text: string }>()
   // The folders of opened notes: editors and our own saves replace the file itself.
   #folders = new FolderWatcher(MAX_WATCHED, {
     change: (dir, name) => this.#changed(path.join(dir, name)),
@@ -188,15 +190,24 @@ export class Notes extends EventEmitter {
     const found = await this.#collect(id)
     if (!terms.length) return found.slice(0, MAX_HITS).map(({ real: _real, ...n }) => ({ ...n, title: false, lines: [] }))
     const hits: SearchHit[] = []
+    const seen = new Set<string>()
     for (const { real, ...n } of found) {
       const stat = await fsp.stat(real).catch(() => null)
       if (!stat || stat.size > MAX_NOTE) continue
-      const text = await fsp.readFile(real, 'utf8').catch(() => '')
+      seen.add(real)
+      // Each note's text is kept until its mtime or size changes, so a search reads only what changed.
+      let cached = this.#texts.get(real)
+      if (!cached || cached.mtime !== stat.mtimeMs || cached.size !== stat.size) {
+        cached = { mtime: stat.mtimeMs, size: stat.size, text: await fsp.readFile(real, 'utf8').catch(() => '') }
+        this.#texts.set(real, cached)
+      }
+      const text = cached.text
       const name = n.name.toLowerCase()
       const lower = text.toLowerCase()
       if (!terms.every((t) => name.includes(t) || lower.includes(t))) continue
       hits.push({ ...n, title: terms.every((t) => name.includes(t)), lines: matchLines(text, terms) })
     }
+    for (const key of this.#texts.keys()) if (!seen.has(key)) this.#texts.delete(key)
     // `found` is newest first and the sort is stable.
     return hits.sort((a, b) => Number(b.title) - Number(a.title)).slice(0, MAX_HITS)
   }

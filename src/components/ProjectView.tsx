@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import {
+  CATEGORY_PALETTE,
   categoriesOf,
   categoryColor,
   CHAT_COLORS,
@@ -132,6 +133,8 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const [renaming, setRenaming] = useState<string | null>(null)
   const [dropChat, setDropChat] = useState<string | null>(null)
   const dragging = useRef<number | null>(null)
+  // The browser's colour picker, for "Other colour…" on a category.
+  const colourInput = useRef<HTMLInputElement>(null)
   // Where the last right-click on this page was, for follow-up menus (Chat here as…).
   const lastPoint = useRef({ x: 0, y: 0 })
   const hasAgents = Object.keys(profile.agents ?? {}).length > 0
@@ -312,6 +315,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
 
   const categoryMenu = (e: React.MouseEvent) => {
     const known = categoriesOf(profile)
+    const at = e.currentTarget.getBoundingClientRect()
     menuBelow(e, [
       ...known.map((c) => ({
         label: c,
@@ -320,8 +324,34 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       })),
       ...(known.length ? (['sep'] as const) : []),
       { label: 'New category…', icon: <Tag size={14} />, run: () => setEditing('category') },
-      ...(item.category ? [{ label: 'No category', icon: <X size={14} />, run: () => setCard('category', null) }] : []),
+      ...(item.category
+        ? [
+            { label: `Colour of ${item.category}…`, icon: <Palette size={14} />, run: () => colourMenu(at, item.category!) },
+            { label: 'No category', icon: <X size={14} />, run: () => setCard('category', null) },
+          ]
+        : []),
     ])
+  }
+
+  /** A category's colour, for every project in it: the palette, any colour, or back to the palette's pick. */
+  const colourMenu = (at: DOMRect, name: string) => {
+    const set = (color: string | null) => void actions.run([{ op: 'setCategory', name, color }], color ? `${name} is now ${color}` : `${name} has the palette's colour again`)
+    setMenu({ x: at.left, y: at.bottom + 4, entries: [
+      ...CATEGORY_PALETTE.map((c, i) => ({ label: COLOR_NAMES[i] ?? c, icon: <span className="category-dot" style={{ background: c }} />, run: () => set(c) })),
+      'sep',
+      {
+        label: 'Other colour…',
+        icon: <Palette size={14} />,
+        run: () => {
+          const input = colourInput.current
+          if (!input) return
+          input.value = categoryColor(profile, name)
+          input.onchange = () => set(input.value)
+          input.click()
+        },
+      },
+      ...(profile.categories?.[name] ? [{ label: "Palette's pick", icon: <X size={14} />, run: () => set(null) }] : []),
+    ] })
   }
 
   const workflowEntries = (): (MenuEntry | 'sep')[] => {
@@ -387,6 +417,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
             {item.category ?? 'Category'}
           </button>
         )}
+        <input ref={colourInput} type="color" className="visually-hidden" tabIndex={-1} aria-hidden />
         {(hasAgents || item.agent) && (
           <button
             className={cx('agent-chip', !item.agent && 'empty')}
@@ -435,6 +466,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           {item.description || 'Add a description'}
         </p>
       )}
+      <CardDates profileId={profileId} path={item.path} />
 
       <div
         className="step-tabs"
@@ -627,6 +659,35 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       )}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>
+  )
+}
+
+/** "Created 3 Mar 2026 · Updated 2 h ago": the folder's birth, and its last commit or newest file. */
+function CardDates({ profileId, path }: { profileId: string; path: string }) {
+  const [dates, setDates] = useState<{ created: number | null; updated: number | null; source: 'git' | 'files' } | null>(null)
+  useEffect(() => {
+    let live = true
+    api.projectDates(profileId, path).then(
+      (d) => live && setDates(d),
+      () => live && setDates(null),
+    )
+    return () => {
+      live = false
+    }
+  }, [profileId, path])
+  if (!dates || (!dates.created && !dates.updated)) return null
+  const day = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  return (
+    <p className="card-dates">
+      {dates.created && <span title={new Date(dates.created).toLocaleString()}>Created {day(dates.created)}</span>}
+      {dates.created && dates.updated && ' · '}
+      {dates.updated && (
+        <span title={`${dates.source === 'git' ? 'Last commit' : 'Newest file'}: ${new Date(dates.updated).toLocaleString()}`}>
+          Updated {ago(dates.updated)}
+          {dates.source === 'git' ? ' (last commit)' : ''}
+        </span>
+      )}
+    </p>
   )
 }
 

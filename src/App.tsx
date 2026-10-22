@@ -40,7 +40,7 @@ import { ContextCtx, type ContextApi } from './lib/context.ts'
 import type { SwitchItem } from './lib/switcher.ts'
 import { followState, onChatsEvent, onContextEvent, type Connection } from './lib/events.ts'
 import { nameOf } from './lib/files.ts'
-import { useLocal } from './lib/local.ts'
+import { readLocal, useLocal } from './lib/local.ts'
 import {
   CHAT_KEY,
   CONTEXT_KEY,
@@ -636,7 +636,15 @@ export function App() {
       if (dialog.mode === 'edit') return run([{ op: 'updateItem', at: dialog.at, item }])
       if (dialog.mode === 'step') {
         if (dialog.index === undefined) return run([{ op: 'addStep', at: dialog.at, step: item }])
-        return run([{ op: 'updateStep', at: dialog.at, index: dialog.index, step: item }])
+        const ok = await run([{ op: 'updateStep', at: dialog.at, index: dialog.index, step: item }])
+        // A renamed step that was the open tab stays the open tab.
+        const a = activeRef.current
+        const project = a?.profile ? getItem(a.profile, dialog.at) : undefined
+        const old = dialog.item?.label
+        if (ok && a && project?.type === 'folder' && old && item.label !== old && readLocal<Record<string, string>>('projectTab', {})[`${a.id}|${project.path}`] === old) {
+          showProjectTab(a.id, project.path, String(item.label))
+        }
+        return ok
       }
       return false
     },

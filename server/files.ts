@@ -5,22 +5,30 @@
 import { execFile, spawn as nodeSpawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import {
   displayPath,
+  type CopyResult,
   type FileEntry,
+  type FileFind,
   type FileListing,
   type FileOp,
   type FileOpResult,
   type FileText,
+  type FolderSize,
   type MoveResult,
   type Profile,
+  type RestoreResult,
 } from '../shared/config-schema.ts'
 import { StoreError, type ConfigStore } from './config-store.ts'
 import { runDetached, runToExit } from './launch.ts'
 import { IMAGE_TYPES } from './notes.ts'
 import { absPath, browseRoots, inside, realish, within } from './paths.ts'
+import { findTrashed, untrash } from './trash.ts'
 import { FolderWatcher } from './watch.ts'
 
 const TEXT_LIMIT = 200 * 1024
@@ -62,6 +70,19 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
 const joinDisplay = (dir: string, name: string) => `${dir.replace(/\/+$/, '')}/${name}`
 
 /** A single file name: not empty, no slash, not `.` or `..`. */
+/** `name` in `dir` if free (and not a duplicate in place), else `name copy`, `name copy 2`… */
+async function freeName(dir: string, name: string, isDir: boolean, sameFolder: boolean): Promise<string> {
+  const ext = isDir ? '' : path.extname(name)
+  const base = name.slice(0, name.length - ext.length)
+  if (!sameFolder && !(await exists(path.join(dir, name)))) return path.join(dir, name)
+  for (let n = 1; ; n++) {
+    const dest = path.join(dir, `${base} copy${n === 1 ? '' : ` ${n}`}${ext}`)
+    if (!(await exists(dest))) return dest
+  }
+}
+
+const MAX_UPLOAD = 2 * 1024 ** 3
+
 function checkName(raw: string): string {
   const name = raw.trim()
   if (!name || name === '.' || name === '..' || /[/\0]/.test(name)) throw new StoreError('Not a valid name', 400)
@@ -280,6 +301,134 @@ export class Files extends EventEmitter {
         await runToExit({ command: 'gio', args: ['trash', '--', ...srcs.map((s) => s.real)] }, this.#spawn)
         return { trashed: srcs.map((s) => s.display) }
       }
+      case 'copy': {
+        const to = await this.#resolve(id, op.to)
+        if (!(await fsp.stat(to.real).catch(() => null))?.isDirectory()) throw new StoreError('Not a folder', 400)
+        const result: CopyResult = { copied: [], skipped: [] }
+        for (const p of op.paths) {
+          const src = await this.#resolve(id, p)
+          if (!(await exists(src.real))) throw new StoreError('Not found', 404)
+          if (within(to.real, src.real)) {
+            result.skipped.push({ path: src.display, reason: 'A folder cannot go inside itself' })
+            continue
+          }
+          const name = path.posix.basename(src.display)
+          const dir = (await fsp.stat(src.real)).isDirectory()
+          const dest = await freeName(to.real, name, dir, path.dirname(src.real) === to.real)
+          await fsp.cp(src.real, dest, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true, verbatimSymlinks: true })
+          result.copied.push({ from: src.display, to: joinDisplay(to.display, path.basename(dest)) })
+        }
+        return result
+      }
+      case 'restore': {
+        const result: RestoreResult = { restored: [], skipped: [] }
+        for (const p of op.paths) {
+          const { real, display } = await this.#place(id, p)
+          const skip = (reason: string) => result.skipped.push({ path: display, reason })
+          const found = await findTrashed(real, this.home)
+          if (!found) skip('It is not in the Trash')
+          else if (await exists(real)) skip('Something else is there now; it stays in the Trash')
+          else {
+            try {
+              await untrash(found, real)
+              result.restored.push(display)
+            } catch (err) {
+              if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+              skip('It is on another drive; restore it from Trash in Files')
+            }
+          }
+        }
+        return result
+      }
+    }
+  }
+
+  /** A folder's size: files under it, symlinks not followed; stops after 10 s or 200 000 entries. */
+  async size(id: string, raw: string): Promise<FolderSize> {
+    const { real } = await this.#resolve(id, raw)
+    const end = Date.now() + 10_000
+    let bytes = 0
+    let files = 0
+    let seen = 0
+    const stack = [real]
+    while (stack.length) {
+      if (++seen > 200_000 || Date.now() > end) return { bytes, files, complete: false }
+      const dir = stack.pop()!
+      for (const d of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        const full = path.join(dir, d.name)
+        if (d.isDirectory()) stack.push(full)
+        else if (d.isFile()) {
+          bytes += (await fsp.lstat(full).catch(() => null))?.size ?? 0
+          files++
+        }
+      }
+    }
+    return { bytes, files, complete: true }
+  }
+
+  /**
+   * Names containing `query` below a folder, closed folders included. Dotfiles
+   * only with `hidden`; `.git` and `node_modules` are never searched. Stops at
+   * 2000 hits, 100 000 entries or 5 s.
+   */
+  async find(id: string, raw: string, query: string, hidden: boolean): Promise<FileFind> {
+    const { real, display } = await this.#resolve(id, raw)
+    const q = query.trim().toLowerCase()
+    if (!q) return { hits: [], complete: true }
+    const end = Date.now() + 5000
+    const hits: FileEntry[] = []
+    let seen = 0
+    const queue: [string, string][] = [[real, display]]
+    while (queue.length) {
+      const [dir, shown] = queue.shift()!
+      for (const d of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        if (++seen > 100_000 || Date.now() > end || hits.length >= 2000) return { hits, complete: false }
+        if (d.name === '.git' || d.name === 'node_modules' || (!hidden && d.name.startsWith('.'))) continue
+        const full = path.join(dir, d.name)
+        const p = joinDisplay(shown, d.name)
+        if (d.isDirectory()) queue.push([full, p])
+        if (!d.name.toLowerCase().includes(q)) continue
+        const st = await fsp.lstat(full).catch(() => null)
+        if (!st) continue
+        const kind = st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'other'
+        hits.push({ name: d.name, path: p, kind, link: st.isSymbolicLink(), size: kind === 'file' ? st.size : 0, mtime: st.mtimeMs, hidden: d.name.startsWith('.'), ignored: false })
+      }
+    }
+    return { hits, complete: true }
+  }
+
+  /** A file dropped from the desktop, written into a folder under a free name; never over another. */
+  async upload(id: string, rawDir: string, rawName: string, body: NodeJS.ReadableStream, limit = MAX_UPLOAD): Promise<{ path: string }> {
+    const dir = await this.#resolve(id, rawDir)
+    if (!(await fsp.stat(dir.real).catch(() => null))?.isDirectory()) throw new StoreError('Not a folder', 400)
+    const name = checkName(rawName)
+    const tmp = path.join(dir.real, `.wb-upload-${randomBytes(6).toString('hex')}`)
+    let size = 0
+    try {
+      await pipeline(
+        body,
+        new Transform({
+          transform(chunk: Buffer, _enc, done) {
+            size += chunk.length
+            done(size > limit ? new StoreError('That file is too large to drop here (2 GB at most)', 413) : null, chunk)
+          },
+        }),
+        fs.createWriteStream(tmp, { flags: 'wx' }),
+      )
+      const ext = path.extname(name)
+      const base = name.slice(0, name.length - ext.length)
+      for (let n = 1; ; n++) {
+        const dest = path.join(dir.real, n === 1 ? name : `${base} ${n}${ext}`)
+        try {
+          // A hard link fails when the name is taken, where a rename would replace it.
+          await fsp.link(tmp, dest)
+          return { path: joinDisplay(dir.display, path.basename(dest)) }
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || n > 999) throw err
+        }
+      }
+    } finally {
+      await fsp.rm(tmp, { force: true })
     }
   }
 
@@ -297,6 +446,15 @@ export class Files extends EventEmitter {
     if (!(await browseRoots(profile, this.home)).some((r) => within(real, r.real))) {
       throw new StoreError("Outside this profile's folders", 403)
     }
+    return { real, display: displayPath(lexical, this.home) }
+  }
+
+  /** Where something was or will be: its folder resolved, inside the profile's folders, not one of them. */
+  async #place(id: string, raw: string): Promise<{ real: string; display: string }> {
+    const profile = this.#profile(id)
+    const lexical = absPath(raw, this.home)
+    const real = path.join(await realish(path.dirname(lexical)), path.basename(lexical))
+    if (!(await browseRoots(profile, this.home)).some((r) => inside(real, r.real))) throw new StoreError("Outside this profile's folders", 403)
     return { real, display: displayPath(lexical, this.home) }
   }
 

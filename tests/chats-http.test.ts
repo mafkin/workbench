@@ -115,6 +115,18 @@ describe('chat routes', { timeout: 15_000 }, () => {
     expect((await call('DELETE', `/api/chats/${chat.id}`)).status).toBe(404)
   })
 
+  test('renaming a chat step in the app keeps its chat', async () => {
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 0 })
+    const renamed = await call('POST', '/api/profiles/work/ops', {
+      rev: rev(),
+      ops: [{ op: 'updateStep', at: { section: 0, index: 0 }, index: 0, step: { label: 'claude', type: 'chat', args: ['--model', 'opus'] } }],
+    })
+    expect(renamed.status).toBe(200)
+    expect(server.chats.get(step.body.id)?.slot).toBe('step:~/alpha|claude')
+    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 0 })
+    expect(again.body.id).toBe(step.body.id)
+  })
+
   test('History lists the Claude sessions in the project folder', async () => {
     const { body: chat } = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
     server.chats.write(chat.id, 'plan the release\r')
@@ -168,7 +180,8 @@ describe('chat terminal socket', { timeout: 15_000 }, () => {
     expect(frames[0].startsWith('r')).toBe(true)
     ws.send('ihello socket\r')
     await until(() => frames.some((f) => f.startsWith('o') && f.includes('you said: hello socket')), 'the echo')
-    await until(() => server.chats.text(chat.id).split('\n').every((l) => l.length <= 90), 'the size')
+    // The args line (with the session hook's --settings) is longer than any width.
+    await until(() => server.chats.text(chat.id).split('\n').every((l) => l.length <= 90 || l.startsWith('args=')), 'the size')
     ws.close()
   })
 

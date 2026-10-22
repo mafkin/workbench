@@ -44,6 +44,7 @@ import { makeGuard } from './guard.ts'
 import { LaunchError, openItem, runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
+import { projectDates } from './project-dates.ts'
 import { Notes, type NoteEvent } from './notes.ts'
 import { absPath, browseRoots, realish, within } from './paths.ts'
 
@@ -81,6 +82,8 @@ const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string
 const ProfileQuery = z.object({ profile: z.string() })
 const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
 const FileOpBody = z.object({ profile: z.string(), op: FileOp })
+const FindQuery = z.object({ profile: z.string(), path: z.string(), q: z.string().default(''), hidden: z.string().optional() })
+const UploadQuery = z.object({ profile: z.string(), dir: z.string(), name: z.string() })
 const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.boolean().optional() })
 const ChatStart = z.object({
   profile: z.string(),
@@ -174,13 +177,26 @@ export async function buildServer(opts: ServerOptions) {
     return reply.code(500).send({ error: 'Internal error' })
   })
 
+  // Uploads arrive as raw bytes; the route streams them to disk (and counts them) itself.
+  app.addContentTypeParser('application/octet-stream', (_req, payload, done) => done(null, payload))
+
   app.get('/api/health', async () => ({ ok: true }))
 
   app.get('/api/state', async () => state())
 
   app.post<{ Params: { id: string } }>('/api/profiles/:id/ops', async (req) => {
     const { rev, ops } = parse(OpsBody, req.body)
-    return store.apply(req.params.id, rev, ops)
+    // A chat step's chat is found by its label: a rename moves the chat with it.
+    const before = store.profile(req.params.id).profile
+    const renames = ops.flatMap((op) => {
+      if (op.op !== 'updateStep' || !before) return []
+      const project = getItem(before, op.at)
+      const old = project?.type === 'folder' ? stepsOf(before, project)[op.index] : undefined
+      return project?.type === 'folder' && old?.type === 'chat' && old.label !== op.step.label ? [{ from: stepSlot(project.path, old.label), to: stepSlot(project.path, String(op.step.label)) }] : []
+    })
+    const result = await store.apply(req.params.id, rev, ops)
+    for (const r of renames) chats.moveSlot(req.params.id, r.from, r.to)
+    return result
   })
 
   app.post<{ Params: { id: string } }>('/api/profiles/:id/undo', async (req) => {
@@ -295,6 +311,23 @@ export async function buildServer(opts: ServerOptions) {
   app.post('/api/files/op', async (req) => {
     const { profile, op } = parse(FileOpBody, req.body)
     return files.op(profile, op)
+  })
+
+  app.get('/api/files/size', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    return files.size(profile, p)
+  })
+
+  app.get('/api/files/find', async (req) => {
+    const b = parse(FindQuery, req.query)
+    return files.find(b.profile, b.path, b.q, b.hidden === '1')
+  })
+
+  // A file dropped from the desktop: the body is its bytes, streamed to disk.
+  app.post('/api/files/upload', async (req) => {
+    const b = parse(UploadQuery, req.query)
+    if (!req.body || typeof (req.body as NodeJS.ReadableStream).pipe !== 'function') throw new StoreError('Send the file as application/octet-stream', 415)
+    return files.upload(b.profile, b.dir, b.name, req.body as NodeJS.ReadableStream)
   })
 
   app.post('/api/files/open', async (req) => {
@@ -443,6 +476,14 @@ export async function buildServer(opts: ServerOptions) {
     const p = store.profile(id)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
     return sessionsIn(await chatFolder(p.profile, raw, true), home)
+  })
+
+  // A project card's dates: when its folder was made and last worked on.
+  app.get('/api/projects/dates', async (req) => {
+    const { profile: id, path: raw } = parse(PathQuery, req.query)
+    const p = store.profile(id)
+    if (!p.profile) throw new StoreError('The profile file is broken', 423)
+    return projectDates(await chatFolder(p.profile, raw, true))
   })
 
   // Claude setup: what claude loads, for everywhere or for a folder of the

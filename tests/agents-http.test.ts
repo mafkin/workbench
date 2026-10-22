@@ -79,7 +79,7 @@ describe('agent profiles at chat start', { timeout: 15_000 }, () => {
   test("New chat starts the project's default agent profile, with its flags and first prompt", async () => {
     const { body: chat } = await start({ at: ALPHA })
     expect(chat).toMatchObject({ agentProfile: 'Reviewer', bypass: false, agent: 'claude' })
-    await sees(chat.id, `args=["--model","opus","--permission-mode","plan","--session-id","${chat.session}"]`)
+    await sees(chat.id, `args=["--model","opus","--permission-mode","plan","--session-id","${chat.session}","--settings"`)
     await sees(chat.id, 'prompt=Look at the diff')
   })
 

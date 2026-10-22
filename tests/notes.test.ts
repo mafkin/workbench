@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ConfigStore } from '../server/config-store.ts'
 import { buildServer } from '../server/main.ts'
 import { Notes } from '../server/notes.ts'
@@ -248,6 +248,24 @@ describe('list and search', () => {
     expect(hit.lines[0].text.length).toBeLessThan(260)
     const [s, e] = hit.lines[0].ranges[0]
     expect(hit.lines[0].text.slice(s, e)).toBe('needle')
+  })
+
+  it('search reads only notes that changed since the last search, and sees edits and deletions', async () => {
+    await notes.search('work', 'warm up')
+    const reads = vi.spyOn(fsp, 'readFile')
+    try {
+      expect(await notes.search('work', 'needle')).toEqual([])
+      expect(reads).not.toHaveBeenCalled()
+      const file = await write('notes/Fresh.md', 'a needle here\n')
+      expect((await notes.search('work', 'needle')).map((h) => h.path)).toEqual(['~/notes/Fresh.md'])
+      expect(reads).toHaveBeenCalledTimes(1)
+      await fsp.writeFile(file, 'a haystack\n')
+      expect(await notes.search('work', 'needle')).toEqual([])
+      await fsp.rm(file)
+      expect(await notes.search('work', 'haystack')).toEqual([])
+    } finally {
+      reads.mockRestore()
+    }
   })
 
   it('an empty query lists notes without snippets', async () => {

@@ -2,7 +2,10 @@
 // A stand-in for the claude CLI in tests: no network, no model. It prints what it
 // was started with, echoes what you type, keeps a transcript where claude would,
 // rings the bell on "ring", works for a while on "work", and answers -p with a
-// canned summary.
+// canned summary. Runs SessionStart hooks from --settings, and "clear" starts
+// a new session as /clear does.
+import { execSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -13,7 +16,7 @@ const flag = (name) => {
   return i >= 0 ? argv[i + 1] : undefined
 }
 // Flags that take one value, and lists that take every word up to the next flag.
-const VALUED = new Set(['--session-id', '--resume', '-r', '--model', '-n', '--name', '--agent', '--effort', '--permission-mode', '--append-system-prompt'])
+const VALUED = new Set(['--settings', '--session-id', '--resume', '-r', '--model', '-n', '--name', '--agent', '--effort', '--permission-mode', '--append-system-prompt'])
 const LISTS = new Set(['--add-dir', '--allowedTools', '--disallowedTools', '--mcp-config'])
 const positional = []
 for (let i = 0; i < argv.length; i++) {
@@ -22,10 +25,27 @@ for (let i = 0; i < argv.length; i++) {
   else if (!argv[i].startsWith('-')) positional.push(argv[i])
 }
 const resume = flag('--resume')
-const session = resume ?? flag('--session-id') ?? 'none'
+let session = resume ?? flag('--session-id') ?? 'none'
 const cwd = process.cwd()
 const base = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME, '.claude')
-const transcript = path.join(base, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${session}.jsonl`)
+const transcriptOf = (id) => path.join(base, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${id}.jsonl`)
+
+// SessionStart hooks from --settings run as claude runs them: the event as JSON on stdin.
+function sessionStart(source) {
+  let settings = {}
+  try {
+    settings = JSON.parse(flag('--settings') ?? '{}')
+  } catch {}
+  for (const group of settings.hooks?.SessionStart ?? []) {
+    for (const hook of group.hooks ?? []) {
+      if (hook.type !== 'command') continue
+      const input = JSON.stringify({ session_id: session, transcript_path: transcriptOf(session), cwd, hook_event_name: 'SessionStart', source })
+      try {
+        execSync(hook.command, { input, stdio: ['pipe', 'ignore', 'ignore'] })
+      } catch {}
+    }
+  }
+}
 
 if (argv.includes('-p') || argv.includes('--print')) {
   process.stdout.write(`SUMMARY of ${session}: fixed the parser; next, the tests.\n`)
@@ -33,11 +53,13 @@ if (argv.includes('-p') || argv.includes('--print')) {
 }
 
 const record = (text) => {
+  const transcript = transcriptOf(session)
   fs.mkdirSync(path.dirname(transcript), { recursive: true })
   const line = { type: 'user', cwd, sessionId: session, message: { role: 'user', content: text }, timestamp: new Date().toISOString() }
   fs.appendFileSync(transcript, `${JSON.stringify(line)}\n`)
 }
 
+sessionStart(resume ? 'resume' : 'startup')
 process.stdout.write('\x1b]0;✳ Fake Claude\x07')
 process.stdout.write(`FAKE CLAUDE cwd=${cwd}\r\n`)
 process.stdout.write(`session=${session} resumed=${!!resume}\r\n`)
@@ -52,6 +74,12 @@ const rl = readline.createInterface({ input: process.stdin })
 rl.on('line', (line) => {
   const text = line.trim()
   if (text === 'exit') process.exit(0)
+  if (text === 'clear') {
+    session = randomUUID()
+    sessionStart('clear')
+    process.stdout.write(`cleared: session=${session}\r\n> `)
+    return
+  }
   if (text === 'ring') process.stdout.write('\x07')
   if (text.startsWith('title ')) process.stdout.write(`\x1b]0;✳ ${text.slice(6)}\x07`)
   if (text === 'work') {

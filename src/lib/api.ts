@@ -3,10 +3,12 @@ import type {
   Chat,
   ClaudeSession,
   ContextStatus,
+  FileFind,
   FileListing,
   FileOp,
   FileOpResult,
   FileText,
+  FolderSize,
   ItemAddr,
   NoteFile,
   NoteSummary,
@@ -84,6 +86,25 @@ export const fileTicket = (profile: string, path: string, folder = false) =>
 export const fileOp = <T extends FileOpResult = FileOpResult>(profile: string, op: FileOp) =>
   api<T>('/api/files/op', { body: { profile, op } })
 export const openFile = (profile: string, path: string) => api('/api/files/open', { body: { profile, path } })
+/** When a project's folder was made and last worked on (git, else its files). */
+export const projectDates = (profile: string, path: string) =>
+  api<{ created: number | null; updated: number | null; source: 'git' | 'files' }>(`/api/projects/dates?${query({ profile, path })}`)
+/** A folder's size, added up on request. */
+export const folderSize = (profile: string, path: string) => api<FolderSize>(`/api/files/size?${query({ profile, path })}`)
+/** Names containing `q` below a folder, closed folders included. */
+export const findFiles = (profile: string, path: string, q: string, hidden: boolean) =>
+  api<FileFind>(`/api/files/find?${query({ profile, path, q, ...(hidden ? { hidden: '1' } : {}) })}`)
+/** A file dropped from the desktop, streamed into `dir`; the service picks a free name. */
+export async function uploadFile(profile: string, dir: string, file: File): Promise<{ path: string }> {
+  const res = await fetch(`/api/files/upload?${query({ profile, dir, name: file.name })}`, {
+    method: 'POST',
+    headers: { 'x-workbench': '1', 'content-type': 'application/octet-stream' },
+    body: file,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new ApiError(data.error ?? res.statusText, res.status, data)
+  return data
+}
 
 // Chats: started from an entry or step by address; the service picks the program.
 export interface ChatStart {

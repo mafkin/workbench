@@ -189,7 +189,8 @@ export function NavPanel(props: Props) {
           <button
             className={cx('icon-btn', editing && 'on')}
             onClick={() => setEditing(!editing)}
-            title={editing ? 'Done editing (Esc)' : 'Edit navigation'}
+            disabled={!!active.error}
+            title={active.error ? `Fix ${active.id}.yaml first: editing is paused while it has an error` : editing ? 'Done editing (Esc)' : 'Edit navigation'}
             aria-pressed={editing}
             aria-label="Edit navigation"
           >

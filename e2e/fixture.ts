@@ -11,8 +11,9 @@ export const WORK_FILE = path.join(DIR, 'profiles/work.yaml')
 export const PERSONAL_FILE = path.join(DIR, 'profiles/personal.yaml')
 export const NOTES = path.join(HOME, 'notes')
 export const ALPHA = path.join(HOME, 'alpha')
-/** Where the fake `gio trash` puts files, outside the fake home. */
-export const TRASH = path.join(DIR, 'trash')
+/** The fake home's Trash, where the fake `gio trash` puts files (with .trashinfo, as GNOME does). */
+export const TRASH_DIR = path.join(HOME, '.local/share/Trash')
+export const TRASH = path.join(TRASH_DIR, 'files')
 /** Stand-ins for claude and the login shell; chats in tests never run the real ones. */
 export const FAKE_CLAUDE = path.resolve(import.meta.dirname, '../tests/fixtures/fake-claude.mjs')
 export const FAKE_SHELL = path.resolve(import.meta.dirname, '../tests/fixtures/fake-shell.mjs')

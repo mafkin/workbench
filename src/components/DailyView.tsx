@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { fillTemplate, isoDate, joinNotes, type NavItem } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
@@ -26,8 +26,20 @@ const longDate = (date: string) =>
 /** Today's note, created from the template the first time it is opened; arrows step through other days. */
 export function DailyView({ item, kicker }: { item: DailyItem; kicker: string }) {
   const notes = useNotes()
-  const today = isoDate(new Date())
+  const [today, setToday] = useState(() => isoDate(new Date()))
   const [date, setDate] = useState(today)
+
+  // At midnight "today" moves on, and so does the page if it was showing today.
+  useEffect(() => {
+    const now = new Date()
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    const timer = setTimeout(() => {
+      const next = isoDate(new Date())
+      setDate((d) => (d === today ? next : d))
+      setToday(next)
+    }, midnight.getTime() - now.getTime() + 1000)
+    return () => clearTimeout(timer)
+  }, [today])
 
   if (!notes.root) {
     return (

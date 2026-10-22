@@ -263,6 +263,8 @@ export const Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('moveItem'), from: ItemAddr, to: ListAddr, index }),
   // An empty value removes an optional key (home, notes).
   z.object({ op: z.literal('setProfileField'), key: z.enum(PROFILE_FIELDS), value: z.string() }),
+  /** A category's colour in `categories:`; null goes back to the palette's pick. */
+  z.object({ op: z.literal('setCategory'), name: z.string().trim().min(1), color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb').nullable() }),
   // Workflow steps of the folder entry at `at`. The first change to a project
   // using the profile's workflow copies it into the project's own steps.
   z.object({ op: z.literal('addStep'), at: ItemAddr, step: itemInput, index: index.optional() }),
@@ -433,7 +435,7 @@ export function stepEntry(project: string, step: StepItem): StepItem {
 const parentPath = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) || '/' : '.')
 
 // Tame colours for categories without their own, picked steadily by name.
-const CATEGORY_PALETTE = ['#7d93ab', '#8fa58a', '#b39b78', '#a38aa8', '#7fa3a0', '#b58a86', '#9a9fb0']
+export const CATEGORY_PALETTE = ['#7d93ab', '#8fa58a', '#b39b78', '#a38aa8', '#7fa3a0', '#b58a86', '#9a9fb0']
 
 export function categoryColor(profile: Profile, name: string): string {
   const own = profile.categories?.[name]
@@ -519,6 +521,10 @@ export const FileOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('touch'), dir: z.string(), name: z.string() }),
   z.object({ op: z.literal('move'), paths: z.array(z.string()).min(1), to: z.string() }),
   z.object({ op: z.literal('trash'), paths: z.array(z.string()).min(1) }),
+  /** Into `to`, under a free name (`x copy.txt`) when the name is taken or it is the same folder. */
+  z.object({ op: z.literal('copy'), paths: z.array(z.string()).min(1), to: z.string() }),
+  /** Put trashed files back where they were (Undo for Trash). */
+  z.object({ op: z.literal('restore'), paths: z.array(z.string()).min(1) }),
 ])
 export type FileOp = z.output<typeof FileOp>
 
@@ -527,7 +533,30 @@ export interface MoveResult {
   skipped: { path: string; reason: string }[]
 }
 
-export type FileOpResult = { path: string } | MoveResult | { trashed: string[] }
+export interface CopyResult {
+  copied: { from: string; to: string }[]
+  skipped: { path: string; reason: string }[]
+}
+
+export interface RestoreResult {
+  restored: string[]
+  skipped: { path: string; reason: string }[]
+}
+
+export type FileOpResult = { path: string } | MoveResult | { trashed: string[] } | CopyResult | RestoreResult
+
+/** A folder's size, added up on request; `complete` is false when the count stopped early. */
+export interface FolderSize {
+  bytes: number
+  files: number
+  complete: boolean
+}
+
+/** Names matching a search below a folder, closed folders included. */
+export interface FileFind {
+  hits: FileEntry[]
+  complete: boolean
+}
 
 // Agent chats (part 5)
 

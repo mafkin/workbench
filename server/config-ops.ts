@@ -382,6 +382,16 @@ function applyOp(doc: Document, op: Op) {
       node.delete('steps')
       return
     }
+    case 'setCategory': {
+      const existing = doc.get('categories', true)
+      if (op.color === null) {
+        if (!isMap(existing)) return
+        existing.delete(op.name)
+        if (existing.items.length === 0) doc.delete('categories')
+      } else if (isMap(existing)) existing.set(op.name, op.color)
+      else setTopLevel(doc, 'categories', doc.createNode({ [op.name]: op.color }))
+      return
+    }
     case 'setAgent':
       setAgent(doc, op.name, op.agent, op.rename)
       return

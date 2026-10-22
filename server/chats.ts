@@ -9,10 +9,11 @@ import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import serialize from '@xterm/addon-serialize'
 import headless from '@xterm/headless'
 import type { IPty } from 'node-pty'
-import { displayPath, type Agent, type Chat } from '../shared/config-schema.ts'
+import { displayPath, SESSION_ID, type Agent, type Chat } from '../shared/config-schema.ts'
 import { countPrompts, sessionFile } from './claude-sessions.ts'
 import { StoreError } from './config-store.ts'
 import { writeAtomic } from './fs-util.ts'
@@ -30,7 +31,11 @@ export interface ChatsOptions {
   /** Output stopping this long after `busyMs` of work asks for attention. */
   quietMs?: number
   busyMs?: number
+  /** The SessionStart hook that tells a chat about /clear and /resume; false for none. */
+  sessionHook?: string | false
 }
+
+const SESSION_HOOK = fileURLToPath(new URL('./session-hook.mjs', import.meta.url))
 
 export interface ChatSpec {
   profile: string
@@ -146,6 +151,9 @@ export class Chats extends EventEmitter {
   #emitting = new Set<string>()
   #saveTimer?: ReturnType<typeof setTimeout>
   #saving: Promise<void> = Promise.resolve()
+  #hook: string | false
+  #hookDir: string
+  #hookWatch: fs.FSWatcher | null = null
 
   constructor(opts: ChatsOptions) {
     super()
@@ -154,9 +162,44 @@ export class Chats extends EventEmitter {
     this.#commands = opts.commands ?? {}
     this.#quietMs = opts.quietMs ?? 3000
     this.#busyMs = opts.busyMs ?? 3000
+    this.#hook = opts.sessionHook ?? SESSION_HOOK
+    this.#hookDir = path.join(opts.stateDir, 'sessions')
+  }
+
+  /**
+   * claude flags that make it report its session on start, /clear and /resume;
+   * hooks from --settings run alongside your own.
+   */
+  #hookArgs(): string[] {
+    if (!this.#hook || !fs.existsSync(this.#hook)) return []
+    const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(this.#hook)}`
+    return ['--settings', JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command }] }] } })]
+  }
+
+  /** The hook wrote a chat's session: follow it when it moved on (/clear, /resume). */
+  async #heard(file: string) {
+    const id = file.replace(/\.json$/, '')
+    const chat = this.#chats.get(id)
+    if (!chat || chat.agent !== 'claude') return
+    const data = await fsp
+      .readFile(path.join(this.#hookDir, file), 'utf8')
+      .then((t) => JSON.parse(t) as { session?: string }, () => null)
+    if (!data?.session || !SESSION_ID.test(data.session) || data.session === chat.session) return
+    chat.session = data.session
+    chat.messages = 0
+    this.#changed(chat)
+    void this.#count(chat)
   }
 
   async init() {
+    await fsp.mkdir(this.#hookDir, { recursive: true })
+    try {
+      this.#hookWatch = fs.watch(this.#hookDir, (_e, name) => {
+        if (name?.endsWith('.json')) void this.#heard(name)
+      })
+    } catch {
+      // Without the watch, chats just do not follow /clear.
+    }
     let saved: Saved[] = []
     try {
       const data = JSON.parse(await fsp.readFile(this.#file, 'utf8'))
@@ -258,6 +301,15 @@ export class Chats extends EventEmitter {
     this.#changed(chat)
     if (resume) void this.#count(chat)
     return { ...chat }
+  }
+
+  /** A chat step was renamed: its chat goes with it. */
+  moveSlot(profile: string, from: string, to: string) {
+    for (const chat of this.#chats.values()) {
+      if (chat.profile !== profile || chat.slot !== from) continue
+      chat.slot = to
+      this.#changed(chat)
+    }
   }
 
   async update(id: string, patch: { label?: string | null; color?: string | null; pinned?: boolean }) {
@@ -399,11 +451,13 @@ export class Chats extends EventEmitter {
     this.#views.delete(id)
     this.#chats.delete(id)
     this.#meta.delete(id)
+    await fsp.rm(path.join(this.#hookDir, `${id}.json`), { force: true })
     this.#changed(chat)
   }
 
   /** Stop every program and save the list (the service is closing). */
   async shutdown() {
+    this.#hookWatch?.close()
     for (const live of this.#live.values()) this.#end(live)
     this.#live.clear()
     clearTimeout(this.#saveTimer)
@@ -442,14 +496,16 @@ export class Chats extends EventEmitter {
     const cmd = this.#program(chat.agent)
     const argv =
       chat.agent === 'claude'
-        ? [...meta.args, resume ? '--resume' : '--session-id', chat.session!, ...(prompt ? [prompt] : [])]
+        ? [...meta.args, resume ? '--resume' : '--session-id', chat.session!, ...this.#hookArgs(), ...(prompt ? [prompt] : [])]
         : ['-l', ...meta.args]
     const term = new headless.Terminal({ cols: meta.cols, rows: meta.rows, scrollback: 5000, allowProposedApi: true })
     const ser = new serialize.SerializeAddon()
     term.loadAddon(ser)
     let proc: IPty
     try {
-      proc = pty.spawn(cmd, argv, { name: 'xterm-256color', cols: meta.cols, rows: meta.rows, cwd: meta.dir, env: this.#env(cmd) })
+      // The session hook reports to this chat's file.
+      const env = { ...this.#env(cmd), WORKBENCH_CHAT: chat.id, WORKBENCH_HOOK_DIR: this.#hookDir }
+      proc = pty.spawn(cmd, argv, { name: 'xterm-256color', cols: meta.cols, rows: meta.rows, cwd: meta.dir, env })
     } catch (err) {
       term.dispose()
       throw new StoreError(`Could not start ${path.basename(cmd)}: ${(err as Error).message}`, 422)

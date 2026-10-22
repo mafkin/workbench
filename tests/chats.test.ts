@@ -51,12 +51,27 @@ describe('chats', { timeout: 15_000 }, () => {
     expect(chat.session).toMatch(/^[0-9a-f-]{36}$/)
     await sees(chat.id, `FAKE CLAUDE cwd=${project}`)
     await sees(chat.id, `session=${chat.session} resumed=false`)
-    await sees(chat.id, `args=["--model","opus","--session-id","${chat.session}"]`)
+    await sees(chat.id, `args=["--model","opus","--session-id","${chat.session}","--settings"`)
     await until(() => chats.get(chat.id)?.title === 'Fake Claude', 'the title')
 
     chats.write(chat.id, 'hello there\r')
     await sees(chat.id, 'you said: hello there')
     expect(chats.screen(chat.id)).toContain('you said: hello there')
+  })
+
+  test('after /clear (or /resume) in claude, the chat follows the new session', async () => {
+    const chat = await chats.start(spec())
+    await sees(chat.id, '"--settings"')
+    chats.write(chat.id, 'clear\r')
+    await sees(chat.id, 'cleared: session=')
+    const now = /cleared: session=([0-9a-f-]{36})/.exec(chats.text(chat.id))![1]
+    expect(now).not.toBe(chat.session)
+    await until(() => chats.get(chat.id)?.session === now, 'the chat to follow the new session')
+    // Resume continues the session it is in now.
+    chats.write(chat.id, 'exit\r')
+    await until(() => chats.get(chat.id)?.state === 'exited', 'exit')
+    await chats.restart(chat.id, { fresh: false })
+    await sees(chat.id, `session=${now}`)
   })
 
   test('the bell asks for attention unless someone is watching with focus', async () => {

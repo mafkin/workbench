@@ -3645,3 +3645,108 @@ button {
   padding: 16px;
   color: var(--faint);
 }
+
+/* Code colours in a note's view (classHighlighter's tok-… classes), from the theme's tokens. */
+
+.markdown .tok-keyword,
+.markdown .tok-operator.tok-definition {
+  color: var(--accent);
+}
+
+.markdown .tok-string,
+.markdown .tok-string2 {
+  color: var(--ok);
+}
+
+.markdown .tok-comment {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.markdown .tok-number,
+.markdown .tok-bool,
+.markdown .tok-atom,
+.markdown .tok-literal {
+  color: var(--warn);
+}
+
+.markdown .tok-typeName,
+.markdown .tok-className,
+.markdown .tok-tagName {
+  color: var(--danger);
+}
+
+.markdown .tok-propertyName,
+.markdown .tok-attributeName {
+  color: var(--text-strong);
+}
+
+.markdown .tok-variableName.tok-definition,
+.markdown .tok-heading {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.markdown .task-list-item input[type='checkbox']:not(:disabled) {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+/* File browser: search all folders, folder labels on hits. */
+
+.file-row.find-all {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-row.find-all:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.file-row.find-all .file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-where {
+  margin-left: 8px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.card-dates {
+  margin: -4px 0 0;
+  color: var(--faint);
+  font-size: 12px;
+}
