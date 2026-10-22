@@ -158,6 +158,31 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - A chat keeps the settings it started with: **Resume** uses them, **New session** uses the profile as it is now (and sends its first prompt again), and Summarize and continue keeps the flags but not the first prompt.
 - Renaming a profile updates everything that names it. A profile still in use can't be deleted; the message says where it's used.
 
+### Claude setup
+
+- **Claude setup** shows what claude loads, read-only: **skills**, **MCP servers**, **agents**, **commands**, **hooks** and **plugins**. Each item has a badge for where it comes from:
+  - **Yours** (`~/.claude`, `~/.claude.json`),
+  - **Project** (the folder's `.claude/`, `.mcp.json`),
+  - **Local** (only you, in that folder),
+  - **Managed** (`/etc/claude-code`),
+  - or the **plugin** that brings it.
+- Two places show it, so you can keep the one you like:
+  - **The page** opens from the blocks button at the top of the sidebar. **For** picks Everywhere or one of the profile's projects.
+  - **The tab:** every project has a **Claude setup** tab after All files, with what applies in its folder.
+- **Overridden** items are dimmed and say what claude uses instead: a skill of the same name in a nearer scope, or a local MCP server over a project or user one. A skill also wins over a command of the same name.
+- **MCP servers** show their state:
+  - **On**,
+  - **Off** (in settings or `/mcp`),
+  - **Not approved** (a project server claude will ask about),
+  - **Blocked** (managed policy),
+  - **Broken**.
+- **Check** on a server tests it: Workbench starts it (or connects), asks for its tools, and stops it again. The tools and their descriptions are listed, or the error with the end of the server's log. **Check all** checks every server that is on.
+  - A server that wants a sign-in says so; signing in is done in claude (`/mcp`).
+  - A project server that claude hasn't approved asks before it runs.
+- **Plugins** show their marketplace, version, where they're turned on, and what they bring; click a count to see those items.
+- **Secret values are hidden everywhere:** env values, headers, passwords and keys in URLs, values after flags like `--token`, and known token shapes. `${VAR}` references stay readable.
+- To change anything, use claude (`claude mcp`, `/plugin`, `/mcp`) or edit its files, then **Refresh**.
+
 ### Notes
 
 - A **note** entry opens formatted (GitHub-flavoured Markdown: tables, task lists, images next to the note). **Edit** or **Ctrl+E** switches to the editor in the same place, and back.
@@ -202,12 +227,14 @@ Paths are checked after resolving symlinks, so `..` or a link can't reach anythi
 
 Agent profiles only choose flags for claude (`--model`, `--permission-mode` and the rest), from your YAML; a request names a profile, never flags. A chat is shell access, so its terminal socket (`/pty/`) needs more: browsers can't add the `X-Workbench` header to a WebSocket, so it must come from Workbench's own `Origin`, and it carries a random token that changes every time the service starts, which only the app can read through the API. Chats start from an entry or step in your config, by its position; a request never carries a command or arguments, and **Chat here** only works inside the profile's folders. Claude's transcripts in `~/.claude/projects/` are read for History, never written.
 
+**Claude setup** reads claude's files and never writes them. Secret values are masked in the service, so they never reach the browser, and only the MCP servers' keys and the open folder's entry are read from `~/.claude.json`. A check names a server by its id; the command or URL comes from claude's files, read again at that moment, never from the request. It runs only servers claude would start. One that claude hasn't approved yet runs only after you confirm. Folders are limited to the profile's own.
+
 ## Development
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, HTTP API
-npm run e2e        # Playwright against a throwaway config; programs are not started, chats run stand-ins
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, Claude setup, MCP checks, HTTP API
+npm run e2e        # Playwright against a throwaway config; programs are not started, chats and MCP checks run stand-ins
 npm run build      # type check + production build
 ```
 
@@ -222,8 +249,9 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/files.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; the folders a profile may reach; folder watching |
 | `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
 | `server/chats.ts`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list; reading claude's transcripts for History; agent profiles as claude flags |
+| `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
-| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats |
+| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats, Claude setup |
 
 ## Roadmap
 
@@ -233,6 +261,6 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 3 | File browser (done) |
 | 4 | Project cards (done) |
 | 5 | Agent chats (done) |
-| 6 | Skills & MCP panel |
+| 6 | Claude setup: skills, MCP servers and more (done) |
 | 7 | Context folders |
 | 8 | Polish (Ctrl+K switcher, systemd user service) |

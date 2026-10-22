@@ -12,6 +12,7 @@ import type {
   Op,
   SearchHit,
 } from '../../shared/config-schema.ts'
+import type { ClaudeSetup, McpCheck } from '../../shared/claude-setup.ts'
 
 export class ApiError extends Error {
   status: number
@@ -103,6 +104,15 @@ export const chatHistory = (profile: string, path: string) => api<ClaudeSession[
 export const claudeAgents = (profile: string, path: string) => api<string[]>(`/api/chats/claude-agents?${query({ profile, path })}`)
 /** The token a chat's terminal socket needs; new each time the service starts. */
 export const chatToken = () => api<{ token: string }>('/api/chats/token').then((r) => r.token)
+
+// Claude setup: read-only and masked. `folder` adds that folder's project and local items.
+const inFolder = (folder: string | null): Record<string, string> => (folder ? { path: folder } : {})
+export const claudeSetup = (profile: string, folder: string | null) => api<ClaudeSetup>(`/api/claude/setup?${query({ profile, ...inFolder(folder) })}`)
+export const claudeDoc = (profile: string, folder: string | null, id: string) =>
+  api<{ body: string }>(`/api/claude/doc?${query({ profile, id, ...inFolder(folder) })}`)
+/** Start a server (or connect), list its tools and stop it. `confirm` for a project server claude has not approved. */
+export const checkMcp = (profile: string, folder: string | null, id: string, confirm = false) =>
+  api<McpCheck>('/api/claude/check', { body: { profile, id, confirm, ...inFolder(folder) } })
 
 // Background pictures: copies in the config folder, chosen per profile.
 export const listBackgrounds = () => api<string[]>('/api/backgrounds')

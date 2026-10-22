@@ -44,18 +44,21 @@ export type DialogState =
 /**
  * What the main pane shows: a nav entry, a note opened by path (a link or a
  * search result), a folder opened by path (a chip, the path bar, a subfolder),
- * or a chat whose project or entry is gone.
+ * a chat whose project or entry is gone, or the Claude setup page.
  */
 export type Selection =
   | { kind: 'entry'; addr: ItemAddr; item: NavItem }
   | { kind: 'note'; path: string }
   | { kind: 'files'; path: string }
   | { kind: 'chat'; id: string }
+  | { kind: 'setup' }
 
 /** Selection key prefixes for a note, folder or chat opened on its own; other keys are entry addresses. */
 export const NOTE_KEY = 'note:'
 export const FILES_KEY = 'files:'
 export const CHAT_KEY = 'chat:'
+/** The Claude setup page. */
+export const SETUP_KEY = 'setup:'
 
 /** The first entry of a type that matches, searching headings and groups. */
 export function findEntry(profile: Profile, type: ItemType, matches: (item: NavItem) => boolean = () => true): ItemAddr | null {

@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ChevronDown, ExternalLink, FilePlus, GripVertical, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { Blocks, ChevronDown, ExternalLink, FilePlus, GripVertical, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, entrySlot, itemKey, projectHost, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import type { Connection } from '../lib/events.ts'
@@ -46,6 +46,9 @@ interface Props extends NavActions {
   onHome: () => void
   /** Open the theme and background panel. */
   onLook: () => void
+  /** Open the Claude setup page; `setupActive` while it shows. */
+  onSetup: () => void
+  setupActive: boolean
 }
 
 const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState; showArchive: boolean }>(null!)
@@ -119,7 +122,7 @@ function dropTarget(over: DropData, profile: Profile): { to: ListAddr; index: nu
 }
 
 export function NavPanel(props: Props) {
-  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook } = props
+  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook, onSetup, setupActive } = props
   const profile = active.profile
   const [drop, setDrop] = useState<DropHint>({ drag: null, overId: null })
   const [renaming, setRenaming] = useState<number | null>(null)
@@ -174,6 +177,9 @@ export function NavPanel(props: Props) {
           <span className="spacer" />
           <button className="icon-btn" onClick={onLook} title="Theme and background" aria-label="Theme and background">
             <Palette size={13} />
+          </button>
+          <button className={cx('icon-btn', setupActive && 'on')} onClick={onSetup} title="Claude setup: skills, MCP servers, agents…" aria-label="Claude setup" aria-pressed={setupActive}>
+            <Blocks size={13} />
           </button>
           <button
             className={cx('icon-btn', editing && 'on')}

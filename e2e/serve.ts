@@ -1,15 +1,18 @@
 // The service on a throwaway config for the Playwright tests. Programs are not
 // started; each launch is appended to a log the tests read. `gio trash` moves
 // files into the fixture's trash folder instead, so tests can see where they went.
-// Chats run stand-ins for claude and the shell (tests/fixtures), never the real ones.
+// Chats run stand-ins for claude and the shell (tests/fixtures), never the real ones,
+// and MCP checks a stand-in server.
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { buildServer } from '../server/main.ts'
-import { DIR, FAKE_CLAUDE, FAKE_SHELL, HOME, PORT, resetFixture, SPAWN_LOG, TRASH } from './fixture.ts'
+import { DIR, FAKE_CLAUDE, FAKE_SHELL, HOME, MANAGED, PORT, resetFixture, SPAWN_LOG, TRASH } from './fixture.ts'
 
 await fsp.rm(DIR, { recursive: true, force: true })
+// Claude's files come from the fake home, never from the machine's own.
+delete process.env.CLAUDE_CONFIG_DIR
 await resetFixture()
 
 const spawn = ((command: string, args: string[], options: { cwd?: string } = {}) => {
@@ -35,5 +38,7 @@ const { app } = await buildServer({
   chatCommands: { claude: FAKE_CLAUDE, shell: FAKE_SHELL },
   // Quicker than on the desktop, so "needs you" shows within a test.
   chatTiming: { quietMs: 400, busyMs: 600 },
+  managedDir: MANAGED,
+  mcpTimeoutMs: 5000,
 })
 await app.listen({ host: '127.0.0.1', port: PORT })

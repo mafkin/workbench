@@ -16,6 +16,10 @@ export const TRASH = path.join(DIR, 'trash')
 /** Stand-ins for claude and the login shell; chats in tests never run the real ones. */
 export const FAKE_CLAUDE = path.resolve(import.meta.dirname, '../tests/fixtures/fake-claude.mjs')
 export const FAKE_SHELL = path.resolve(import.meta.dirname, '../tests/fixtures/fake-shell.mjs')
+/** A stand-in MCP server for the Claude setup checks. */
+export const FAKE_MCP = path.resolve(import.meta.dirname, '../tests/fixtures/fake-mcp.mjs')
+/** Claude's managed settings folder for the e2e server (empty unless a test writes it). */
+export const MANAGED = path.join(DIR, 'managed')
 
 export const WORK = `# fixture: work profile
 name: Work
@@ -143,6 +147,7 @@ export async function resetFixture() {
   await fsp.rm(HOME, { recursive: true, force: true })
   await fsp.rm(TRASH, { recursive: true, force: true })
   await fsp.rm(path.join(DIR, 'backgrounds'), { recursive: true, force: true })
+  await fsp.rm(MANAGED, { recursive: true, force: true })
   await fsp.mkdir(ALPHA, { recursive: true })
   for (const [rel, data] of Object.entries(ALPHA_FILES)) {
     await fsp.mkdir(path.dirname(path.join(ALPHA, rel)), { recursive: true })
@@ -156,6 +161,53 @@ export async function resetFixture() {
   for (const [rel, text] of Object.entries(NOTE_FILES)) {
     await fsp.mkdir(path.dirname(path.join(HOME, rel)), { recursive: true })
     await fsp.writeFile(path.join(HOME, rel), text)
+  }
+}
+
+/** Secret values in the fake Claude setup; none may reach the page. */
+export const CLAUDE_SECRETS = ['E2E-OAUTH-SECRET', 'E2E-SECRET-TOKEN', 'E2E-URL-SECRET', 'E2E-HOOK-SECRET', 'E2E-PLUGIN-SECRET']
+
+const skill = (name: string, description: string, body: string) => `---\nname: ${name}\ndescription: ${description}\n---\n${body}\n`
+
+/**
+ * A Claude setup in the fake home: your skills, agent, command, hook and MCP
+ * servers, an enabled plugin, and Alpha's own (.mcp.json, .claude/). Only the
+ * Claude setup tests write it, so other tests see Alpha as before.
+ */
+export async function writeClaudeSetup() {
+  const claude = path.join(HOME, '.claude')
+  const toolkit = path.join(claude, 'plugins/cache/acme/toolkit/1.2.0')
+  const files: Record<string, string | object> = {
+    [path.join(HOME, '.claude.json')]: {
+      oauthAccount: { emailAddress: 'me@example.com', accessToken: 'E2E-OAUTH-SECRET' },
+      mcpServers: {
+        tools: { command: process.execPath, args: [FAKE_MCP], env: { FAKE_MCP_TOKEN: 'E2E-SECRET-TOKEN' } },
+        broken: { command: process.execPath, args: [FAKE_MCP], env: { FAKE_MCP_MODE: 'crash' } },
+      },
+      projects: { [ALPHA]: { mcpServers: { scratch: { type: 'http', url: 'http://127.0.0.1:9/mcp?key=E2E-URL-SECRET' } } } },
+    },
+    [path.join(claude, 'settings.json')]: {
+      enabledPlugins: { 'toolkit@acme': true },
+      hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'guard.sh --token E2E-HOOK-SECRET', timeout: 30 }] }] },
+    },
+    [path.join(claude, 'skills/review/SKILL.md')]: skill('review', 'Reviews a change before it ships', '# Review\n\nRead the diff, then **run the tests**.\n\n- Check the names\n- Check the tests'),
+    [path.join(claude, 'skills/deploy/SKILL.md')]: skill('deploy', 'Ships the current branch', 'Tag, push, watch the deploy.'),
+    [path.join(claude, 'agents/critic.md')]: skill('critic', 'Finds the weak spots in a plan', 'Be blunt, be kind.'),
+    [path.join(claude, 'commands/release.md')]: '---\ndescription: Cuts a release\nargument-hint: <version>\n---\nRelease $ARGUMENTS\n',
+    [path.join(claude, 'plugins/installed_plugins.json')]: { version: 2, plugins: { 'toolkit@acme': [{ scope: 'user', installPath: toolkit, version: '1.2.0' }] } },
+    [path.join(claude, 'plugins/known_marketplaces.json')]: { acme: { source: { source: 'github', repo: 'acme/claude-plugins' } } },
+    [path.join(toolkit, '.claude-plugin/plugin.json')]: { name: 'toolkit', version: '1.2.0', description: 'Handy tools for every project', author: { name: 'Acme' } },
+    [path.join(toolkit, 'skills/lint/SKILL.md')]: skill('lint', 'Lints the changed files', 'Run the linter.'),
+    [path.join(toolkit, 'skills/format/SKILL.md')]: skill('format', 'Formats the changed files', 'Run the formatter.'),
+    [path.join(toolkit, 'commands/todo.md')]: '---\ndescription: Lists the TODOs\n---\nFind TODOs\n',
+    [path.join(toolkit, '.mcp.json')]: { mcpServers: { search: { type: 'http', url: 'https://search.example/mcp', headers: { Authorization: 'Bearer E2E-PLUGIN-SECRET' } } } },
+    [path.join(ALPHA, '.mcp.json')]: { mcpServers: { 'alpha-db': { command: process.execPath, args: [FAKE_MCP] } } },
+    [path.join(ALPHA, '.claude/settings.json')]: { hooks: { Stop: [{ hooks: [{ type: 'prompt', prompt: 'Check the tests ran' }] }] } },
+    [path.join(ALPHA, '.claude/skills/alpha-notes/SKILL.md')]: skill('alpha-notes', 'How Alpha is laid out', 'Code in src/, reports in reports/.'),
+  }
+  for (const [file, content] of Object.entries(files)) {
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    await fsp.writeFile(file, typeof content === 'string' ? content : JSON.stringify(content, null, 2))
   }
 }
 

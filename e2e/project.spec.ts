@@ -26,7 +26,7 @@ test.beforeEach(async ({ page }) => {
 
 test('a project shows its workflow steps as tabs, and All files is the project', async ({ page }) => {
   await entry(page, 'Alpha').click()
-  expect(await tabNames(page)).toEqual(['All files', 'sources', 'readme', 'build'])
+  expect(await tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
   await expect(tab(page, 'All files')).toHaveAttribute('aria-selected', 'true')
   await expect(row(page, 'README.md')).toBeVisible()
   await page.screenshot({ path: 'test-results/project-tabs.png' })
@@ -71,7 +71,7 @@ test('adding a step copies the profile steps into the project, and a missing fol
   await expect(dialog).toContainText('Not found on disk')
   await dialog.getByRole('button', { name: 'Add' }).click()
   await expect(dialog).toHaveCount(0)
-  expect(await tabNames(page)).toEqual(['All files', 'sources', 'readme', 'build', 'assets'])
+  expect(await tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build', 'assets'])
 
   const yaml = await workYaml()
   expect(yaml).toMatch(/path: ~\/alpha\n\s+steps:\n/)
@@ -95,25 +95,25 @@ test('steps can be edited, reordered and removed; Reset brings back the profile 
   await expect(tab(page, 'intro')).toBeVisible()
 
   await tabs(page).getByRole('button', { name: 'build' }).dragTo(tab(page, 'sources'))
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'build', 'sources', 'intro'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'build', 'sources', 'intro'])
 
   await stepMenu(page, 'intro', 'Remove')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'build', 'sources'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'build', 'sources'])
 
   await stepMenu(page, 'sources', 'Reset to profile steps')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'sources', 'readme', 'build'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
   expect(await workYaml()).not.toContain('steps:')
 })
 
 test("one project's steps can become every project's", async ({ page }) => {
   await entry(page, 'Alpha').click()
   await stepMenu(page, 'build', 'Remove')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'sources', 'readme'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme'])
   await stepMenu(page, 'readme', 'Use these steps for every project')
   await expect.poll(async () => (await workYaml()).includes('command: make')).toBe(false)
   expect(await workYaml()).not.toContain('steps:')
   await entry(page, 'Beta').click()
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'sources', 'readme'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme'])
 })
 
 test('Home shows recent work and today, not the nav again', async ({ page }) => {

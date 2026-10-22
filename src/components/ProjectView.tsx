@@ -4,8 +4,10 @@
 // its HTML page, a file step one file large, and launcher and link steps open
 // outside. Steps are the project's own `steps:` or, until it has any, the
 // profile's `workflow:`. A chat step is claude (or the shell) in its tab, and
-// chats started with New chat are tabs after the steps.
+// chats started with New chat are tabs after the steps. "Claude setup", after
+// All files, is what claude loads in the project folder.
 import {
+  Blocks,
   ChevronDown,
   ExternalLink,
   FastForward,
@@ -27,7 +29,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import {
   categoriesOf,
   categoryColor,
@@ -99,6 +101,10 @@ interface Props {
 const describe = (s: StepItem) =>
   s.type === 'launch' ? [s.command, ...s.args].join(' ') : s.type === 'link' ? s.url : s.type === 'chat' ? `${s.agent === 'shell' ? 'Shell' : 'Claude'} in ${s.path ?? 'the project folder'}` : s.path
 
+const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
+/** The saved tab of a project showing its Claude setup. */
+const SETUP_TAB = 'setup:'
+
 /** Names for the chat colours, in the order of CHAT_COLORS. */
 const COLOR_NAMES = ['Slate', 'Sage', 'Sand', 'Heather', 'Teal', 'Clay', 'Grey']
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -116,7 +122,8 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const activeChat = saved.startsWith(CHAT_TAB) ? (adhoc.find((c) => CHAT_TAB + c.id === saved) ?? null) : null
   // Until the list arrives, a chat tab cannot be told from a closed one.
   const waitingForChats = saved.startsWith(CHAT_TAB) && !chats.loaded
-  const active = activeChat ? null : (steps.find((s) => s.label === saved && !opensOutside(s)) ?? null)
+  const setupOn = saved === SETUP_TAB
+  const active = activeChat || setupOn ? null : (steps.find((s) => s.label === saved && !opensOutside(s)) ?? null)
   const tabId = activeChat ? saved : (active?.label ?? '')
   const [browse, setBrowse] = useState<{ tab: string; top: string } | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -129,7 +136,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const lastPoint = useRef({ x: 0, y: 0 })
   const hasAgents = Object.keys(profile.agents ?? {}).length > 0
   const status = item.status ?? 'active'
-  const crumb = activeChat ? chatName(activeChat) : (active?.label ?? null)
+  const crumb = activeChat ? chatName(activeChat) : setupOn ? 'Claude setup' : (active?.label ?? null)
 
   useEffect(() => onTab(crumb), [crumb])
   // A chat opened from elsewhere (the nav menu, a notification) picks its tab here.
@@ -145,6 +152,11 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     setTabs((t) => ({ ...t, [tabKey]: step?.label ?? '' }))
     setBrowse(null)
     if (step) actions.rememberStep(addr, step.label)
+  }
+
+  const selectSetup = () => {
+    setTabs((t) => ({ ...t, [tabKey]: SETUP_TAB }))
+    setBrowse(null)
   }
 
   const selectChat = (chat: Chat) => {
@@ -433,9 +445,19 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() })
         }}
       >
-        <button role="tab" aria-selected={!active} className={cx('step-tab', !active && 'active')} onClick={() => select(null)}>
+        <button role="tab" aria-selected={!active && !activeChat && !setupOn} className={cx('step-tab', !active && !activeChat && !setupOn && 'active')} onClick={() => select(null)}>
           <FolderOpen size={14} className="icon" />
           All files
+        </button>
+        <button
+          role="tab"
+          aria-selected={setupOn}
+          className={cx('step-tab', setupOn && 'active')}
+          onClick={selectSetup}
+          title="What claude loads in this folder: skills, MCP servers, agents, commands, hooks and plugins"
+        >
+          <Blocks size={14} className="icon" />
+          Claude setup
         </button>
         {steps.map((step, i) => {
           const outside = opensOutside(step)
@@ -557,7 +579,11 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
         </button>
       </div>
 
-      {waitingForChats ? null : activeChat ? (
+      {setupOn ? (
+        <Suspense fallback={null}>
+          <ClaudeSetupView profileId={profileId} profile={profile} folder={item.path} />
+        </Suspense>
+      ) : waitingForChats ? null : activeChat ? (
         <ChatPane key={activeChat.id} chat={activeChat} />
       ) : active?.type === 'chat' ? (
         <ChatPane

@@ -1,5 +1,5 @@
 import { Archive, ArchiveRestore, ExternalLink, FilePlus, FolderOpen, Pencil, Pin, Play, Sparkles, SquareTerminal, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   chatName,
   entrySlot,
@@ -20,10 +20,8 @@ import {
   type Op,
 } from '../shared/config-schema.ts'
 import { agentEntries } from './components/AgentMenu.tsx'
-import { AgentProfilesDialog } from './components/AgentProfilesDialog.tsx'
 import { ConfirmDialog } from './components/ConfirmDialog.tsx'
 import { ContextMenu } from './components/ContextMenu.tsx'
-import { LookPanel } from './components/LookPanel.tsx'
 import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
@@ -42,6 +40,7 @@ import {
   findEntry,
   listLength,
   NOTE_KEY,
+  SETUP_KEY,
   parseKey,
   type DialogState,
   type MenuEntry,
@@ -53,6 +52,10 @@ import { NotesCtx, type NotesApi } from './lib/notes-ctx.ts'
 import { pushRecent, type Recent } from './lib/recent.ts'
 import { applyLook, themeById } from './lib/themes.ts'
 import { normalizePath } from './lib/wikilinks.ts'
+
+// Dialogs that open on demand load on demand, to keep the main bundle small.
+const AgentProfilesDialog = lazy(() => import('./components/AgentProfilesDialog.tsx').then((m) => ({ default: m.AgentProfilesDialog })))
+const LookPanel = lazy(() => import('./components/LookPanel.tsx').then((m) => ({ default: m.LookPanel })))
 
 const NAV_MIN = 220
 const NAV_MAX = 520
@@ -645,6 +648,7 @@ export function App() {
     if (key?.startsWith(NOTE_KEY)) return { kind: 'note', path: key.slice(NOTE_KEY.length) }
     if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
     if (key?.startsWith(CHAT_KEY)) return { kind: 'chat', id: key.slice(CHAT_KEY.length) }
+    if (key === SETUP_KEY) return { kind: 'setup' }
     const addr = parseKey(key)
     const item = addr ? getItem(active.profile, addr) : undefined
     if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
@@ -716,6 +720,8 @@ export function App() {
               onResizeStart={onResizeStart}
               onHome={goHome}
               onLook={() => setLookOpen(true)}
+              onSetup={() => navigate(SETUP_KEY)}
+              setupActive={selection?.kind === 'setup'}
             />
             <MainPane
               active={active}
@@ -742,12 +748,14 @@ export function App() {
               dialog && <ItemDialog dialog={dialog} agents={Object.keys(profile?.agents ?? {})} onClose={() => setDialog(null)} onSubmit={submitDialog} />
             )}
             {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
-            {lookOpen && profile && (
-              <LookPanel profile={profile} profileId={active.id} run={run} pictureMissing={!!pictureName && picture?.name === pictureName && !picture.url} onClose={() => setLookOpen(false)} />
-            )}
-            {agentsFor !== null && profile && (
-              <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
-            )}
+            <Suspense fallback={null}>
+              {lookOpen && profile && (
+                <LookPanel profile={profile} profileId={active.id} run={run} pictureMissing={!!pictureName && picture?.name === pictureName && !picture.url} onClose={() => setLookOpen(false)} />
+              )}
+              {agentsFor !== null && profile && (
+                <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
+              )}
+            </Suspense>
             {closing && (
               <ConfirmDialog
                 title={`Close ${chatName(closing)}?`}

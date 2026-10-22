@@ -1,5 +1,5 @@
 import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search, X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import {
   chatName,
   chatProgram,
@@ -30,6 +30,8 @@ import { NoteView } from './NoteView.tsx'
 import { ProjectView, type ProjectActions } from './ProjectView.tsx'
 import { SearchView } from './SearchView.tsx'
 import type { ToastInput } from './Toast.tsx'
+
+const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
 
 export interface SearchState {
   open: boolean
@@ -116,6 +118,11 @@ export function MainPane(props: Props) {
               <span className="sep">/</span>
               <span>Chats</span>
             </>
+          ) : selected?.kind === 'setup' ? (
+            <>
+              <span className="sep">/</span>
+              <span className="current">Claude setup</span>
+            </>
           ) : selected && selected.kind !== 'entry' ? (
             <>
               <span className="sep">/</span>
@@ -171,6 +178,10 @@ export function MainPane(props: Props) {
           <Browser key={`${active.id}:${selected.path}`} top={selected.path} kicker="Files" heading={nameOf(selected.path)} pane={props} />
         ) : selected?.kind === 'chat' ? (
           <LoneChat key={selected.id} id={selected.id} />
+        ) : selected?.kind === 'setup' ? (
+          <Suspense fallback={null}>
+            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} />
+          </Suspense>
         ) : (
           <Home active={active} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />
         )}

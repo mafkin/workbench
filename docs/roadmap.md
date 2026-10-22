@@ -40,7 +40,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 5 | Agent chats | Done (same branch) |
 | 5½ | Agent profiles | Done (same branch); see below |
 | 5¾ | Sidebar open buttons, themes and backgrounds | Done (same branch); see below |
-| 6 | Skills & MCP panel | Next in the suggested order |
+| 6 | Skills & MCP panel (built as Claude setup) | Done (same branch); see below |
 | 7 | Context folders | |
 | 8 | Polish | |
 
@@ -107,6 +107,8 @@ The user asked for this before part 4: "no overlap in the selections". The centr
 | Home | Recent work plus today's note, instead of the nav cards |
 
 Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the entry dialog, `/api/open` with a step index, and Home as Recent work. The file browser's chips and Home's cards and chips are gone.
+
+Later, in part 6, the user said "No repeated nav is not an explicit rule, if it makes sense it should be implemented." Avoid repeating the nav by default, but a list of projects is fine where it serves a purpose, like the Claude setup page's For picker.
 
 ### Part 4: Project cards (done)
 
@@ -206,22 +208,43 @@ The user asked: launchers in the sidebar started on a single click of their name
 - **Built:** the open button in `NavPanel` (row click does nothing for launchers and links); `THEMES` and the six themes in `src/lib/themes.ts` (tokens plus a gradient background each); `server/backgrounds.ts` and `/api/backgrounds`; `LookPanel` (palette button in the sidebar header); "Use as background" in the file browser; the `.app.backdrop` frosted layout. The background follows the theme by default; None is the old flat look.
 - **Left for later:** theme colours or new themes from the UI; a light theme (the app stays dark-only); per-picture tint or blur settings.
 
-### Part 6: Skills & MCP panel
+### Part 6: Skills & MCP panel, built as Claude setup (done)
 
 - **In Mr. Mak:**
   - A right rail with Skills, Knowledge, Workflows, MCP, Settings and Help.
-  - The MCP view lists servers by scope:
-    - global: `~/.claude.json` `mcpServers`
-    - local: `~/.claude.json` `projects[<path>].mcpServers`
-    - project: `.mcp.json`
-    - managed: `managed-mcp.json`
-    - plugins: their `.mcp.json`
+  - The MCP view lists servers by scope: global, local, project, managed and plugins.
   - Each server gets a connection check.
-- **Ask:**
-  - Read-only, or also enable and disable.
-  - Which sources: user skills `~/.claude/skills`, plugin skills, project `.claude/skills`.
-  - Whether to show per-project scope for the profile's folders.
-- **Notes:** mask secret values (env vars, headers, tokens) everywhere. Read-only is the safe default.
+- **Decisions (2026-10-22):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Read-only, or enable and disable too | Read-only for now |
+  | Which skill sources | All: yours, plugin and project skills |
+  | Per-project view | Yes |
+  | Where it shows | Both, to pick one later: a page from the sidebar and a project tab. "No repeated nav is not an explicit rule, if it makes sense it should be implemented. Start with both so I can decide if I want to drop one." |
+  | The page | A page in the main pane, from a button in the sidebar header |
+  | Checks | On demand, per server (and Check all): start it, do the MCP handshake, list its tools, stop it |
+  | Also list | Claude agents, slash commands, hooks, plugins |
+  | Project tab | What applies in this folder: merged user, project, local, plugin and managed config, each item with a scope badge |
+
+- **Built:**
+  - `server/claude-setup.ts` (`readSetup`): every source with its scope, name clashes, MCP states (on, off, not approved, blocked, overridden, broken) and plugins.
+  - `server/mcp-check.ts`: stdio, Streamable HTTP and legacy SSE handshakes, protocol `2025-11-25`, falling back to tools/list without initialize.
+  - `server/mask.ts`.
+  - The routes `/api/claude/{setup,doc,check}`.
+  - `ClaudeSetupView` (a lazy chunk) for the page (`setup:` selection) and the project tab (`setup:` saved tab).
+  - The Theme and Agent profiles dialogs became lazy chunks, to keep the main bundle under 800 kB.
+- **Formats that aren't documented** are read leniently. Shapes that don't match are listed as problems at the top of the page:
+  - the layout of `installed_plugins.json` (v1 object or v2 array per id) and `known_marketplaces.json`,
+  - the shape of `managed-mcp.json` (read like `.mcp.json`),
+  - where `disabledMcpServers` is kept (read from `~/.claude.json` `projects[<folder>]`),
+  - `.claude.json` inside `$CLAUDE_CONFIG_DIR` when that is set.
+- **Left for later:**
+  - Enabling or disabling things from the app.
+  - Watching claude's files (there is a Refresh button instead).
+  - Skills in nested folders below the project (claude loads them when it works there).
+  - Skills, agents or MCP servers passed only on the command line (`--agents`, `--mcp-config`); agent profiles name the latter.
+  - OAuth sign-in for remote servers (done in claude with `/mcp`).
 
 ### Part 7: Context folders
 
