@@ -57,6 +57,9 @@ workflow:                       # the steps every project (folder entry) starts 
   - { label: design, type: note, path: docs/design.md }
   - { label: agent, type: chat }                                                   # claude in the project folder
   - { label: shell, type: chat, agent: shell, path: src }                          # your login shell, in src/
+openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
+  - { ext: [kra], command: krita }                                       # args default to ["{file}"]
+  - { ext: [tscn, gd], command: godot, args: [--editor, --path, "{godot}"] }  # {file}, {dir}, {godot}: the project folder
 categories:                     # optional colours for project categories
   game: "#8fa58a"
 agents:                         # agent profiles: how claude starts when you pick one
@@ -288,6 +291,26 @@ A project in a git repository (or in a folder of one) gets a **Git** tab after A
 - Right-click for the rest: open in the default app, open the folder in Files, copy the path.
 - The tree follows changes on disk while it is open.
 
+### Assets and media
+
+- **List / Gallery:** the two buttons in every file browser's toolbar. The choice is remembered per folder, and a subfolder takes its parent's until you pick one for it.
+- **Tiles:** each tile has a thumbnail. Folders are tiles too, and a Godot project shows its icon.
+  - Click, Ctrl/Shift-click, the arrow keys, Enter, F2, Delete, right-click and drag work as in the list.
+  - The chips filter by type (Images, 3D, Video, Audio, Other); the slider sets the tile size.
+- **Thumbnails** are kept in `~/.cache/workbench/thumbs` and made once per version of a file.
+  - The browser makes them for images, video (a frame a tenth of the way in), audio (its waveform) and 3D models (a render).
+  - A `.blend` shows the preview Blender saves inside the file (Blender's default when saving).
+  - Formats a browser can't decode (TGA, EXR, PSD, DDS, many MKV/H.265 videos, Draco-compressed glTF) show an icon.
+  - The cache prunes itself past 300 MB.
+- **Previews:**
+  - **3D files** (glTF/GLB, OBJ with its .mtl, FBX, STL) open in a viewer: drag to turn, scroll to zoom, right-drag to pan. It has Wireframe and Grid toggles and Reset view, and shows vertex, triangle, mesh and material counts and the model's size.
+  - **Images** show their size in pixels and format. Select two images (Ctrl-click) to compare them, with a slider or side by side.
+  - **Audio** shows its waveform; click it to seek.
+- **Open in Blender / Godot:**
+  - A `.blend` opens in Blender, and a Godot project's files (or the project folder) open in the Godot editor, when those programs are installed.
+  - Use the button in the preview, double-click or Enter (or the right-click menu, for a project folder).
+  - `openWith:` in the profile adds your own programs, or overrides these.
+
 ## Security
 
 The service binds to loopback only. It accepts a request only if:
@@ -312,6 +335,8 @@ Agent profiles only choose flags for claude (`--model`, `--permission-mode` and 
 
 **Servers** lists only your own processes whose folder is inside one of the profile's projects. **Stop** names a process and port; the service checks again that this process is yours, still listens on that port and runs in a project before it sends SIGTERM, and refuses anything else.
 
+**Thumbnails** are read and stored only for files of the profile's folders. An uploaded one must be a WebP or PNG under 512 KB, and is stored under the file as it is at that moment. A 3D model's preview loads through a link that serves only its own folder. **Open with** names only the file: the program and its arguments come from `openWith:` or the built-in rules, each `{file}`/`{dir}`/`{godot}` becomes one argument, and nothing runs through a shell.
+
 **Git** works only on the repositories of the profile's projects. A request names the project; files, branches, stashes and commits must be ones git lists. A hunk is found again by its hash before it is applied, so the page never sends a patch. Git runs with no shell and never prompts. It also runs with `core.fsmonitor` off: a repository's config could otherwise name a program to run on a plain `git status`, so looking at a cloned repository never runs anything from it. Committing, merging and switching branches run the repository's hooks, as git in a terminal does. Error messages have credentials in URLs masked. **Draft** runs `claude -p` with no tools and no saved session; only the staged diff (up to 60 KB) and your recent commit subjects are sent.
 
 Each claude chat starts with a `SessionStart` hook (passed with `--settings`, merged with your own hooks) that runs `server/session-hook.mjs`. It only writes the chat's new session id to `~/.local/state/workbench/sessions/`, so a chat's tab follows `/clear` and `/resume`.
@@ -324,7 +349,7 @@ Each claude chat starts with a `SessionStart` hook (passed with `--settings`, me
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, servers, git, profiles, HTTP API
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, servers, git, thumbnails, .blend previews, open with, profiles, HTTP API
 npm run e2e        # Playwright against a throwaway config; programs are not started, chats and MCP checks run stand-ins
 npm run build      # type check + production build
 ```
@@ -339,6 +364,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/trash.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; putting things back from the Trash; the folders a profile may reach; folder watching |
 | `server/servers.ts`, `server/procfs.ts` | servers running in projects: listening sockets and their processes from `/proc`, declared servers, health checks, Stop |
+| `server/thumbs.ts`, `server/open-with.ts` | gallery thumbnails (the cache, .blend previews, a Godot project's icon); the program a file opens in |
 | `server/git.ts`, `shared/git.ts` | git per project: status, diffs and hunks, stage, discard with Undo, commit, Draft, branches, stash, fetch, pull, push, conflicts, history, the nav's marks |
 | `server/project-dates.ts` | a project's created and updated dates |
 | `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
@@ -347,7 +373,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
 | `bin/workbench` | opens the window; installs, removes and prints the systemd units; the update step after a pull |
-| `src/` | the UI: nav panel, main pane, dialogs, Ctrl+K, profile settings, notes (view, editor, search, daily), file browser, project page, Git tab, chats, context, Claude setup, servers |
+| `src/` | the UI: nav panel, main pane, dialogs, Ctrl+K, profile settings, notes (view, editor, search, daily), file browser and gallery, 3D viewer, project page, Git tab, chats, context, Claude setup, servers |
 
 ## Roadmap
 
@@ -361,4 +387,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 7 | Context folders (done) |
 | 8 | Polish: Ctrl+K, profile settings, systemd service, the known gaps, Servers (done) |
 | 9 | Git per project: changes, hunks, commit with Draft, branches, stash, pull and push, conflicts, history (done) |
+| 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
 | later | A Tauri window, if wanted |

@@ -44,6 +44,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 7 | Context folders | Done (same branch); see below |
 | 8 | Polish, the known gaps, Servers | Done (same branch); merged to `main` with parts 2–7 (PR #1) |
 | 9 | Git per project | Done; merged to `main`; see below |
+| 10 | Assets and media | Done (branch restarted from `main`); see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -344,6 +345,25 @@ The user asked: launchers in the sidebar started on a single click of their name
   - Untracked files are listed one by one (`--untracked-files=all`) in the tab; the nav's counts use `normal` (a new folder counts once) to stay cheap.
   - Discard's Undo is kept in memory for an hour; the content itself is a git object.
 - **Left for later:** rebase, cherry-pick, tags, submodules, force push, editing remotes, `git init` and clone, a branch graph, resolving conflicts inside the tab (ours/theirs per file).
+
+### Part 10: Assets and media (done)
+
+- **Decisions (2026-10-22):**
+
+  | Question | Answer |
+  | --- | --- |
+  | What part 10 is | Assets and media (over project tasks and logs, a tasks board, activity and time) |
+  | Where | A List / Gallery switch in every file browser, remembered per folder |
+  | Thumbnails | Workbench's own cache (`~/.cache/workbench`): made in the browser; `.blend` from the preview inside the file |
+  | 3D | A viewer for glTF/GLB, OBJ, FBX and STL (three.js, lazy) |
+  | Extras | All four: type filters and size slider; open with the right program; image info and compare; audio waveforms |
+
+- **Built:** `server/thumbs.ts`, `server/open-with.ts`, `server/programs.ts`; `Gallery.tsx`, `src/lib/thumbs.ts`, `ModelPreview.tsx`, `AudioPreview.tsx`, `ImageCompare.tsx`; `FileBrowser` and `FilePreview` changes; `openWith:` in the schema; folder tickets for 3D files.
+- **Choices made while building:**
+  - A subfolder takes its parent's view until it has its own (otherwise a gallery's subfolders opened as lists).
+  - The audio preview shows length and channels, not the sample rate: the browser resamples when decoding.
+  - Open with runs a profile rule even when its program isn't found (the error says so); the built-in rules apply only when Blender or Godot is installed.
+- **Left for later:** thumbnails for Godot scenes, TGA/EXR/PSD/DDS decoding, Draco glTF, animation playback in the viewer, a gallery step kind, and keeping the view choice in the YAML.
 
 ## Reference
 
