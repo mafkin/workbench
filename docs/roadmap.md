@@ -43,7 +43,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 6 | Skills & MCP panel (built as Claude setup) | Done (same branch); see below |
 | 7 | Context folders | Done (same branch); see below |
 | 8 | Polish, the known gaps, Servers | Done (same branch); merged to `main` with parts 2–7 (PR #1) |
-| 9 | Git per project | Done (branch restarted from `main`); see below |
+| 9 | Git per project | Done; merged to `main`; see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
