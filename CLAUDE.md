@@ -21,7 +21,7 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - edit mode with drag and drop, add/rename/delete, right-click menus and undo,
   - YAML config with live reload, comment-preserving writes and a banner for broken files,
   - opening and launching entries, plus the GNOME launcher.
-- **Part 2 (Markdown notes) is done** on branch `claude/inspiring-einstein-vwftq8` (not yet merged to `main`). It includes:
+- **Part 2 (Markdown notes) is done** on branch `claude/inspiring-einstein-vwftq8`, which was merged into `main` with parts 3 to 8. It includes:
   - note entries open formatted; **Edit** / Ctrl+E swaps in a CodeMirror editor in place,
   - autosave (1 s after typing, and on leaving) against the file's rev; a change on disk reloads the note, or, with unsaved edits, shows a conflict banner (Reload from disk / Keep mine),
   - a `notes:` folder per profile (a hint sets it to `<home>/notes` in one click), **New note…** in heading and group menus, `[[wiki links]]`, search (Ctrl+Shift+F), and `daily` entries made from a template,
