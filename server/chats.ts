@@ -17,6 +17,7 @@ import { displayPath, SESSION_ID, type Agent, type Chat } from '../shared/config
 import { countPrompts, sessionFile } from './claude-sessions.ts'
 import { StoreError } from './config-store.ts'
 import { writeAtomic } from './fs-util.ts'
+import { findProgram } from './programs.ts'
 
 export interface ChatCommands {
   claude: string
@@ -115,26 +116,6 @@ async function loadPty() {
     ptyModule = null
     throw new StoreError(`Chats need node-pty, which did not load (${(err as Error).message}); run npm install, which builds it with gcc, make and python3`, 500)
   }
-}
-
-function executable(file: string): boolean {
-  try {
-    fs.accessSync(file, fs.constants.X_OK)
-    return fs.statSync(file).isFile()
-  } catch {
-    return false
-  }
-}
-
-/** A program by name on PATH, then in the places claude's installers use. */
-export function findProgram(name: string, home: string, envPath = process.env.PATH ?? ''): string | null {
-  if (name.includes('/')) return executable(name) ? name : null
-  const dirs = [...envPath.split(':').filter(Boolean), path.join(home, '.local/bin'), path.join(home, '.claude/local'), '/usr/local/bin', '/usr/bin']
-  for (const dir of dirs) {
-    const file = path.join(dir, name)
-    if (executable(file)) return file
-  }
-  return null
 }
 
 export class Chats extends EventEmitter {

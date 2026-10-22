@@ -16,6 +16,7 @@ import {
   CHAT_COLORS,
   chatName,
   chatProgram,
+  displayPath,
   entrySlot,
   expandHome,
   FileOp,
@@ -41,8 +42,10 @@ import { ConfigStore, StoreError } from './config-store.ts'
 import { Context } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { Git, type Repo } from './git.ts'
+import { openProgram } from './open-with.ts'
+import { Thumbs } from './thumbs.ts'
 import { makeGuard } from './guard.ts'
-import { LaunchError, openItem, runToExit } from './launch.ts'
+import { LaunchError, openItem, runDetached, runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
 import { projectDates } from './project-dates.ts'
@@ -74,6 +77,8 @@ export interface ServerOptions {
   mcpTimeoutMs?: number
   /** How often the active profile's repositories are fetched; 0 for never (tests). */
   gitFetchEveryMs?: number
+  /** Where gallery thumbnails are cached; defaults to ~/.cache/workbench/thumbs. */
+  thumbsDir?: string
 }
 
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
@@ -151,6 +156,11 @@ export function defaultConfigDir(): string {
   return path.join(base, 'workbench')
 }
 
+export function defaultCacheDir(): string {
+  const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache')
+  return path.join(base, 'workbench')
+}
+
 export function defaultStateDir(): string {
   if (process.env.WORKBENCH_STATE_DIR) return process.env.WORKBENCH_STATE_DIR
   const base = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state')
@@ -166,6 +176,7 @@ export async function buildServer(opts: ServerOptions) {
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
   const files = new Files(store, home, { spawn: opts.spawn })
+  const thumbs = new Thumbs(opts.thumbsDir ?? path.join(defaultCacheDir(), 'thumbs'))
   const backgrounds = new Backgrounds(path.join(opts.configDir, 'backgrounds'), store, home)
   const context = new Context(store, home)
   const servers = new Servers(store, home)
@@ -217,6 +228,8 @@ export async function buildServer(opts: ServerOptions) {
 
   // Uploads arrive as raw bytes; the route streams them to disk (and counts them) itself.
   app.addContentTypeParser('application/octet-stream', (_req, payload, done) => done(null, payload))
+  // Thumbnails the gallery made, as bytes (checked again in Thumbs.put).
+  app.addContentTypeParser(['image/webp', 'image/png'], { parseAs: 'buffer', bodyLimit: 600 * 1024 }, (_req, body, done) => done(null, body))
 
   app.get('/api/health', async () => ({ ok: true }))
 
@@ -372,6 +385,48 @@ export async function buildServer(opts: ServerOptions) {
     const { profile, path: p } = parse(PathQuery, req.body)
     await files.open(profile, p)
     return { ok: true }
+  })
+
+  // Gallery thumbnails: the cached one, a .blend's own preview, or what the
+  // browser should make one from. The browser's thumbnail is stored under the
+  // file as it is now; only files of the profile's folders.
+  app.get('/api/thumbs', async (req, reply) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    const { real } = await files.resolve(profile, p)
+    const got = await thumbs.get(real, (x) => displayPath(x, home))
+    if ('data' in got) return reply.type(got.type).header('cache-control', 'no-store').send(got.data)
+    return reply.code(404).send({ error: 'No thumbnail yet', ...got })
+  })
+  app.put('/api/thumbs', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    if (!Buffer.isBuffer(req.body)) throw new StoreError('Send the thumbnail as image/webp or image/png', 415)
+    const { real } = await files.resolve(profile, p)
+    await thumbs.put(real, req.body)
+    return { ok: true }
+  })
+
+  // Open with: the program a file opens in, from the profile's openWith: or the
+  // built-in ones (Blender, Godot). The request names only the file.
+  app.get('/api/files/open-with', async (req) => {
+    const { profile: id, path: p } = parse(PathQuery, req.query)
+    const prof = store.profile(id)
+    if (!prof.profile) throw new StoreError('The profile file is broken', 423)
+    const { real } = await files.resolve(id, p)
+    return { label: (await openProgram(prof.profile, real, home))?.label ?? null }
+  })
+  app.post('/api/files/open-with', async (req) => {
+    const { profile: id, path: p } = parse(PathQuery, req.body)
+    const prof = store.profile(id)
+    if (!prof.profile) throw new StoreError('The profile file is broken', 423)
+    const { real } = await files.resolve(id, p)
+    const program = await openProgram(prof.profile, real, home)
+    if (!program) throw new StoreError('No program is set up for this kind of file', 422)
+    try {
+      await runDetached({ command: program.command, args: program.args, cwd: program.cwd }, opts.spawn)
+    } catch (err) {
+      throw new StoreError((err as Error).message, 422)
+    }
+    return { label: program.label }
   })
 
   // Media and HTML reports for previews. <video>, <audio>, the PDF viewer and iframes

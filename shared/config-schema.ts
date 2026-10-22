@@ -187,6 +187,20 @@ export const Section = z.object({
   items: list(NavItem),
 })
 
+/**
+ * "Open with" (part 10): the program a file opens in, by extension. `args` may
+ * use `{file}`, `{dir}` and `{godot}` (the nearest folder up holding a
+ * project.godot, else `{dir}`); each becomes one argument, never a shell word.
+ */
+export const OpenRule = z.object({
+  ext: z.array(z.string().trim().min(1).transform((e) => e.replace(/^\./, '').toLowerCase())).min(1, 'Name at least one extension'),
+  command: z.string().trim().min(1),
+  args: z.array(z.string()).default(['{file}']),
+  /** The menu's "Open in <label>"; the command's name by default. */
+  label: z.string().trim().min(1).max(40).optional(),
+})
+export type OpenRule = z.output<typeof OpenRule>
+
 export const Profile = z.object({
   name: z.string().trim().min(1),
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Accent must be a #rrggbb colour').default('#7d93ab'),
@@ -203,6 +217,8 @@ export const Profile = z.object({
   categories: z.record(z.string(), z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb')).optional(),
   /** Agent profiles for chats, by name. */
   agents: Agents.optional(),
+  /** Programs for "Open with", before the built-in ones (Blender, Godot). */
+  openWith: z.array(OpenRule).optional(),
   sections: list(Section),
 })
 
