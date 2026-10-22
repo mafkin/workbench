@@ -2591,3 +2591,238 @@ button {
 .btn.danger-text:hover {
   color: var(--danger);
 }
+
+/* ── Look: frosted panels over a background ─────────── */
+
+/* The theme's background or a picture fills the window; the panels float over it as tinted glass. */
+.app.backdrop {
+  gap: 8px;
+  padding: 8px;
+  background: var(--backdrop);
+}
+
+.app.backdrop .nav,
+.app.backdrop .main {
+  border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
+  border-radius: 10px;
+  backdrop-filter: blur(14px) saturate(1.15);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+}
+
+.app.backdrop .nav {
+  background: color-mix(in srgb, var(--panel) 66%, transparent);
+}
+
+.app.backdrop .main {
+  background: color-mix(in srgb, var(--bg) 52%, transparent);
+}
+
+.app.backdrop .resize-handle {
+  right: -7px;
+  border-radius: 3px;
+}
+
+/* Sidebar: launchers and links open from their button; the name is just text. */
+
+.item.outside {
+  cursor: default;
+}
+
+.item.outside:hover {
+  background: none;
+}
+
+.open-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.open-btn:hover,
+.open-btn:focus-visible {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The theme and background panel. */
+
+.look-dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.scrim:has(.look-dialog) {
+  padding-top: 7vh;
+}
+
+.look-dialog .section-label {
+  margin: 4px 0 0;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.theme-card {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-height: 112px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: left;
+}
+
+.theme-card:hover {
+  border-color: var(--border-strong);
+}
+
+.theme-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-line);
+}
+
+.theme-card .mini {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 5px 10px;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 8px 10px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.mini-line {
+  height: 5px;
+  border-radius: 3px;
+  opacity: 0.85;
+}
+
+.mini-line.short {
+  width: 55%;
+}
+
+.mini-dot {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.theme-name {
+  font-weight: 600;
+}
+
+.theme-note {
+  font-size: 11px;
+}
+
+.bg-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bg-picture {
+  position: relative;
+}
+
+.bg-option {
+  display: flex;
+  align-items: flex-end;
+  width: 132px;
+  height: 80px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center;
+  color: var(--text-strong);
+  text-align: left;
+}
+
+.bg-option span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.45);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bg-option:hover {
+  border-color: var(--border-strong);
+}
+
+.bg-option[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-line);
+}
+
+.bg-delete {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.5);
+  color: var(--text);
+  opacity: 0;
+}
+
+.bg-picture:hover .bg-delete,
+.bg-delete:focus-visible {
+  opacity: 1;
+}
+
+.bg-delete:hover {
+  color: var(--danger);
+}
+
+.bg-add {
+  display: flex;
+  gap: 8px;
+}
+
+.bg-add input {
+  flex: 1;
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.look-dialog .hint {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.look-dialog .hint.warn {
+  color: var(--warn);
+}
+
+.look-dialog .err {
+  color: var(--danger);
+  font-size: 12px;
+}

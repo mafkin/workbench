@@ -91,7 +91,7 @@ test('Markdown opens as a note and saves; Back returns to the folder', async ({ 
   await page.keyboard.press('Control+End')
   await page.keyboard.type('Edited from the browser.')
   await expect.poll(() => fsp.readFile(path.join(ALPHA, 'README.md'), 'utf8')).toContain('Edited from the browser.')
-  await page.getByRole('button', { name: 'Back' }).click()
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
   await expect(title(page)).toHaveText('Alpha')
 })
 

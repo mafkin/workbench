@@ -50,6 +50,9 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - `agents:` in the profile YAML: per profile model, effort, permission mode, instructions (`--append-system-prompt`), first prompt, extra folders, allowed/blocked tools, MCP config, or a Claude Code `agent` (an orchestrator; model and effort are then left out). Edited in **Agent profiles…** (New chat ▾), comments kept.
   - Chosen from New chat ▾, Chat here as… and New chat as…; New chat starts the project's default (`agent:` on the folder entry, set from the agent chip in the card). Chat steps and entries name theirs in `agent:` (`claude`, `shell` or a profile).
   - The chat bar shows the profile; bypass permissions shows a shield. Rename updates references; deleting one in use is refused.
+- **Sidebar open buttons, themes and backgrounds (after agent profiles) are done** on the same branch:
+  - Launchers and links in the sidebar start or open only from a button at the end of the row (▶ / ↗, hover highlight); their names are just text. Right-click still has Start / Open link.
+  - Per profile `theme:` (slate, fjord, moss, ember, dusk, graphite; dark only) and `background:` (`theme` by default, `none`, or a picture's name in `<config>/backgrounds/`). Chosen in **Theme and background** (palette button in the sidebar header) or **Use as background** on a picture in the file browser; pictures are copied from the profile's folders. With a background, the panels are frosted glass over it with 8px gaps; `none` is the original flat look.
 - **Next:** part 6 (Skills & MCP panel) is next in the suggested order, but ask the user which part they want next.
 - **Known gaps:**
   - The selection is stored by address (`section.index` or `section.group.index`) in localStorage, so it doesn't follow an entry that has moved.
@@ -67,8 +70,8 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
 
 ```sh
 npm install
-npm test           # Vitest: 225 tests (config ops, store, guard, launch, notes, wiki links, files, steps, cards, chats, agent profiles, HTTP API)
-npm run e2e        # Playwright: 64 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
+npm test           # Vitest: 230 tests (config ops, store, guard, launch, notes, wiki links, files, steps, cards, chats, agent profiles, backgrounds, HTTP API)
+npm run e2e        # Playwright: 69 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
 npm run build      # tsc -p . (TypeScript 7) + vite build
 npm run dev        # service on 7420 (node --watch) + Vite with hot reload on 7421 (proxies /api)
 bin/workbench      # desktop only: start the service if needed, then open the window
@@ -91,6 +94,7 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 | `server/chats.ts` | `Chats`: node-pty (imported with the first chat) plus a headless xterm and serialize addon per chat; frames `r`+screen and `o`+output to views; title, bell and quiet-after-work (needs-you, suppressed while a view reports focus); `chats.json` (0600) in the state dir, loaded as stopped; `--session-id`/`--resume`; handoff; strips the env claude sets for its children. `commands` and timings are injectable for tests. |
 | `server/claude-sessions.ts` | Reads claude's transcripts (`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<slug>/<id>.jsonl`, slug = path with non-alphanumerics as `-`): sessions in a folder (prefix match, then each file's `cwd`), titles (`custom-title`, else first real prompt), prompt counts. |
 | `server/agents.ts` | `agentArgs(profile, home, cwd)`: an agent profile as claude flags plus a first prompt (list flags last; the chat's `--session-id` ends them before the prompt). `claudeAgents`: names from `~/.claude/agents` and a folder's `.claude/agents`. |
+| `server/backgrounds.ts` | `Backgrounds`: pictures in `<config>/backgrounds/`. `add` copies from the profile's folders (confined like files.ts, raster only, 25 MB, a unique name, the same picture keeps its name), `read` serves only plain names inside the folder, `list`, `remove`. |
 | `server/fs-util.ts` | `writeAtomic` and `revOf`, shared by the config store and notes. |
 | `server/guard.ts` | Every request must have the right Host (blocks DNS rebinding) and Origin, and every `/api/*` request needs `X-Workbench: 1`. Keep this for all new routes. Exceptions: `/raw/` skips the Origin and cross-site checks after the Host check (a sandboxed report's own assets arrive cross-site; the random ticket protects them); `/pty/` must have an Origin (browsers can't add headers to a WebSocket) and `main.ts` also checks the per-start token. |
 | `server/launch.ts` | Links and paths open with `xdg-open`; launchers run as a detached `spawn` with no shell, `~` expanded. `/api/open` takes an entry **address** (plus a step index for a project's launcher step) from the config, never a command. |
@@ -106,7 +110,8 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 | `src/components/ItemDialog.tsx` | The add/edit entry dialog. |
 | `src/components/AgentProfilesDialog.tsx`, `AgentMenu.tsx` | The agent profile editor (list + form, `setAgent` through `run`, so Undo works); `agentEntries`, the menu of Claude, profiles and Shell used by New chat ▾, Chat here as…, New chat as… and the card's agent chip. |
 | `src/lib/events.ts` | SSE read through `fetch`, because EventSource can't send the X-Workbench header. Note events (and reconnects) go to `onNoteEvent` listeners. |
-| `src/theme.css` | Design tokens on `:root`. Per-profile accent goes in `--accent`; also `--accent-soft` and `--accent-line`. |
+| `src/lib/themes.ts`, `src/components/LookPanel.tsx`, `src/lib/look.ts` | The six themes (token values plus a gradient `backdrop` each) and `applyLook`, which sets the tokens and `--backdrop` on `:root`; the Theme and background panel; `LookCtx.pictureFrom` for the file browser's "Use as background". App fetches a picture as a blob URL (CSS can't send X-Workbench) and adds `.backdrop` to `.app` unless `background: none`. |
+| `src/theme.css` | Design tokens on `:root` (themes override the base ones at runtime). Per-profile accent goes in `--accent`; also `--accent-soft` and `--accent-line`. `.app.backdrop` is the frosted layout. |
 
 ## Conventions and gotchas
 
@@ -115,7 +120,7 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 - **YAML quirks:**
   - The parser stores a comment above a list's first item on the list itself; `attachLeadingComments` moves it onto the item.
   - A bare `~` is YAML null, so quote it: `home: "~"`.
-- **Style:** dark only, tame colours, using the tokens from `theme.css`. Small uppercase muted headings, a 2px accent bar plus a soft accent background on the selected row. Keep new UI consistent with this.
+- **Style:** dark only, tame colours, using the tokens from `theme.css` (never hard-coded colours: themes swap the tokens). With a background, `.nav` and `.main` are translucent; give new surfaces that hold text a solid token background (`--bg`, `--panel`) so they stay readable over a picture. Small uppercase muted headings, a 2px accent bar plus a soft accent background on the selected row. Keep new UI consistent with this.
 - **UI state:** per-browser state (nav width, collapsed headings, selection) lives in localStorage, read through `src/lib/local.ts` with try/catch. Anything the user configures belongs in the YAML.
 - **Testing drag and drop:** Playwright drags need `mouse.down` followed by moves with `steps`; see `e2e/nav.spec.ts`.
 - **File access:** any new route that reads or writes user files goes through a confinement check like `Notes.#resolve` (realpath, then allowed roots). Part 3's file browser should reuse that approach.

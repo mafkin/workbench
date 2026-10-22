@@ -178,6 +178,10 @@ export const Section = z.object({
 export const Profile = z.object({
   name: z.string().trim().min(1),
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Accent must be a #rrggbb colour').default('#7d93ab'),
+  /** One of THEMES; another name falls back to slate rather than breaking the file. */
+  theme: z.string().trim().min(1).optional(),
+  /** `theme` (the theme's own, the default), `none`, or a picture's name in the backgrounds folder. */
+  background: z.string().trim().min(1).optional(),
   home: z.string().optional(),
   /** Folder for new notes, daily notes, search and wiki links. */
   notes: z.string().trim().regex(/^(~|\/)/, 'Notes folder must start with ~ or /').optional(),
@@ -224,7 +228,12 @@ export const TYPE_FIELDS: Record<AnyType, string[]> = {
 }
 
 /** Profile-level keys the app can set, in the order a new key is placed. */
-export const PROFILE_FIELDS = ['name', 'accent', 'home', 'notes'] as const
+export const PROFILE_FIELDS = ['name', 'accent', 'theme', 'background', 'home', 'notes'] as const
+
+/** The look of a profile: base colours and a background of its own (see src/lib/themes.ts). */
+export const THEMES = ['slate', 'fjord', 'moss', 'ember', 'dusk', 'graphite'] as const
+export type ThemeId = (typeof THEMES)[number]
+export const themeOf = (name: string | undefined): ThemeId => (THEMES as readonly string[]).includes(name ?? '') ? (name as ThemeId) : 'slate'
 
 const index = z.int().nonnegative()
 

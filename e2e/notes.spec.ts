@@ -125,7 +125,7 @@ test('wiki links open notes, Back returns, and a missing one can be created', as
   await markdown(page).locator('a.wikilink', { hasText: 'Deploy plan' }).click()
   await expect(title(page)).toHaveText('Deploy plan')
   await expect(markdown(page)).toContainText('rollback')
-  await page.getByRole('button', { name: 'Back' }).click()
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
   await expect(title(page)).toHaveText('Ideas')
 
   await markdown(page).locator('a.wikilink', { hasText: 'Missing page' }).click()

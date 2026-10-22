@@ -9,6 +9,7 @@ import {
   joinNotes,
   noteFileName,
   projectHost,
+  themeOf,
   type AppState,
   type Chat,
   type ItemAddr,
@@ -22,6 +23,7 @@ import { agentEntries } from './components/AgentMenu.tsx'
 import { AgentProfilesDialog } from './components/AgentProfilesDialog.tsx'
 import { ConfirmDialog } from './components/ConfirmDialog.tsx'
 import { ContextMenu } from './components/ContextMenu.tsx'
+import { LookPanel } from './components/LookPanel.tsx'
 import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
@@ -46,8 +48,10 @@ import {
   type MenuState,
   type Selection,
 } from './lib/nav.ts'
+import { LookCtx, type LookApi } from './lib/look.ts'
 import { NotesCtx, type NotesApi } from './lib/notes-ctx.ts'
 import { pushRecent, type Recent } from './lib/recent.ts'
+import { applyLook, themeById } from './lib/themes.ts'
 import { normalizePath } from './lib/wikilinks.ts'
 
 const NAV_MIN = 220
@@ -95,6 +99,36 @@ export function App() {
     document.documentElement.style.setProperty('--accent', profile?.accent ?? '#8a8f98')
     document.title = profile ? `${profile.name} · Workbench` : 'Workbench'
   }, [profile?.accent, profile?.name])
+
+  // The profile's look: its theme's colours, and behind frosted panels the
+  // theme's own background or a picture from the backgrounds folder. A picture
+  // loads through fetch and a blob URL, because CSS cannot send X-Workbench.
+  const theme = themeById(themeOf(profile?.theme))
+  const background = profile?.background ?? 'theme'
+  const pictureName = background === 'theme' || background === 'none' ? null : background
+  const [picture, setPicture] = useState<{ name: string; url: string | null } | null>(null)
+  const [lookOpen, setLookOpen] = useState(false)
+
+  useEffect(() => {
+    if (!pictureName) return setPicture(null)
+    let live = true
+    let url: string | null = null
+    api.backgroundImage(pictureName).then(
+      (blob) => {
+        if (!live) return
+        url = URL.createObjectURL(blob)
+        setPicture({ name: pictureName, url })
+      },
+      () => live && setPicture({ name: pictureName, url: null }),
+    )
+    return () => {
+      live = false
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [pictureName])
+
+  const pictureUrl = picture?.name === pictureName ? picture.url : null
+  useEffect(() => applyLook(theme, pictureUrl), [theme, pictureUrl])
 
   const refresh = useCallback(() => api.getState().then(setState), [])
 
@@ -591,7 +625,9 @@ export function App() {
     (e: React.PointerEvent) => {
       e.preventDefault()
       setResizing(true)
-      const move = (ev: PointerEvent) => setNavWidth(Math.max(NAV_MIN, Math.min(NAV_MAX, ev.clientX)))
+      // Keep the edge under the pointer, also when the frosted layout insets the panels.
+      const offset = e.clientX - navWidth
+      const move = (ev: PointerEvent) => setNavWidth(Math.max(NAV_MIN, Math.min(NAV_MAX, ev.clientX - offset)))
       const up = () => {
         setResizing(false)
         window.removeEventListener('pointermove', move)
@@ -600,7 +636,7 @@ export function App() {
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', up)
     },
-    [setNavWidth],
+    [setNavWidth, navWidth],
   )
 
   const selection = useMemo<Selection | null>(() => {
@@ -614,6 +650,20 @@ export function App() {
     if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
     return { kind: 'entry', addr, item }
   }, [active, selected])
+
+  const lookApi = useMemo<LookApi>(
+    () => ({
+      pictureFrom: (path) => {
+        const a = activeRef.current
+        if (!a) return
+        api
+          .addBackground(a.id, path)
+          .then(({ name }) => run([{ op: 'setProfileField', key: 'background', value: name }], `Background: ${name}`))
+          .catch(fail)
+      },
+    }),
+    [run, fail],
+  )
 
   const notesApi = useMemo<NotesApi | null>(() => {
     if (!active) return null
@@ -644,72 +694,78 @@ export function App() {
   return (
     <NotesCtx.Provider value={notesApi}>
       <ChatsCtx.Provider value={chatsApi}>
-      <div className={cx('app', resizing && 'resizing')} style={{ '--nav-w': `${navWidth}px` } as React.CSSProperties}>
-        <NavPanel
-          profiles={state.profiles}
-          active={active}
-          connection={connection}
-          editing={editing && !active.error}
-          setEditing={setEditing}
-          selectedKey={selection?.kind === 'entry' ? itemKey(selection.addr) : undefined}
-          isCollapsed={(key, fallback) => collapsed[key] ?? fallback}
-          toggleCollapsed={(key, fallback) => setCollapsed((c) => ({ ...c, [key]: !(c[key] ?? fallback) }))}
-          activate={activate}
-          run={run}
-          openDialog={setDialog}
-          openMenu={openMenu}
-          itemMenu={itemMenu}
-          chatMarks={chatMarks}
-          notify={(message, kind) => toasts.push({ message, kind })}
-          onSwitch={switchProfile}
-          onResizeStart={onResizeStart}
-          onHome={goHome}
-        />
-        <MainPane
-          active={active}
-          selected={selection}
-          search={search}
-          setSearch={setSearch}
-          searchRef={searchRef}
-          canGoBack={search.open || history.length > 0}
-          onBack={back}
-          openFolder={openFolder}
-          toast={toasts.push}
-          home={state.home}
-          actions={projectActions}
-          recent={recent[active.id] ?? []}
-          openRecent={openRecent}
-          onHome={goHome}
-          activate={activate}
-          openExternally={openExternally}
-          startEditing={() => setEditing(true)}
-        />
-        {dialog?.mode === 'note' ? (
-          <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
-        ) : (
-          dialog && <ItemDialog dialog={dialog} agents={Object.keys(profile?.agents ?? {})} onClose={() => setDialog(null)} onSubmit={submitDialog} />
-        )}
-        {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
-        {agentsFor !== null && profile && (
-          <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
-        )}
-        {closing && (
-          <ConfirmDialog
-            title={`Close ${chatName(closing)}?`}
-            action="Close"
-            onCancel={() => setClosing(null)}
-            onConfirm={() => {
-              setClosing(null)
-              void closeChat(closing)
-            }}
-          >
-            {closing.agent === 'claude'
-              ? 'claude stops. The conversation stays in History, where you can resume it.'
-              : 'The shell, and anything running in it, stops.'}
-          </ConfirmDialog>
-        )}
-        <Toasts list={toasts.list} dismiss={toasts.dismiss} />
-      </div>
+        <LookCtx.Provider value={lookApi}>
+          <div className={cx('app', resizing && 'resizing', background !== 'none' && 'backdrop')} style={{ '--nav-w': `${navWidth}px` } as React.CSSProperties}>
+            <NavPanel
+              profiles={state.profiles}
+              active={active}
+              connection={connection}
+              editing={editing && !active.error}
+              setEditing={setEditing}
+              selectedKey={selection?.kind === 'entry' ? itemKey(selection.addr) : undefined}
+              isCollapsed={(key, fallback) => collapsed[key] ?? fallback}
+              toggleCollapsed={(key, fallback) => setCollapsed((c) => ({ ...c, [key]: !(c[key] ?? fallback) }))}
+              activate={activate}
+              run={run}
+              openDialog={setDialog}
+              openMenu={openMenu}
+              itemMenu={itemMenu}
+              chatMarks={chatMarks}
+              notify={(message, kind) => toasts.push({ message, kind })}
+              onSwitch={switchProfile}
+              onResizeStart={onResizeStart}
+              onHome={goHome}
+              onLook={() => setLookOpen(true)}
+            />
+            <MainPane
+              active={active}
+              selected={selection}
+              search={search}
+              setSearch={setSearch}
+              searchRef={searchRef}
+              canGoBack={search.open || history.length > 0}
+              onBack={back}
+              openFolder={openFolder}
+              toast={toasts.push}
+              home={state.home}
+              actions={projectActions}
+              recent={recent[active.id] ?? []}
+              openRecent={openRecent}
+              onHome={goHome}
+              activate={activate}
+              openExternally={openExternally}
+              startEditing={() => setEditing(true)}
+            />
+            {dialog?.mode === 'note' ? (
+              <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
+            ) : (
+              dialog && <ItemDialog dialog={dialog} agents={Object.keys(profile?.agents ?? {})} onClose={() => setDialog(null)} onSubmit={submitDialog} />
+            )}
+            {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+            {lookOpen && profile && (
+              <LookPanel profile={profile} profileId={active.id} run={run} pictureMissing={!!pictureName && picture?.name === pictureName && !picture.url} onClose={() => setLookOpen(false)} />
+            )}
+            {agentsFor !== null && profile && (
+              <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
+            )}
+            {closing && (
+              <ConfirmDialog
+                title={`Close ${chatName(closing)}?`}
+                action="Close"
+                onCancel={() => setClosing(null)}
+                onConfirm={() => {
+                  setClosing(null)
+                  void closeChat(closing)
+                }}
+              >
+                {closing.agent === 'claude'
+                  ? 'claude stops. The conversation stays in History, where you can resume it.'
+                  : 'The shell, and anything running in it, stops.'}
+              </ConfirmDialog>
+            )}
+            <Toasts list={toasts.list} dismiss={toasts.dismiss} />
+          </div>
+        </LookCtx.Provider>
       </ChatsCtx.Provider>
     </NotesCtx.Provider>
   )

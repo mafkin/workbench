@@ -34,6 +34,8 @@ You can edit the files by hand or through the app (the pencil at the top of the 
 ```yaml
 name: Work
 accent: "#7d93ab"
+theme: fjord                    # slate (default) | fjord | moss | ember | dusk | graphite
+background: theme               # theme (default) | none | a picture in ~/.config/workbench/backgrounds/
 home: ~/Documents/work
 notes: ~/Documents/work/notes   # new notes, daily notes, search and [[wiki links]]
 workflow:                       # the steps every project (folder entry) starts with
@@ -100,9 +102,16 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
   - **+** adds an entry, the pencil renames or edits, and the bin deletes.
   - Deletes can be undone from the toast that appears.
 - **Right-click** any heading or entry for the same actions.
-- **Links** open in your browser and **launchers** start their program, both without a shell. Folders and notes open in the main pane.
+- **Launchers** and **links** start or open from the small button at the end of their row (▶ or ↗), without a shell; their names are just text. Folders and notes open in the main pane when you click them.
 - **Alt+←** or the back arrow in the top bar goes back to the previous page.
 - **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
+
+### Themes and backgrounds
+
+- The palette button at the top of the sidebar opens **Theme and background** for the current profile. Work and Personal each have their own; the accent colour stays the profile's.
+- Six dark themes: **Slate** (the original), **Fjord**, **Moss**, **Ember**, **Dusk** and **Graphite**. Each has its own background, drawn with soft gradients, behind frosted panels.
+- **Background:** the theme's own, **None** (the flat look, panels edge to edge), or your own picture. Add one by path in the panel, or right-click a picture in the file browser and choose **Use as background**. Workbench keeps a copy in `~/.config/workbench/backgrounds/` (jpg, png, webp, avif or gif, up to 25 MB), so it still works if you move the original; the × on a picture in the panel deletes the copy.
+- Choices are written to the profile's YAML (`theme:`, `background:`) at once, with Undo in the toast.
 
 ### Projects: cards and workflow steps
 
@@ -189,7 +198,7 @@ Notes can only touch:
 
 The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file, and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
 
-Paths are checked after resolving symlinks, so `..` or a link can't reach anything else.
+Paths are checked after resolving symlinks, so `..` or a link can't reach anything else. Background pictures are copied only from the profile's folders, only raster types (no SVG, which can carry scripts), and served only by plain name from the backgrounds folder.
 
 Agent profiles only choose flags for claude (`--model`, `--permission-mode` and the rest), from your YAML; a request names a profile, never flags. A chat is shell access, so its terminal socket (`/pty/`) needs more: browsers can't add the `X-Workbench` header to a WebSocket, so it must come from Workbench's own `Origin`, and it carries a random token that changes every time the service starts, which only the app can read through the API. Chats start from an entry or step in your config, by its position; a request never carries a command or arguments, and **Chat here** only works inside the profile's folders. Claude's transcripts in `~/.claude/projects/` are read for History, never written.
 
@@ -211,6 +220,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/config-store.ts` | loading, validation, atomic writes, watching and undo |
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; the folders a profile may reach; folder watching |
+| `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
 | `server/chats.ts`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list; reading claude's transcripts for History; agent profiles as claude flags |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
 | `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats |

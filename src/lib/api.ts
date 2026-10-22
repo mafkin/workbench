@@ -104,6 +104,17 @@ export const claudeAgents = (profile: string, path: string) => api<string[]>(`/a
 /** The token a chat's terminal socket needs; new each time the service starts. */
 export const chatToken = () => api<{ token: string }>('/api/chats/token').then((r) => r.token)
 
+// Background pictures: copies in the config folder, chosen per profile.
+export const listBackgrounds = () => api<string[]>('/api/backgrounds')
+export const addBackground = (profile: string, path: string) => api<{ name: string }>('/api/backgrounds', { body: { profile, path } })
+export const deleteBackground = (name: string) => api(`/api/backgrounds/${encodeURIComponent(name)}`, { method: 'DELETE' })
+/** A picture's bytes, for a blob URL: CSS cannot send the X-Workbench header. */
+export async function backgroundImage(name: string): Promise<Blob> {
+  const res = await fetch(`/api/backgrounds/${encodeURIComponent(name)}`, { headers: { 'x-workbench': '1' } })
+  if (!res.ok) throw new ApiError(res.statusText, res.status)
+  return res.blob()
+}
+
 /** Images in notes go through fetch, because an <img> cannot send the X-Workbench header. */
 export async function noteImage(profile: string, path: string): Promise<Blob> {
   const res = await fetch(`/api/notes/asset?${query({ profile, path })}`, { headers: { 'x-workbench': '1' } })

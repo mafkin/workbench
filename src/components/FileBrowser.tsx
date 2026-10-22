@@ -13,6 +13,7 @@ import {
   FileText,
   FolderOpen,
   FolderPlus,
+  ImageIcon,
   ListFilter,
   PencilLine,
   Trash2,
@@ -21,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { expandHome, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { PATHS_TYPE } from '../lib/chats.ts'
+import { PICTURE_EXT, useLook } from '../lib/look.ts'
 import { onFilesEvent } from '../lib/events.ts'
 import { formatDate, formatSize, isMarkdown, nameOf, parentOf, segments, uniqueName } from '../lib/files.ts'
 import { useLocal } from '../lib/local.ts'
@@ -64,6 +66,7 @@ function sorted(entries: FileEntry[], key: SortKey, dir: 1 | -1): FileEntry[] {
 /** The toolbar, tree and preview; the page around it supplies the heading. */
 export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: Props) {
   const notes = useNotes()
+  const look = useLook()
   const profile = notes.profile
   const [listings, setListings] = useState<Record<string, Listing>>({})
   const listingsRef = useRef(listings)
@@ -371,6 +374,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       items.push(
         { label: 'Open folder in Files', icon: <FolderOpen size={14} />, run: () => void openDefault(dir ? entry.path : parentOf(entry.path)) },
         { label: 'Copy path', icon: <Copy size={14} />, run: () => void copyPath(entry.path) },
+        ...(look && !dir && PICTURE_EXT.test(entry.name) ? [{ label: 'Use as background', icon: <ImageIcon size={14} />, run: () => look.pictureFrom(entry.path) }] : []),
         ...chatEntries(dir ? entry.path : parentOf(entry.path)),
         'sep',
         { label: 'Rename', icon: <PencilLine size={14} />, run: () => setRenaming(entry.path) },

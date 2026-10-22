@@ -28,6 +28,7 @@ import {
   type Profile,
 } from '../shared/config-schema.ts'
 import { agentArgs, claudeAgents } from './agents.ts'
+import { Backgrounds } from './backgrounds.ts'
 import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { describeIssue } from './config-ops.ts'
@@ -116,6 +117,7 @@ export async function buildServer(opts: ServerOptions) {
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
   const files = new Files(store, home, { spawn: opts.spawn })
+  const backgrounds = new Backgrounds(path.join(opts.configDir, 'backgrounds'), store, home)
   const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
   await chats.init()
   // A chat's terminal is shell access. Besides the guard, its socket needs this
@@ -271,6 +273,29 @@ export async function buildServer(opts: ServerOptions) {
     if (ext === '.svg') reply.header('content-security-policy', 'sandbox')
     if (ext === '.html' || ext === '.htm') reply.header('content-security-policy', 'sandbox allow-scripts allow-popups allow-forms')
     return reply.sendFile(path.basename(file.real), path.dirname(file.real), { dotfiles: 'allow', acceptRanges: true })
+  })
+
+  // Background pictures: copies in the config folder, from the profile's folders only.
+  app.get('/api/backgrounds', async () => backgrounds.list())
+
+  app.get<{ Params: { name: string } }>('/api/backgrounds/:name', async (req, reply) => {
+    const pic = await backgrounds.read(req.params.name)
+    return reply
+      .header('content-type', pic.type)
+      .header('content-length', pic.size)
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'no-cache')
+      .send(fs.createReadStream(pic.real))
+  })
+
+  app.post('/api/backgrounds', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.body)
+    return backgrounds.add(profile, p)
+  })
+
+  app.delete<{ Params: { name: string } }>('/api/backgrounds/:name', async (req) => {
+    await backgrounds.remove(req.params.name)
+    return { ok: true }
   })
 
   // Chats: started from an entry or step in the config, by address; a request

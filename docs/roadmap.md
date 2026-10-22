@@ -39,6 +39,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 4 | Project cards | Done (same branch) |
 | 5 | Agent chats | Done (same branch) |
 | 5½ | Agent profiles | Done (same branch); see below |
+| 5¾ | Sidebar open buttons, themes and backgrounds | Done (same branch); see below |
 | 6 | Skills & MCP panel | Next in the suggested order |
 | 7 | Context folders | |
 | 8 | Polish | |
@@ -190,6 +191,20 @@ The user asked for "agent profiles I can prepare and choose when initiating sess
 - **Built:** `AgentProfile` and `agents:` in the schema, `chatProgram`, `findAgent`, `agentSummary`; the `setAgent` op (rename updates references, a delete is refused while in use); `server/agents.ts` (`agentArgs`, `claudeAgents`); start-time resolution in `POST /api/chats` (request, else step or entry, else project default); `GET /api/chats/claude-agents`; `AgentProfilesDialog`, `agentEntries` menus, the agent chip, bypass marks.
 - **Fixed on the way:** a comment after `key:` whose value is a block map or list now stays on the key's line through app edits (`applyOps` gets the source text); saves of `chats.json` are serialized (two at once collided on the temp file); `countPrompts` never rejects.
 - **Left for later:** a chat started with a profile keeps its flags when the profile changes (by design); no per-folder rules (a profile can't claim `~/Projects/games/**`).
+
+### After part 5: sidebar open buttons, themes and backgrounds (done)
+
+The user asked: launchers in the sidebar started on a single click of their name; they wanted an explicit button with a hover highlight, and the text as just text. And themes ("a few example themes, your choice") with a background based on the theme, or their own picture.
+
+| Question | Answer |
+| --- | --- |
+| Which entries get the button | Launchers and links |
+| Scope of the look | Per profile (`theme:`, `background:` in its YAML) |
+| How a background shows | Behind everything, frosted panels |
+| Own picture | Picked from a file (file browser or path); the app keeps a copy in `<config>/backgrounds/` |
+
+- **Built:** the open button in `NavPanel` (row click does nothing for launchers and links); `THEMES` and the six themes in `src/lib/themes.ts` (tokens plus a gradient background each); `server/backgrounds.ts` and `/api/backgrounds`; `LookPanel` (palette button in the sidebar header); "Use as background" in the file browser; the `.app.backdrop` frosted layout. The background follows the theme by default; None is the old flat look.
+- **Left for later:** theme colours or new themes from the UI; a light theme (the app stays dark-only); per-picture tint or blur settings.
 
 ### Part 6: Skills & MCP panel
 

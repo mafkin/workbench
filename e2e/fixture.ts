@@ -142,6 +142,7 @@ export async function resetFixture() {
   // Tests create notes and files all over the fake home; start each one from a clean copy.
   await fsp.rm(HOME, { recursive: true, force: true })
   await fsp.rm(TRASH, { recursive: true, force: true })
+  await fsp.rm(path.join(DIR, 'backgrounds'), { recursive: true, force: true })
   await fsp.mkdir(ALPHA, { recursive: true })
   for (const [rel, data] of Object.entries(ALPHA_FILES)) {
     await fsp.mkdir(path.dirname(path.join(ALPHA, rel)), { recursive: true })

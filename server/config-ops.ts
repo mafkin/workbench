@@ -184,7 +184,7 @@ function setProfileField(doc: Document, key: (typeof PROFILE_FIELDS)[number], ra
   const map = doc.contents
   if (!isMap(map)) throw new OpError('The profile is not a mapping')
   const value = raw.trim()
-  if (!value && (key === 'home' || key === 'notes')) {
+  if (!value && key !== 'name' && key !== 'accent') {
     map.delete(key)
     return
   }

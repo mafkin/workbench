@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ArrowUpRight, ChevronDown, FilePlus, GripVertical, Pencil, Pin, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { ChevronDown, ExternalLink, FilePlus, GripVertical, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, entrySlot, itemKey, projectHost, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import type { Connection } from '../lib/events.ts'
@@ -44,6 +44,8 @@ interface Props extends NavActions {
   onSwitch: (id: string) => void
   onResizeStart: (e: React.PointerEvent) => void
   onHome: () => void
+  /** Open the theme and background panel. */
+  onLook: () => void
 }
 
 const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState; showArchive: boolean }>(null!)
@@ -117,7 +119,7 @@ function dropTarget(over: DropData, profile: Profile): { to: ListAddr; index: nu
 }
 
 export function NavPanel(props: Props) {
-  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome } = props
+  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook } = props
   const profile = active.profile
   const [drop, setDrop] = useState<DropHint>({ drag: null, overId: null })
   const [renaming, setRenaming] = useState<number | null>(null)
@@ -170,6 +172,9 @@ export function NavPanel(props: Props) {
             WORKBENCH
           </button>
           <span className="spacer" />
+          <button className="icon-btn" onClick={onLook} title="Theme and background" aria-label="Theme and background">
+            <Palette size={13} />
+          </button>
           <button
             className={cx('icon-btn', editing && 'on')}
             onClick={() => setEditing(!editing)}
@@ -505,7 +510,9 @@ function RowActions({ addr, item }: { addr: ItemAddr; item: NavItem }) {
 function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
   const ctx = useContext(Ctx)
   const { setNodeRef, attributes, listeners, isDragging, hint, style } = useItemSortable(addr, item)
-  const selected = ctx.selectedKey === itemKey(addr) && !opensExternally(item)
+  // Launchers and links open outside the app only from their button; the name is just text.
+  const outside = opensExternally(item)
+  const selected = ctx.selectedKey === itemKey(addr) && !outside
   const section = ctx.profile.sections[addr.section]
   const context = addr.group === undefined ? `Under ${section?.title}` : `Under ${section?.title} / ${section?.items[addr.group]?.label}`
 
@@ -513,10 +520,13 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
     <div
       ref={setNodeRef}
       style={style}
-      className={cx('item', selected && 'selected', isDragging && 'dragging', archived(item) && 'archived', hint)}
+      className={cx('item', selected && 'selected', isDragging && 'dragging', archived(item) && 'archived', outside && !ctx.editing && 'outside', hint)}
       title={item.type === 'folder' && item.description ? `${item.description}\n${describeTarget(item)}` : describeTarget(item)}
       aria-current={selected ? 'page' : undefined}
-      onClick={() => (ctx.editing ? ctx.openDialog({ mode: 'edit', at: addr, item, context }) : ctx.activate(addr, item))}
+      onClick={() => {
+        if (ctx.editing) ctx.openDialog({ mode: 'edit', at: addr, item, context })
+        else if (!outside) ctx.activate(addr, item)
+      }}
       onContextMenu={(e) => {
         e.preventDefault()
         ctx.openMenu({ x: e.clientX, y: e.clientY, entries: ctx.itemMenu(addr, item) })
@@ -529,7 +539,19 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       )}
       <EntryIcon type={item.type} icon={item.icon} agent={item.type === 'chat' ? chatProgram(item.agent) : undefined} />
       <span className="label">{item.label}</span>
-      {!ctx.editing && opensExternally(item) && <ArrowUpRight size={12} className="kind" />}
+      {!ctx.editing && outside && (
+        <button
+          className="open-btn"
+          aria-label={`${item.type === 'launch' ? 'Start' : 'Open'} ${item.label}`}
+          title={item.type === 'launch' ? 'Start' : 'Open in the browser'}
+          onClick={(e) => {
+            e.stopPropagation()
+            ctx.activate(addr, item)
+          }}
+        >
+          {item.type === 'launch' ? <Play size={11} /> : <ExternalLink size={11} />}
+        </button>
+      )}
       {!ctx.editing && <ChatMark item={item} />}
       {!ctx.editing && item.type === 'folder' && (
         <span className="project-marks">
