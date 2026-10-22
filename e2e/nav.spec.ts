@@ -31,13 +31,16 @@ test('profile switch swaps nav, accent and title', async ({ page }) => {
 test('selecting a folder shows its view', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await expect(page.locator('.page-title')).toHaveText('Alpha')
-  await expect(page.locator('.status.ok')).toHaveText('Found')
+  await expect(page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name: 'README.md' })).toBeVisible()
   await expect(entry(page, 'Alpha')).toHaveClass(/selected/)
   await page.screenshot({ path: 'test-results/folder.png' })
 })
 
-test('a launcher starts its program', async ({ page }) => {
-  await entry(page, 'Echo tool').click()
+test('a launcher starts from its button; its name is just text', async ({ page }) => {
+  await entry(page, 'Echo tool').locator('.label').click()
+  await page.waitForTimeout(300)
+  expect(await fsp.readFile(SPAWN_LOG, 'utf8')).toBe('')
+  await page.getByRole('button', { name: 'Start Echo tool' }).click()
   await expect(page.locator('.toast')).toContainText('Started Echo tool')
   expect(await fsp.readFile(SPAWN_LOG, 'utf8')).toBe('echo hello\n')
 })

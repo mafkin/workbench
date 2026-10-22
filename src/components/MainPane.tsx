@@ -1,56 +1,217 @@
-import { ExternalLink, FolderOpen, Pencil } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import type { ItemAddr, NavItem, ProfileState } from '../../shared/config-schema.ts'
-import { stat } from '../lib/api.ts'
-import { opensExternally } from '../lib/nav.ts'
-import { EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
+import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search, X } from 'lucide-react'
+import { lazy, Suspense, useRef, useState } from 'react'
+import {
+  chatName,
+  chatProgram,
+  CONTEXT_LABEL,
+  entrySlot,
+  folderRoots,
+  getItem,
+  NOTE_EXT,
+  projectHost,
+  stepsOf,
+  type Chat,
+  type ItemAddr,
+  type NavItem,
+  type Profile,
+  type ProfileState,
+  type SearchHit,
+  type ServersScan,
+} from '../../shared/config-schema.ts'
+import { useChats } from '../lib/chats.ts'
+import { nameOf } from '../lib/files.ts'
+import { findEntry, FILES_KEY, NOTE_KEY, parseKey, resolveEntry, type Selection } from '../lib/nav.ts'
+import { useNotes } from '../lib/notes-ctx.ts'
+import { ago, type Recent } from '../lib/recent.ts'
+import { ChatPane } from './ChatPane.tsx'
+import { ContextView } from './ContextView.tsx'
+import { DailyView } from './DailyView.tsx'
+import { agentIcon, EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
+import { FileBrowser } from './FileBrowser.tsx'
+import { NotesFolderHint } from './NotesFolderHint.tsx'
+import { NoteView } from './NoteView.tsx'
+import { ProjectView, type ProjectActions } from './ProjectView.tsx'
+import { SearchView } from './SearchView.tsx'
+import type { ToastInput } from './Toast.tsx'
+
+const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
+const ServersView = lazy(() => import('./ServersView.tsx'))
+
+export interface SearchState {
+  open: boolean
+  query: string
+}
 
 interface Props {
   active: ProfileState
-  selected: { addr: ItemAddr; item: NavItem } | null
+  selected: Selection | null
+  search: SearchState
+  setSearch: (s: SearchState) => void
+  searchRef: React.RefObject<HTMLInputElement | null>
+  canGoBack: boolean
+  onBack: () => void
+  /** Open a folder in the browser; one that is a folder entry opens as that entry. */
+  openFolder: (path: string) => void
+  toast: (t: ToastInput) => void
+  home: string
   onHome: () => void
   activate: (addr: ItemAddr, item: NavItem) => void
   openExternally: (addr: ItemAddr, item: NavItem) => void
   startEditing: () => void
+  actions: ProjectActions
+  /** Recently opened, newest first, for Home. */
+  recent: Recent[]
+  openRecent: (r: Recent) => void
+  /** The Servers page's checks, so the nav's marks follow it. */
+  onServersScan: (scan: ServersScan) => void
 }
 
-export function MainPane({ active, selected, onHome, activate, openExternally, startEditing }: Props) {
+const noteName = (path: string) => (path.split('/').pop() ?? path).replace(NOTE_EXT, '')
+
+export function MainPane(props: Props) {
+  const { active, selected, search, setSearch, searchRef, canGoBack, onBack, onHome, activate, startEditing } = props
+  const notes = useNotes()
+  const firstHit = useRef<string | null>(null)
   const profile = active.profile
-  const section = selected && profile ? profile.sections[selected.addr.section] : undefined
-  const group = selected && section && selected.addr.group !== undefined ? section.items[selected.addr.group] : undefined
+  const entry = selected?.kind === 'entry' ? selected : null
+  const section = entry && profile ? profile.sections[entry.addr.section] : undefined
+  const group = entry && section && entry.addr.group !== undefined ? section.items[entry.addr.group] : undefined
+  const atHome = !selected && !search.open
+  const [stepCrumb, setStepCrumb] = useState<string | null>(null)
 
   return (
     <main className="main">
       <div className="topbar">
+        {canGoBack && (
+          <button className="icon-btn" onClick={onBack} title="Back (Alt+←)" aria-label="Back">
+            <ArrowLeft size={15} />
+          </button>
+        )}
         <div className="crumbs">
-          {selected ? <button onClick={onHome}>{profile?.name ?? active.id}</button> : <span className="current">{profile?.name ?? active.id}</span>}
-          {section && (
+          {atHome ? <span className="current">{profile?.name ?? active.id}</span> : <button onClick={onHome}>{profile?.name ?? active.id}</button>}
+          {search.open ? (
             <>
               <span className="sep">/</span>
-              <span>{section.title}</span>
+              <span className="current">Search</span>
             </>
-          )}
-          {group && (
+          ) : entry ? (
+            <>
+              {section && (
+                <>
+                  <span className="sep">/</span>
+                  <span>{section.title}</span>
+                </>
+              )}
+              {group && (
+                <>
+                  <span className="sep">/</span>
+                  <span>{group.label}</span>
+                </>
+              )}
+              <span className="sep">/</span>
+              {entry.item.type === 'folder' && stepCrumb ? (
+                <>
+                  <span>{entry.item.label}</span>
+                  <span className="sep">/</span>
+                  <span className="current">{stepCrumb}</span>
+                </>
+              ) : (
+                <span className="current">{entry.item.label}</span>
+              )}
+            </>
+          ) : selected?.kind === 'chat' ? (
             <>
               <span className="sep">/</span>
-              <span>{group.label}</span>
+              <span>Chats</span>
             </>
-          )}
-          {selected && (
+          ) : selected?.kind === 'setup' ? (
             <>
               <span className="sep">/</span>
-              <span className="current">{selected.item.label}</span>
+              <span className="current">Claude setup</span>
             </>
-          )}
+          ) : selected?.kind === 'servers' ? (
+            <>
+              <span className="sep">/</span>
+              <span className="current">Servers</span>
+            </>
+          ) : selected?.kind === 'context' ? (
+            <>
+              <span className="sep">/</span>
+              <span>Context</span>
+              {selected.name !== 'context' && (
+                <>
+                  <span className="sep">/</span>
+                  <span className="current">{CONTEXT_LABEL[selected.name]}</span>
+                </>
+              )}
+            </>
+          ) : selected && selected.kind !== 'entry' ? (
+            <>
+              <span className="sep">/</span>
+              <span>{selected.kind === 'note' ? 'Notes' : 'Files'}</span>
+              <span className="sep">/</span>
+              <span className="current" title={selected.path}>
+                {selected.kind === 'note' ? noteName(selected.path) : nameOf(selected.path)}
+              </span>
+            </>
+          ) : null}
         </div>
+        <span style={{ flex: 1 }} />
+        <label className="search-box">
+          <Search size={13} />
+          <input
+            ref={searchRef}
+            value={search.query}
+            placeholder="Search notes"
+            aria-label="Search notes"
+            onFocus={() => !search.open && setSearch({ ...search, open: true })}
+            onChange={(e) => setSearch({ open: true, query: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setSearch({ ...search, open: false })
+                e.currentTarget.blur()
+              } else if (e.key === 'Enter' && firstHit.current) {
+                notes.open(firstHit.current)
+                e.currentTarget.blur()
+              }
+            }}
+          />
+          {!search.open && <span className="kbd">Ctrl+Shift+F</span>}
+        </label>
       </div>
       <div className="content">
         {!profile ? (
           <BrokenProfile active={active} />
-        ) : selected ? (
-          <EntryView key={`${active.id}:${selected.item.label}`} addr={selected.addr} item={selected.item} kicker={section?.title ?? ''} openExternally={openExternally} />
+        ) : search.open ? (
+          <SearchView query={search.query} onResults={(hits: SearchHit[]) => (firstHit.current = hits[0]?.path ?? null)} />
+        ) : entry ? (
+          <EntryView
+            key={`${active.id}:${entry.item.label}`}
+            addr={entry.addr}
+            item={entry.item}
+            kicker={section?.title ?? ''}
+            pane={props}
+            onTab={setStepCrumb}
+          />
+        ) : selected?.kind === 'note' ? (
+          <PathNote key={selected.path} path={selected.path} />
+        ) : selected?.kind === 'files' ? (
+          <Browser key={`${active.id}:${selected.path}`} top={selected.path} kicker="Files" heading={nameOf(selected.path)} pane={props} />
+        ) : selected?.kind === 'chat' ? (
+          <LoneChat key={selected.id} id={selected.id} />
+        ) : selected?.kind === 'context' ? (
+          <ContextView key={`${active.id}:${selected.name}`} name={selected.name} profileId={active.id} profile={profile} home={props.home} openFolder={props.openFolder} toast={props.toast} />
+        ) : selected?.kind === 'servers' ? (
+          <Suspense fallback={null}>
+            <ServersView key={active.id} profileId={active.id} onScan={props.onServersScan} toast={props.toast} />
+          </Suspense>
+        ) : selected?.kind === 'setup' ? (
+          <Suspense fallback={null}>
+            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} />
+          </Suspense>
         ) : (
-          <Home active={active} activate={activate} startEditing={startEditing} />
+          <Home active={active} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />
         )}
       </div>
     </main>
@@ -70,9 +231,21 @@ function BrokenProfile({ active }: { active: ProfileState }) {
   )
 }
 
-function Home({ active, activate, startEditing }: { active: ProfileState; activate: Props['activate']; startEditing: () => void }) {
+/** Home: what you opened last, and today's note. The nav is on the left, so it is not repeated here. */
+function Home({
+  active,
+  activate,
+  recent,
+  openRecent,
+  startEditing,
+}: {
+  active: ProfileState
+  activate: Props['activate']
+  recent: Recent[]
+  openRecent: Props['openRecent']
+  startEditing: () => void
+}) {
   const profile = active.profile!
-  const count = profile.sections.reduce((n, s) => n + s.items.reduce((m, i) => m + (i.type === 'group' ? i.items.length : 1), 0), 0)
 
   if (profile.sections.length === 0) {
     return (
@@ -86,124 +259,247 @@ function Home({ active, activate, startEditing }: { active: ProfileState; activa
     )
   }
 
-  const entry = (addr: ItemAddr, item: NavItem, indent = false) => (
-    <li key={`${addr.group ?? ''}.${addr.index}`}>
-      <button onClick={() => activate(addr, item)} style={indent ? { paddingLeft: 22 } : undefined} title={item.label}>
-        <EntryIcon type={item.type} icon={item.icon} size={14} />
-        <span className="label">{item.label}</span>
-        {opensExternally(item) && <ExternalLink size={11} style={{ color: 'var(--faint)', flex: 'none' }} />}
-      </button>
-    </li>
-  )
+  const dailyAddr = findEntry(profile, 'daily')
+  const daily = dailyAddr ? getItem(profile, dailyAddr) : undefined
+  const rows = recent.flatMap((r) => {
+    const row = describeRecent(profile, r)
+    return row ? [{ r, ...row }] : []
+  })
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
-    <div className="page">
+    <div className="page home-page">
       <div className="page-kicker">Profile</div>
       <h1 className="page-title">{profile.name}</h1>
-      <p className="page-sub">
-        {profile.sections.length} headings · {count} entries
-        {profile.home && (
-          <>
-            {' · home '}
-            <span className="mono">{profile.home}</span>
-          </>
-        )}
-      </p>
-      <div className="overview">
-        {profile.sections.map((s, si) => (
-          <section className="card" key={si}>
-            <h2>
-              {s.title} <span>{s.items.length}</span>
-            </h2>
-            {s.items.length === 0 ? (
-              <div className="none">Nothing here yet</div>
-            ) : (
-              <ul>
-                {s.items.flatMap((item, i) =>
-                  item.type === 'group'
-                    ? [
-                        <li key={`g${i}`}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 28, padding: '0 6px', color: 'var(--muted)' }}>
-                            <EntryIcon type="group" icon={item.icon} size={14} />
-                            {item.label}
-                          </div>
-                        </li>,
-                        ...item.items.map((child, ci) => entry({ section: si, group: i, index: ci }, child, true)),
-                      ]
-                    : [entry({ section: si, index: i }, item)],
-                )}
-              </ul>
-            )}
-          </section>
-        ))}
-      </div>
+      {!profile.notes && <NotesFolderHint compact />}
+      {dailyAddr && daily && (
+        <button className="today-card" onClick={() => activate(dailyAddr, daily)}>
+          <CalendarDays size={18} className="icon" />
+          <span>
+            <strong>{daily.label}</strong>
+            <span>{today}</span>
+          </span>
+        </button>
+      )}
+      <OtherChats profile={profile} />
+      <h2 className="section-label">Recent</h2>
+      {rows.length === 0 ? (
+        <p className="none">Nothing opened yet. Pick a project on the left.</p>
+      ) : (
+        <ul className="recent-list">
+          {rows.map(({ r, icon, label, where }) => (
+            <li key={`${r.key}|${r.step ?? ''}`}>
+              <button onClick={() => openRecent(r)}>
+                {icon}
+                <span className="label">{label}</span>
+                <span className="where">{where}</span>
+                <span className="when">{ago(r.at)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
 
-function PathStatus({ path, want }: { path: string; want: 'dir' | 'file' }) {
-  const [status, setStatus] = useState<{ exists: boolean; kind: string | null } | null>(null)
-  useEffect(() => {
-    let live = true
-    stat(path).then((s) => live && setStatus(s), () => live && setStatus(null))
-    return () => {
-      live = false
-    }
-  }, [path])
-  if (!status) return null
-  if (!status.exists) return <span className="status bad">Not found</span>
-  if (status.kind !== want) return <span className="status bad">{want === 'dir' ? 'Not a folder' : 'Not a file'}</span>
-  return <span className="status ok">Found</span>
+/** Chats whose project or chat entry is gone (removed, or its path changed), so none runs out of sight. */
+function OtherChats({ profile }: { profile: Profile }) {
+  const chats = useChats()
+  const hosts = new Set<string>()
+  const visit = (item: NavItem) => {
+    if (item.type === 'folder') hosts.add(projectHost(item.path))
+    if (item.type === 'chat') hosts.add(entrySlot(item))
+    if (item.type === 'group') item.items.forEach(visit)
+  }
+  for (const s of profile.sections) s.items.forEach(visit)
+  const others = chats.list.filter((c) => !hosts.has(c.host))
+  if (!others.length) return null
+  return (
+    <>
+      <h2 className="section-label">Other chats</h2>
+      <ul className="recent-list other-chats">
+        {others.map((c) => {
+          const Icon = agentIcon(c.agent)
+          return (
+            <li key={c.id}>
+              <button onClick={() => chats.open(c)}>
+                <Icon size={15} className="icon" />
+                <span className="label">{chatName(c)}</span>
+                <span className="where">{c.cwd}</span>
+                <span className="when">{c.state === 'running' ? 'running' : c.state}</span>
+              </button>
+              <button className="icon-btn" aria-label={`Close ${chatName(c)}`} title="Close" onClick={() => chats.close(c)}>
+                <X size={13} />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
 }
 
-function EntryView({ addr, item, kicker, openExternally }: { addr: ItemAddr; item: NavItem; kicker: string; openExternally: Props['openExternally'] }) {
-  return (
-    <div className="page">
-      <div className="page-kicker">
-        {kicker} · {TYPE_LABEL[item.type]}
-      </div>
-      <h1 className="page-title">
-        <EntryIcon type={item.type} icon={item.icon} size={22} />
-        {item.label}
-      </h1>
+/** A chat on its own page: one whose project or entry is gone. */
+function LoneChat({ id }: { id: string }) {
+  const chats = useChats()
+  const chat = chats.list.find((c) => c.id === id)
+  if (!chats.loaded) return null
+  if (!chat) return <div className="empty-state">This chat has been closed.</div>
+  return <ChatPage chat={chat} kicker="Chat" />
+}
 
-      {(item.type === 'folder' || item.type === 'note') && (
+function ChatPage({ chat, kicker, start, historyPath, title }: { chat: Chat | null; kicker: string; start?: (resume?: string) => Promise<Chat | null>; historyPath?: string; title?: React.ReactNode }) {
+  return (
+    <div className="page wide chat-page">
+      <div className="page-kicker">{kicker}</div>
+      <h1 className="page-title">{title ?? (chat ? chatName(chat) : '')}</h1>
+      <ChatPane chat={chat} start={start} historyPath={historyPath} />
+    </div>
+  )
+}
+
+/** How a recent item reads now; null when it no longer exists (an address that now holds another entry). */
+function describeRecent(profile: NonNullable<ProfileState['profile']>, r: Recent): { icon: React.ReactNode; label: string; where: string } | null {
+  if (r.key.startsWith(NOTE_KEY)) {
+    const p = r.key.slice(NOTE_KEY.length)
+    return { icon: <FileText size={15} className="icon" />, label: noteName(p), where: p }
+  }
+  if (r.key.startsWith(FILES_KEY)) {
+    const p = r.key.slice(FILES_KEY.length)
+    return { icon: <Folder size={15} className="icon" />, label: nameOf(p), where: p }
+  }
+  // Older items have no identity: the address must still hold the same label.
+  const addr = r.entry ? resolveEntry(profile, r.key, r.entry) : parseKey(r.key)
+  const item = addr ? getItem(profile, addr) : undefined
+  if (!addr || !item || (!r.entry && item.label !== r.label)) return null
+  const section = profile.sections[addr.section]
+  const group = addr.group !== undefined ? section?.items[addr.group] : undefined
+  const where = group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
+  const step = r.step && stepsOf(profile, item).some((s) => s.label === r.step) ? r.step : undefined
+  return { icon: <EntryIcon type={item.type} icon={item.icon} size={15} />, label: step ? `${item.label} › ${step}` : item.label, where }
+}
+
+/** A folder opened by path (outside a project's tabs): the file browser at `top`. */
+function Browser({ top, kicker, heading, pane }: { top: string; kicker: string; heading: React.ReactNode; pane: Props }) {
+  const profile = pane.active.profile!
+  return (
+    <div className="page wide files-page">
+      <div className="page-kicker">{kicker}</div>
+      <h1 className="page-title">{heading}</h1>
+      <FileBrowser top={top} roots={folderRoots(profile)} home={pane.home} onNavigate={pane.openFolder} toast={pane.toast} />
+    </div>
+  )
+}
+
+/** A note opened by path: from a link or a search result, not from the nav. */
+function PathNote({ path }: { path: string }) {
+  const notes = useNotes()
+  const rel = notes.list.find((n) => n.path === path)?.rel
+  const folder = rel?.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : null
+  const name = noteName(path)
+  return (
+    <NoteView
+      path={path}
+      title={name}
+      kicker={folder ? `Notes · ${folder}` : 'Notes'}
+      heading={
         <>
+          <FileText size={22} className="icon" />
+          {name}
+        </>
+      }
+      below={
+        <div className="path-row">
+          <span className="path mono">{path}</span>
+        </div>
+      }
+    />
+  )
+}
+
+function EntryView({
+  addr,
+  item,
+  kicker,
+  pane,
+  onTab,
+}: {
+  addr: ItemAddr
+  item: NavItem
+  kicker: string
+  pane: Props
+  onTab: (label: string | null) => void
+}) {
+  const { openExternally } = pane
+  if (item.type === 'note') {
+    return (
+      <NoteView
+        key={item.path}
+        path={item.path}
+        title={item.label}
+        kicker={`${kicker} · ${TYPE_LABEL.note}`}
+        heading={
+          <>
+            <EntryIcon type="note" icon={item.icon} size={22} />
+            {item.label}
+          </>
+        }
+        below={
           <div className="path-row">
             <span className="path mono">{item.path}</span>
-            <PathStatus path={item.path} want={item.type === 'folder' ? 'dir' : 'file'} />
-            <button className="btn" onClick={() => openExternally(addr, item)}>
-              {item.type === 'folder' ? <FolderOpen size={14} /> : <ExternalLink size={14} />}
-              {item.type === 'folder' ? 'Open in Files' : 'Open in default app'}
+            <button className="btn ghost" onClick={() => openExternally(addr, item)}>
+              <ExternalLink size={14} />
+              Open in default app
             </button>
           </div>
-          <div className="placeholder">
-            {item.type === 'folder' ? (
-              <>
-                <h3>File browser: part 3</h3>
-                <p>The folder tree, quick-jump chips, filter and previews will open here.</p>
-              </>
-            ) : (
-              <>
-                <h3>Notes: part 2</h3>
-                <p>This note will open here formatted, with an Edit mode that saves in place.</p>
-              </>
-            )}
-          </div>
-        </>
-      )}
+        }
+      />
+    )
+  }
 
-      {item.type === 'project' && (
+  if (item.type === 'daily') return <DailyView item={item} kicker={kicker} />
+
+  if (item.type === 'chat') return <ChatEntry addr={addr} item={item} kicker={kicker} />
+
+  if (item.type === 'folder') {
+    return (
+      <ProjectView
+        key={item.path}
+        addr={addr}
+        item={item}
+        kicker={kicker}
+        profile={pane.active.profile!}
+        profileId={pane.active.id}
+        home={pane.home}
+        actions={pane.actions}
+        openFolder={pane.openFolder}
+        toast={pane.toast}
+        onTab={onTab}
+      />
+    )
+  }
+
+  // Groups, links and launchers never open in the centre.
+  return null
+}
+
+/** A chat entry: its one chat, started the first time it is opened. */
+function ChatEntry({ addr, item, kicker }: { addr: ItemAddr; item: Extract<NavItem, { type: 'chat' }>; kicker: string }) {
+  const chats = useChats()
+  const chat = chats.list.find((c) => c.slot === entrySlot(item)) ?? null
+  return (
+    <ChatPage
+      chat={chat}
+      kicker={`${kicker} · ${TYPE_LABEL.chat}`}
+      title={
         <>
-          <div className="path-row">
-            <span className="path mono">project: {item.project}</span>
-          </div>
-          <div className="placeholder">
-            <h3>Project cards: part 4</h3>
-            <p>The card for this project, with its tabs for brief, plan, reports and assets, will open here.</p>
-          </div>
+          <EntryIcon type="chat" agent={chatProgram(item.agent)} icon={item.icon} size={22} />
+          {item.label}
         </>
-      )}
-    </div>
+      }
+      start={(resume) => chats.start({ at: addr, resume })}
+      historyPath={item.path ?? '~'}
+    />
   )
 }

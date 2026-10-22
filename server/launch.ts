@@ -51,6 +51,22 @@ export function runDetached(launch: Launch, spawn: SpawnFn = nodeSpawn): Promise
   })
 }
 
+/** Run a command to its end, e.g. `gio trash`; fails with what it printed to stderr. */
+export function runToExit(launch: Launch, spawn: SpawnFn = nodeSpawn): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(launch.command, launch.args, { cwd: launch.cwd, stdio: ['ignore', 'ignore', 'pipe'], shell: false })
+    let stderr = ''
+    child.stderr?.on('data', (d: Buffer) => (stderr += d.toString()))
+    child.once('error', (err: NodeJS.ErrnoException) => {
+      reject(new LaunchError(err.code === 'ENOENT' ? `Command not found: ${launch.command}` : err.message))
+    })
+    child.once('close', (code: number | null) => {
+      if (code === 0) resolve()
+      else reject(new LaunchError(stderr.trim() || `${launch.command} failed (exit ${code})`))
+    })
+  })
+}
+
 export async function openItem(item: NavItem, home: string, spawn: SpawnFn = nodeSpawn): Promise<void> {
   const launch = launchFor(item, home)
   // Check paths first: xdg-open runs detached, so its own errors would be lost,

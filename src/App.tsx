@@ -1,15 +1,83 @@
-import { ExternalLink, FolderOpen, Pencil, Play, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getItem, itemKey, type AppState, type ItemAddr, type ItemInput, type NavItem, type Op } from '../shared/config-schema.ts'
+import { Archive, ArchiveRestore, ExternalLink, FilePlus, FolderOpen, Pencil, Pin, Play, Sparkles, SquareTerminal, Trash2 } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  chatName,
+  CONTEXT_FOLDERS,
+  CONTEXT_LABEL,
+  entrySlot,
+  expandHome,
+  getItem,
+  itemKey,
+  joinNotes,
+  noteFileName,
+  projectHost,
+  stepsOf,
+  themeOf,
+  type AppState,
+  type Chat,
+  type ContextFolder,
+  type ContextStatus,
+  type ItemAddr,
+  type ItemInput,
+  type ListAddr,
+  type NavItem,
+  type NoteSummary,
+  type Op,
+  type Profile,
+  type ServersScan,
+} from '../shared/config-schema.ts'
+import { agentEntries } from './components/AgentMenu.tsx'
+import { ConfirmDialog } from './components/ConfirmDialog.tsx'
 import { ContextMenu } from './components/ContextMenu.tsx'
 import { ItemDialog } from './components/ItemDialog.tsx'
-import { MainPane } from './components/MainPane.tsx'
+import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
+import { NewNoteDialog } from './components/NewNoteDialog.tsx'
+import type { ProjectActions } from './components/ProjectView.tsx'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
-import { followState, type Connection } from './lib/events.ts'
-import { useLocal } from './lib/local.ts'
-import { cx, parseKey, type DialogState, type MenuEntry, type MenuState } from './lib/nav.ts'
+import { CHAT_TAB, ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
+import { ContextCtx, type ContextApi } from './lib/context.ts'
+import type { SwitchItem } from './lib/switcher.ts'
+import { followState, onChatsEvent, onContextEvent, type Connection } from './lib/events.ts'
+import { nameOf } from './lib/files.ts'
+import { readLocal, useLocal } from './lib/local.ts'
+import {
+  CHAT_KEY,
+  CONTEXT_KEY,
+  cx,
+  FILES_KEY,
+  findEntry,
+  listLength,
+  NOTE_KEY,
+  SERVERS_KEY,
+  SETUP_KEY,
+  entryId,
+  parseKey,
+  resolveEntry,
+  type DialogState,
+  type MenuEntry,
+  type MenuState,
+  type Selection,
+} from './lib/nav.ts'
+import { LookCtx, type LookApi } from './lib/look.ts'
+import { NotesCtx, type NotesApi } from './lib/notes-ctx.ts'
+import { pushRecent, type Recent } from './lib/recent.ts'
+import { applyLook, themeById } from './lib/themes.ts'
+import { normalizePath } from './lib/wikilinks.ts'
+
+// Dialogs that open on demand load on demand, to keep the main bundle small.
+const AgentProfilesDialog = lazy(() => import('./components/AgentProfilesDialog.tsx').then((m) => ({ default: m.AgentProfilesDialog })))
+const ProfileDialog = lazy(() => import('./components/ProfileDialog.tsx').then((m) => ({ default: m.ProfileDialog })))
+const QuickSwitcher = lazy(() => import('./components/QuickSwitcher.tsx').then((m) => ({ default: m.QuickSwitcher })))
+const LookPanel = lazy(() => import('./components/LookPanel.tsx').then((m) => ({ default: m.LookPanel })))
+
+/** The identity of the entry at an address key, if the key is one. */
+function idAt(profile: Profile | null | undefined, key: string | undefined): string | undefined {
+  const addr = parseKey(key)
+  const item = addr && profile ? getItem(profile, addr) : undefined
+  return item ? entryId(item) : undefined
+}
 
 const NAV_MIN = 220
 const NAV_MAX = 520
@@ -20,10 +88,24 @@ export function App() {
   const [editing, setEditing] = useState(false)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  // Where the last nav menu opened, so a follow-up menu (New chat as…) opens there too.
+  const lastMenuAt = useRef({ x: 0, y: 0 })
+  const openMenu = useCallback((m: MenuState) => {
+    lastMenuAt.current = { x: m.x, y: m.y }
+    setMenu(m)
+  }, [])
   const [resizing, setResizing] = useState(false)
   const [selected, setSelected] = useLocal<Record<string, string | undefined>>('selected', {})
+  // Which entry the selection stands for (entryId), so it follows the entry when it moves.
+  const [selectedIds, setSelectedIds] = useLocal<Record<string, string | undefined>>('selectedId', {})
   const [collapsed, setCollapsed] = useLocal<Record<string, boolean>>('collapsed', {})
   const [navWidth, setNavWidth] = useLocal('navWidth', 280)
+  const [history, setHistory] = useState<(string | undefined)[]>([])
+  const [search, setSearch] = useState<SearchState>({ open: false, query: '' })
+  const [notesList, setNotesList] = useState<NoteSummary[]>([])
+  const [fresh, setFresh] = useState<string | null>(null)
+  const [recent, setRecent] = useLocal<Record<string, Recent[]>>('recent', {})
+  const searchRef = useRef<HTMLInputElement>(null)
   const toasts = useToasts()
 
   useEffect(() => followState(setState, setConnection), [])
@@ -32,12 +114,50 @@ export function App() {
   // Handlers below read the latest profile through a ref, so a quick second edit uses the new revision.
   const activeRef = useRef(active)
   activeRef.current = active
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  const historyRef = useRef(history)
+  historyRef.current = history
+  const homeRef = useRef(state?.home ?? '')
+  homeRef.current = state?.home ?? ''
   const profile = active?.profile ?? null
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', profile?.accent ?? '#8a8f98')
     document.title = profile ? `${profile.name} · Workbench` : 'Workbench'
   }, [profile?.accent, profile?.name])
+
+  // The profile's look: its theme's colours, and behind frosted panels the
+  // theme's own background or a picture from the backgrounds folder. A picture
+  // loads through fetch and a blob URL, because CSS cannot send X-Workbench.
+  const theme = themeById(themeOf(profile?.theme))
+  const background = profile?.background ?? 'theme'
+  const pictureName = background === 'theme' || background === 'none' ? null : background
+  const [picture, setPicture] = useState<{ name: string; url: string | null } | null>(null)
+  const [lookOpen, setLookOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
+
+  useEffect(() => {
+    if (!pictureName) return setPicture(null)
+    let live = true
+    let url: string | null = null
+    api.backgroundImage(pictureName).then(
+      (blob) => {
+        if (!live) return
+        url = URL.createObjectURL(blob)
+        setPicture({ name: pictureName, url })
+      },
+      () => live && setPicture({ name: pictureName, url: null }),
+    )
+    return () => {
+      live = false
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [pictureName])
+
+  const pictureUrl = picture?.name === pictureName ? picture.url : null
+  useEffect(() => applyLook(theme, pictureUrl), [theme, pictureUrl])
 
   const refresh = useCallback(() => api.getState().then(setState), [])
 
@@ -86,9 +206,145 @@ export function App() {
     (id: string) => {
       setState((s) => (s ? { ...s, activeProfile: id } : s))
       setMenu(null)
+      setHistory([])
       api.setActive(id).catch(fail)
     },
     [fail],
+  )
+
+  /** Add to recent work on Home. */
+  const remember = useCallback(
+    (key: string, label: string, step?: string, entry?: string) => {
+      const id = activeRef.current?.id
+      if (id) setRecent((all) => ({ ...all, [id]: pushRecent(all[id] ?? [], { key, label, step, entry, at: Date.now() }) }))
+    },
+    [setRecent],
+  )
+
+  /** Show an entry (by address key), a note (`note:<path>`), a folder (`files:<path>`) or Home (undefined); Back returns. */
+  const navigate = useCallback(
+    (key: string | undefined) => {
+      const a = activeRef.current
+      if (!a) return
+      const current = selectedRef.current[a.id]
+      if (current !== key) setHistory((h) => [...h.slice(-49), current])
+      setSelected((s) => ({ ...s, [a.id]: key }))
+      setSelectedIds((s) => ({ ...s, [a.id]: idAt(a.profile, key) }))
+      setSearch((s) => (s.open ? { ...s, open: false } : s))
+      if (!key) return
+      if (key.startsWith(NOTE_KEY) || key.startsWith(FILES_KEY)) remember(key, nameOf(key.slice(key.indexOf(':') + 1)))
+      else if (key.startsWith(CONTEXT_KEY)) remember(key, CONTEXT_LABEL[key.slice(CONTEXT_KEY.length) as ContextFolder] ?? 'Context')
+      else {
+        const addr = parseKey(key)
+        const item = addr && a.profile ? getItem(a.profile, addr) : undefined
+        if (item) remember(key, item.label, undefined, entryId(item))
+      }
+    },
+    [setSelected, setSelectedIds, remember],
+  )
+
+  const back = useCallback(() => {
+    const a = activeRef.current
+    if (!a) return
+    if (search.open) {
+      setSearch((s) => ({ ...s, open: false }))
+      return
+    }
+    const h = historyRef.current
+    if (!h.length) return
+    setHistory(h.slice(0, -1))
+    setSelected((s) => ({ ...s, [a.id]: h[h.length - 1] }))
+    setSelectedIds((s) => ({ ...s, [a.id]: idAt(a.profile, h[h.length - 1]) }))
+  }, [search.open, setSelected, setSelectedIds])
+
+  /** Open a note or folder by path; one that is also a nav entry opens as that entry. */
+  const openPath = useCallback(
+    (type: 'note' | 'folder', path: string) => {
+      const p = activeRef.current?.profile
+      if (!p) return
+      const want = normalizePath(expandHome(path, homeRef.current))
+      const addr = findEntry(p, type, (item) => 'path' in item && !!item.path && normalizePath(expandHome(item.path, homeRef.current)) === want)
+      navigate(addr ? itemKey(addr) : (type === 'note' ? NOTE_KEY : FILES_KEY) + path)
+    },
+    [navigate],
+  )
+  const openNote = useCallback((path: string) => openPath('note', path), [openPath])
+  const openFolder = useCallback((path: string) => openPath('folder', path), [openPath])
+
+  const refreshNotes = useCallback(() => {
+    const id = activeRef.current?.id
+    if (!id) return
+    api.listNotes(id).then(
+      (list) => activeRef.current?.id === id && setNotesList(list),
+      () => activeRef.current?.id === id && setNotesList([]),
+    )
+  }, [])
+
+  // The list backs wiki links: reload it when the profile or its entries change.
+  useEffect(() => setNotesList([]), [active?.id])
+  useEffect(() => refreshNotes(), [active?.id, active?.rev, refreshNotes])
+
+  const notesTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const notesChanged = useCallback(() => {
+    clearTimeout(notesTimer.current)
+    notesTimer.current = setTimeout(refreshNotes, 300)
+  }, [refreshNotes])
+
+  /** Quick-create: the file, then its nav entry, then open it in Edit. Resolves to an error message or null. */
+  const createNote = useCallback(
+    async (list: ListAddr, title: string, path: string): Promise<string | null> => {
+      const a = activeRef.current
+      if (!a?.profile) return 'The profile is not loaded'
+      try {
+        await api.writeNote(a.id, path, null, `# ${title}\n\n`)
+      } catch (err) {
+        if (err instanceof api.ApiError && err.status === 409) return `${path} already exists`
+        return err instanceof Error ? err.message : String(err)
+      }
+      const index = listLength(a.profile, list)
+      if (!(await run([{ op: 'addItem', to: list, item: { label: title, type: 'note', path } }]))) {
+        return 'The file was created, but its entry could not be added'
+      }
+      refreshNotes()
+      setFresh(path)
+      navigate(itemKey({ ...list, index }))
+      return null
+    },
+    [run, refreshNotes, navigate],
+  )
+
+  /** A [[wiki link]] to a missing note: offer to create it in the notes folder. */
+  const missingNote = useCallback(
+    (name: string) => {
+      const create = async () => {
+        const a = activeRef.current
+        const root = a?.profile?.notes
+        if (!a || !root) {
+          toasts.push({ message: 'Set a notes folder for this profile first', kind: 'error' })
+          return
+        }
+        const parts = name.split('/').map((s) => s.trim()).filter((s) => s && s !== '.' && s !== '..')
+        const file = noteFileName(parts.pop() ?? '')
+        if (!file) return
+        const path = joinNotes(root, [...parts, file].join('/'))
+        try {
+          await api.writeNote(a.id, path, null, `# ${file.replace(/\.md$/, '')}\n\n`)
+          setFresh(path)
+        } catch (err) {
+          // Already there (the list was stale): just open it.
+          if (!(err instanceof api.ApiError && err.status === 409)) return fail(err)
+        }
+        refreshNotes()
+        openNote(path)
+      }
+      toasts.push({ message: `No note named "${name}" yet`, action: { label: 'Create', run: () => void create() } })
+    },
+    [toasts.push, fail, refreshNotes, openNote],
+  )
+
+  const setRoot = useCallback(
+    (value: string) => void run([{ op: 'setProfileField', key: 'notes', value }], `Notes folder set to ${value}`),
+    [run],
   )
 
   const openExternally = useCallback(
@@ -108,28 +364,295 @@ export function App() {
 
   const activate = useCallback(
     (addr: ItemAddr, item: NavItem) => {
-      const a = activeRef.current
-      if (!a) return
       if (item.type === 'link' || item.type === 'launch') openExternally(addr, item)
-      else if (item.type !== 'group') setSelected((s) => ({ ...s, [a.id]: itemKey(addr) }))
+      else if (item.type !== 'group') navigate(itemKey(addr))
     },
-    [openExternally, setSelected],
+    [openExternally, navigate],
   )
 
-  const goHome = useCallback(() => {
+  const goHome = useCallback(() => navigate(undefined), [navigate])
+
+  /** Open something from recent work, on the step it was on. */
+  const openRecent = useCallback(
+    (r: Recent) => {
+      const a = activeRef.current
+      const addr = a?.profile && parseKey(r.key) ? resolveEntry(a.profile, r.key, r.entry) : null
+      const item = addr && a?.profile ? getItem(a.profile, addr) : undefined
+      if (a && r.step && item?.type === 'folder') {
+        // Saved for the project, and heard directly by a project page already showing.
+        showProjectTab(a.id, item.path, r.step)
+      }
+      navigate(addr ? itemKey(addr) : r.key)
+    },
+    [navigate],
+  )
+
+  // Chats of the active profile. The service keeps the programs; this is the
+  // list, fetched again on each `chats` event.
+  const [chatList, setChatList] = useState<{ profile: string; list: Chat[] } | null>(null)
+  const [closing, setClosing] = useState<Chat | null>(null)
+  // The agent profile editor, with the folder whose Claude Code agents it suggests.
+  const [agentsFor, setAgentsFor] = useState<string | null>(null)
+
+  const refreshChats = useCallback(() => {
+    const id = activeRef.current?.id
+    if (!id) return
+    api.listChats(id).then(
+      (list) => activeRef.current?.id === id && setChatList({ profile: id, list }),
+      () => {},
+    )
+  }, [])
+
+  useEffect(() => {
+    refreshChats()
+    return onChatsEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshChats())
+  }, [active?.id, refreshChats])
+
+  // Servers running in the active profile's projects, for the nav's marks and the
+  // project cards: checked every 15 s here, every 3 s while the Servers page is open.
+  const [serverScan, setServerScan] = useState<{ profile: string; scan: ServersScan } | null>(null)
+  useEffect(() => {
+    const id = active?.id
+    if (!id) return
+    let live = true
+    const load = () =>
+      api.servers(id).then(
+        (scan) => live && setServerScan({ profile: id, scan }),
+        () => {},
+      )
+    void load()
+    const timer = setInterval(load, 15_000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [active?.id])
+  const serverMarks = useMemo(() => {
+    const marks = new Map<string, { up: number; down: number }>()
+    if (!serverScan || serverScan.profile !== active?.id) return marks
+    for (const p of serverScan.scan.projects) {
+      const down = p.rows.filter((r) => r.health.state === 'down').length
+      const up = p.rows.length - down
+      if (up || down) marks.set(p.path, { up, down })
+    }
+    return marks
+  }, [serverScan, active?.id])
+
+  // The active profile's context folders: the nav heading, the context pages, Send to inbox.
+  const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null)
+  const refreshContext = useCallback(() => {
     const a = activeRef.current
-    if (a) setSelected((s) => ({ ...s, [a.id]: undefined }))
-  }, [setSelected])
+    if (!a?.profile) return setContextStatus(null)
+    const id = a.id
+    api.contextStatus(id).then(
+      (s) => activeRef.current?.id === id && setContextStatus(s),
+      () => activeRef.current?.id === id && setContextStatus(null),
+    )
+  }, [])
+  useEffect(() => {
+    setContextStatus(null)
+    refreshContext()
+    return onContextEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshContext())
+  }, [active?.id, active?.profile?.notes, refreshContext])
+
+  /** Put a chat the service just returned into the list, so its tab shows before the next event. */
+  const upsertChat = useCallback((chat: Chat) => {
+    setChatList((cur) => (cur?.profile === chat.profile ? { ...cur, list: [...cur.list.filter((c) => c.id !== chat.id), chat] } : cur))
+  }, [])
+
+  /** Show a chat: its tab in its project, its chat entry, or a page of its own. */
+  const openChat = useCallback(
+    (chat: Chat) => {
+      const a = activeRef.current
+      const p = a?.profile
+      if (!a || !p) return
+      const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(item.path) === chat.host)
+      const item = project && getItem(p, project)
+      if (project && item?.type === 'folder') {
+        showProjectTab(a.id, item.path, chat.slot ? slotStep(chat.slot) : CHAT_TAB + chat.id)
+        return navigate(itemKey(project))
+      }
+      const entry = findEntry(p, 'chat', (it) => it.type === 'chat' && entrySlot(it) === chat.host)
+      navigate(entry ? itemKey(entry) : CHAT_KEY + chat.id)
+    },
+    [navigate],
+  )
+
+  // Desktop notifications for a chat that needs you while the window is not looked at;
+  // permission is asked on the first chat started (a click).
+  const askedNotify = useRef(false)
+  const askNotifications = () => {
+    if (askedNotify.current || typeof Notification === 'undefined' || Notification.permission !== 'default') return
+    askedNotify.current = true
+    void Notification.requestPermission().catch(() => {})
+  }
+  const attention = useRef(new Map<string, boolean>())
+  useEffect(() => {
+    if (!chatList) return
+    for (const c of chatList.list) {
+      const was = attention.current.get(c.id)
+      attention.current.set(c.id, c.attention)
+      if (!c.attention || was !== false) continue
+      if ((document.hasFocus() && !document.hidden) || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
+      const n = new Notification(`${chatName(c)} needs you`, { body: c.cwd, tag: c.id })
+      n.onclick = () => {
+        window.focus()
+        openChat(c)
+        n.close()
+      }
+    }
+  }, [chatList, openChat])
+
+  const closeChat = useCallback(
+    async (chat: Chat) => {
+      try {
+        await api.closeChat(chat.id)
+      } catch (err) {
+        return fail(err)
+      }
+      setChatList((cur) => (cur ? { ...cur, list: cur.list.filter((c) => c.id !== chat.id) } : cur))
+      toasts.push({ message: chat.agent === 'claude' && chat.session ? `Closed ${chatName(chat)}; its session stays in History` : `Closed ${chatName(chat)}` })
+    },
+    [fail, toasts.push],
+  )
+
+  const chatsApi = useMemo<ChatsApi | null>(() => {
+    if (!active) return null
+    const loaded = chatList?.profile === active.id
+    async function attempt<T>(p: Promise<T>): Promise<T | null> {
+      try {
+        return await p
+      } catch (err) {
+        fail(err)
+        return null
+      }
+    }
+    const keep = (chat: Chat | null) => {
+      if (chat) upsertChat(chat)
+      return chat
+    }
+    return {
+      profile: active.id,
+      list: loaded ? chatList.list : [],
+      loaded,
+      start: (req) => {
+        askNotifications()
+        const a = activeRef.current
+        if (!a) return Promise.resolve(null)
+        return attempt(api.startChat(a.id, a.rev, req)).then(keep)
+      },
+      restart: (chat, fresh) => attempt(api.restartChat(chat.id, fresh)).then((c) => void keep(c)),
+      update: (chat, patch) => attempt(api.updateChat(chat.id, patch)).then((c) => void keep(c)),
+      handoff: (chat) => attempt(api.handoffChat(chat.id)).then(keep),
+      close: (chat) => (chat.state === 'running' ? setClosing(chat) : void closeChat(chat)),
+      history: (path) => api.chatHistory(active.id, path).catch(() => []),
+      open: openChat,
+      agents: active.profile?.agents ?? {},
+      editAgents: (folder) => setAgentsFor(folder ?? active.profile?.home ?? '~'),
+    }
+  }, [active, chatList, fail, upsertChat, openChat, closeChat])
+  const chatsRef = useRef(chatsApi)
+  chatsRef.current = chatsApi
+
+  /** A chat in a project: `agent` from a menu, or the project's default. */
+  const newChatIn = useCallback(
+    async (addr: ItemAddr, agent?: string) => {
+      const chat = await chatsRef.current?.start({ at: addr, agent })
+      if (chat) openChat(chat)
+    },
+    [openChat],
+  )
+
+  // Running chats (and any that need you) per project or chat entry, for the nav.
+  const chatMarks = useMemo(() => {
+    const marks = new Map<string, { running: number; attention: boolean }>()
+    for (const c of chatsApi?.list ?? []) {
+      const m = marks.get(c.host) ?? { running: 0, attention: false }
+      if (c.state === 'running') m.running++
+      if (c.attention) m.attention = true
+      marks.set(c.host, m)
+    }
+    return marks
+  }, [chatsApi?.list])
+
+  const projectActions = useMemo<ProjectActions>(
+    () => ({
+      run,
+      openDialog: setDialog,
+      launchStep: (addr, index, label, kind) => {
+        const a = activeRef.current
+        if (!a) return
+        api
+          .openEntry(a.id, a.rev, addr, index)
+          .then(() => toasts.push({ message: `${kind === 'link' ? 'Opened' : 'Started'} ${label}` }))
+          .catch(fail)
+      },
+      rememberStep: (addr, label) => {
+        const item = activeRef.current?.profile ? getItem(activeRef.current.profile, addr) : undefined
+        if (item) remember(itemKey(addr), item.label, label, entryId(item))
+      },
+      servers: (path) => serverMarks.get(path),
+      openServers: () => navigate(SERVERS_KEY),
+    }),
+    [run, fail, toasts.push, remember, serverMarks, navigate],
+  )
 
   const itemMenu = useCallback(
     (addr: ItemAddr, item: NavItem): (MenuEntry | 'sep')[] => {
       const section = activeRef.current?.profile?.sections[addr.section]
       const where = addr.group === undefined ? section?.title : `${section?.title} / ${section?.items[addr.group]?.label}`
       const entries: (MenuEntry | 'sep')[] = []
-      if (item.type === 'folder') entries.push({ label: 'Open in Files', icon: <FolderOpen size={14} />, run: () => openExternally(addr, item) })
+      if (item.type === 'folder') {
+        const card = (field: 'pinned' | 'status', value: string | boolean | null, label?: string) =>
+          void run([{ op: 'setCard', at: addr, field, value }], label)
+        const status = item.status ?? 'active'
+        entries.push(
+          { label: 'Open in Files', icon: <FolderOpen size={14} />, run: () => openExternally(addr, item) },
+          { label: 'New chat', icon: <Sparkles size={14} />, run: () => void newChatIn(addr) },
+          ...(Object.keys(activeRef.current?.profile?.agents ?? {}).length
+            ? [
+                {
+                  label: 'New chat as…',
+                  icon: <Sparkles size={14} />,
+                  // A second menu where the first one was.
+                  run: () =>
+                    setMenu({
+                      ...lastMenuAt.current,
+                      entries: agentEntries(activeRef.current?.profile?.agents, {
+                        current: item.agent,
+                        run: (agent) => void newChatIn(addr, agent),
+                        edit: () => setAgentsFor(item.path),
+                      }),
+                    }),
+                },
+              ]
+            : []),
+          { label: 'New shell', icon: <SquareTerminal size={14} />, run: () => void newChatIn(addr, 'shell') },
+          'sep',
+          { label: item.pinned ? 'Unpin' : 'Pin', icon: <Pin size={14} />, run: () => card('pinned', item.pinned ? null : true) },
+          ...(['active', 'paused', 'done'] as const)
+            .filter((s) => s !== status && !(s === 'active' && status === 'archived'))
+            .map((s) => ({
+              label: `Mark ${s}`,
+              icon: <span className={cx('status-dot', s)} />,
+              // Active is the default: the field is left out.
+              run: () => card('status', s === 'active' ? null : s, `${item.label}: ${s}`),
+            })),
+          status === 'archived'
+            ? { label: 'Unarchive', icon: <ArchiveRestore size={14} />, run: () => card('status', null, `${item.label}: back from the archive`) }
+            : { label: 'Archive', icon: <Archive size={14} />, run: () => card('status', 'archived', `Archived "${item.label}"`) },
+        )
+      }
       if (item.type === 'note') entries.push({ label: 'Open in default app', icon: <ExternalLink size={14} />, run: () => openExternally(addr, item) })
       if (item.type === 'link') entries.push({ label: 'Open link', icon: <ExternalLink size={14} />, run: () => openExternally(addr, item) })
       if (item.type === 'launch') entries.push({ label: 'Start', icon: <Play size={14} />, run: () => openExternally(addr, item) })
+      if (item.type === 'group') {
+        entries.push({
+          label: 'New note…',
+          icon: <FilePlus size={14} />,
+          run: () => setDialog({ mode: 'note', list: { section: addr.section, group: addr.index }, context: `Under ${section?.title} / ${item.label}` }),
+        })
+      }
       if (entries.length) entries.push('sep')
       entries.push(
         { label: 'Edit…', icon: <Pencil size={14} />, run: () => setDialog({ mode: 'edit', at: addr, item, context: `Under ${where}` }) },
@@ -137,19 +660,32 @@ export function App() {
       )
       return entries
     },
-    [openExternally, run],
+    [openExternally, run, newChatIn],
   )
 
   const submitDialog = useCallback(
     async (item: ItemInput) => {
       if (!dialog) return false
       if (dialog.mode === 'add') return run([{ op: 'addItem', to: dialog.list, index: dialog.index, item }])
-      return run([{ op: 'updateItem', at: dialog.at, item }])
+      if (dialog.mode === 'edit') return run([{ op: 'updateItem', at: dialog.at, item }])
+      if (dialog.mode === 'step') {
+        if (dialog.index === undefined) return run([{ op: 'addStep', at: dialog.at, step: item }])
+        const ok = await run([{ op: 'updateStep', at: dialog.at, index: dialog.index, step: item }])
+        // A renamed step that was the open tab stays the open tab.
+        const a = activeRef.current
+        const project = a?.profile ? getItem(a.profile, dialog.at) : undefined
+        const old = dialog.item?.label
+        if (ok && a && project?.type === 'folder' && old && item.label !== old && readLocal<Record<string, string>>('projectTab', {})[`${a.id}|${project.path}`] === old) {
+          showProjectTab(a.id, project.path, String(item.label))
+        }
+        return ok
+      }
+      return false
     },
     [dialog, run],
   )
 
-  // Ctrl+1..9 switches profile; Esc leaves edit mode.
+  // Ctrl+1..9 switches profile; Esc leaves edit mode; Ctrl+Shift+F searches notes; Alt+← goes back.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && state) {
@@ -158,19 +694,35 @@ export function App() {
           e.preventDefault()
           switchProfile(p.id)
         }
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        // In a terminal, Ctrl+K belongs to the program (it cuts the line in a shell).
+        if ((e.target as HTMLElement | null)?.closest?.('.xterm')) return
+        e.preventDefault()
+        setSwitcherOpen((o) => !o)
+      } else if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      } else if (e.altKey && !e.ctrlKey && e.key === 'ArrowLeft') {
+        // In text, Alt+← moves the cursor.
+        if ((e.target as HTMLElement | null)?.closest?.('input, textarea, .cm-editor')) return
+        e.preventDefault()
+        back()
       } else if (e.key === 'Escape' && !dialog && !menu && editing) {
         setEditing(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [state, dialog, menu, editing, switchProfile])
+  }, [state, dialog, menu, editing, switchProfile, back])
 
   const onResizeStart = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault()
       setResizing(true)
-      const move = (ev: PointerEvent) => setNavWidth(Math.max(NAV_MIN, Math.min(NAV_MAX, ev.clientX)))
+      // Keep the edge under the pointer, also when the frosted layout insets the panels.
+      const offset = e.clientX - navWidth
+      const move = (ev: PointerEvent) => setNavWidth(Math.max(NAV_MIN, Math.min(NAV_MAX, ev.clientX - offset)))
       const up = () => {
         setResizing(false)
         window.removeEventListener('pointermove', move)
@@ -179,18 +731,159 @@ export function App() {
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', up)
     },
-    [setNavWidth],
+    [setNavWidth, navWidth],
   )
 
-  const selection = useMemo(() => {
+  const selection = useMemo<Selection | null>(() => {
     if (!active?.profile) return null
-    const addr = parseKey(selected[active.id])
+    const key = selected[active.id]
+    if (key?.startsWith(NOTE_KEY)) return { kind: 'note', path: key.slice(NOTE_KEY.length) }
+    if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
+    if (key?.startsWith(CHAT_KEY)) return { kind: 'chat', id: key.slice(CHAT_KEY.length) }
+    if (key === SETUP_KEY) return { kind: 'setup' }
+    if (key === SERVERS_KEY) return { kind: 'servers' }
+    if (key?.startsWith(CONTEXT_KEY)) {
+      const name = key.slice(CONTEXT_KEY.length) as ContextFolder
+      return CONTEXT_FOLDERS.includes(name) ? { kind: 'context', name } : null
+    }
+    const addr = key ? resolveEntry(active.profile, key, selectedIds[active.id]) : null
     const item = addr ? getItem(active.profile, addr) : undefined
     if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
-    return { addr, item }
-  }, [active, selected])
+    return { kind: 'entry', addr, item }
+  }, [active, selected, selectedIds])
 
-  if (!state || !active) {
+  // The selected entry moved or was renamed: keep its new address and identity.
+  useEffect(() => {
+    if (!active || selection?.kind !== 'entry') return
+    const key = itemKey(selection.addr)
+    const id = entryId(selection.item)
+    if (selected[active.id] !== key) setSelected((s) => ({ ...s, [active.id]: key }))
+    if (selectedIds[active.id] !== id) setSelectedIds((s) => ({ ...s, [active.id]: id }))
+  }, [active, selection, selected, selectedIds, setSelected, setSelectedIds])
+
+  const lookApi = useMemo<LookApi>(
+    () => ({
+      pictureFrom: (path) => {
+        const a = activeRef.current
+        if (!a) return
+        api
+          .addBackground(a.id, path)
+          .then(({ name }) => run([{ op: 'setProfileField', key: 'background', value: name }], `Background: ${name}`))
+          .catch(fail)
+      },
+    }),
+    [run, fail],
+  )
+
+  const notesApi = useMemo<NotesApi | null>(() => {
+    if (!active) return null
+    const home = active.profile?.home
+    return {
+      profile: active.id,
+      root: active.profile?.notes,
+      suggestedRoot: `${home && home !== '~' ? home.replace(/\/+$/, '') : '~'}/notes`,
+      setRoot,
+      list: notesList,
+      open: openNote,
+      missing: missingNote,
+      changed: notesChanged,
+      notify: (message, kind) => toasts.push({ message, kind }),
+      fresh,
+      clearFresh: () => setFresh(null),
+    }
+  }, [active, setRoot, notesList, openNote, missingNote, notesChanged, toasts.push, fresh])
+
+  const contextApi = useMemo<ContextApi>(
+    () => ({
+      status: contextStatus,
+      setup: async () => {
+        const a = activeRef.current
+        if (!a?.profile) return
+        // Context lives in the notes folder; a profile without one gets the usual one first.
+        if (!a.profile.notes && notesApi && !(await run([{ op: 'setProfileField', key: 'notes', value: notesApi.suggestedRoot }], `Notes folder set to ${notesApi.suggestedRoot}`))) return
+        try {
+          setContextStatus(await api.setupContext(a.id))
+          navigate(CONTEXT_KEY + 'context')
+        } catch (err) {
+          fail(err)
+        }
+      },
+      open: (name) => navigate(CONTEXT_KEY + name),
+      sendToInbox: (path) => {
+        const a = activeRef.current
+        if (!a) return
+        api.sendToInbox(a.id, path).then(
+          (r) => toasts.push({ message: `Copied to the inbox as ${nameOf(r.path)}`, action: { label: 'Open inbox', run: () => navigate(CONTEXT_KEY + 'inbox') } }),
+          fail,
+        )
+      },
+    }),
+    [contextStatus, notesApi, run, navigate, fail, toasts.push],
+  )
+
+  /** Everything Ctrl+K offers, built when it opens. */
+  const switchItems = (): SwitchItem[] => {
+    const p = active?.profile
+    if (!active || !p || !state) return []
+    const items: SwitchItem[] = []
+    const where = (addr: ItemAddr) => {
+      const section = p.sections[addr.section]
+      const group = addr.group !== undefined ? section?.items[addr.group] : undefined
+      return group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
+    }
+    for (const [si, section] of p.sections.entries()) {
+      const add = (addr: ItemAddr, item: NavItem) => {
+        if (item.type === 'group') return
+        const key = itemKey(addr)
+        const verb = item.type === 'launch' ? 'Start ' : item.type === 'link' ? 'Open ' : ''
+        items.push({ id: `entry:${entryId(item)}`, kind: 'entry', label: `${verb}${item.label}`, detail: where(addr), run: () => activate(addr, item) })
+        if (item.type !== 'folder') return
+        for (const [i, step] of stepsOf(p, item).entries()) {
+          const outside = step.type === 'launch' || step.type === 'link'
+          items.push({
+            id: `step:${entryId(item)}|${step.label}`,
+            kind: 'step',
+            label: `${item.label} › ${step.label}`,
+            detail: outside ? (step.type === 'launch' ? 'Start in the project' : 'Open link') : where(addr),
+            run: () => (outside ? projectActions.launchStep(addr, i, step.label, step.type as 'launch' | 'link') : openRecent({ key, step: step.label, label: item.label, entry: entryId(item), at: 0 })),
+          })
+        }
+        items.push({ id: `action:chat:${entryId(item)}`, kind: 'action', label: `New chat in ${item.label}`, detail: item.path, run: () => void newChatIn(addr) })
+      }
+      for (const [i, item] of section.items.entries()) {
+        add({ section: si, index: i }, item)
+        if (item.type === 'group') for (const [ci, child] of item.items.entries()) add({ section: si, group: i, index: ci }, child)
+      }
+    }
+    for (const n of notesList) items.push({ id: `note:${n.path}`, kind: 'note', label: n.name, detail: n.rel ?? n.path, run: () => openNote(n.path) })
+    if (contextStatus?.ready) {
+      for (const f of contextStatus.folders) items.push({ id: `context:${f.name}`, kind: 'context', label: CONTEXT_LABEL[f.name], detail: f.path, run: () => navigate(CONTEXT_KEY + f.name) })
+    }
+    for (const c of chatsApi?.list ?? []) items.push({ id: `chat:${c.id}`, kind: 'chat', label: chatName(c), detail: `${c.cwd} · ${c.state}`, run: () => chatsApi?.open(c) })
+    items.push(
+      { id: 'page:home', kind: 'page', label: 'Home', detail: 'Recent work and today', run: goHome },
+      { id: 'page:setup', kind: 'page', label: 'Claude setup', detail: 'Skills, MCP servers, agents, hooks, plugins', run: () => navigate(SETUP_KEY) },
+      { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your projects', run: () => navigate(SERVERS_KEY) },
+    )
+    // New note goes under the heading with the notes (the daily entry's), else the last one.
+    const daily = findEntry(p, 'daily') ?? findEntry(p, 'note')
+    const noteSection = daily ? daily.section : p.sections.length - 1
+    if (noteSection >= 0) {
+      items.push({ id: 'action:note', kind: 'action', label: 'New note…', detail: `Under ${p.sections[noteSection].title}`, run: () => setDialog({ mode: 'note', list: { section: noteSection }, context: `Under ${p.sections[noteSection].title}` }) })
+    }
+    items.push(
+      { id: 'action:look', kind: 'action', label: 'Theme and background…', detail: p.name, run: () => setLookOpen(true) },
+      { id: 'action:agents', kind: 'action', label: 'Agent profiles…', detail: p.name, run: () => setAgentsFor(p.home ?? '~') },
+      { id: 'action:profile', kind: 'action', label: 'Profile settings…', detail: p.name, run: () => setProfileOpen(true) },
+      { id: 'action:edit', kind: 'action', label: 'Edit navigation', detail: 'Drag, add, rename, delete', run: () => setEditing(true) },
+    )
+    for (const [i, q] of state.profiles.entries()) {
+      if (q.id !== active.id) items.push({ id: `action:switch:${q.id}`, kind: 'action', label: `Switch to ${q.profile?.name ?? q.id}`, detail: `Ctrl+${i + 1}`, run: () => switchProfile(q.id) })
+    }
+    return items
+  }
+
+  if (!state || !active || !notesApi || !chatsApi) {
     return (
       <div className="empty-state">
         {connection === 'offline' ? 'The Workbench service is not running. Start it with bin/workbench.' : 'Loading…'}
@@ -199,37 +892,97 @@ export function App() {
   }
 
   return (
-    <div className={cx('app', resizing && 'resizing')} style={{ '--nav-w': `${navWidth}px` } as React.CSSProperties}>
-      <NavPanel
-        profiles={state.profiles}
-        active={active}
-        connection={connection}
-        editing={editing && !active.error}
-        setEditing={setEditing}
-        selectedKey={selection ? itemKey(selection.addr) : undefined}
-        isCollapsed={(key, fallback) => collapsed[key] ?? fallback}
-        toggleCollapsed={(key, fallback) => setCollapsed((c) => ({ ...c, [key]: !(c[key] ?? fallback) }))}
-        activate={activate}
-        run={run}
-        openDialog={setDialog}
-        openMenu={setMenu}
-        itemMenu={itemMenu}
-        notify={(message, kind) => toasts.push({ message, kind })}
-        onSwitch={switchProfile}
-        onResizeStart={onResizeStart}
-        onHome={goHome}
-      />
-      <MainPane
-        active={active}
-        selected={selection}
-        onHome={goHome}
-        activate={activate}
-        openExternally={openExternally}
-        startEditing={() => setEditing(true)}
-      />
-      {dialog && <ItemDialog dialog={dialog} onClose={() => setDialog(null)} onSubmit={submitDialog} />}
-      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
-      <Toasts list={toasts.list} dismiss={toasts.dismiss} />
-    </div>
+    <NotesCtx.Provider value={notesApi}>
+      <ContextCtx.Provider value={contextApi}>
+        <ChatsCtx.Provider value={chatsApi}>
+          <LookCtx.Provider value={lookApi}>
+            <div className={cx('app', resizing && 'resizing', background !== 'none' && 'backdrop')} style={{ '--nav-w': `${navWidth}px` } as React.CSSProperties}>
+              <NavPanel
+                profiles={state.profiles}
+                active={active}
+                connection={connection}
+                editing={editing && !active.error}
+                setEditing={setEditing}
+                selectedKey={selection?.kind === 'entry' ? itemKey(selection.addr) : undefined}
+                isCollapsed={(key, fallback) => collapsed[key] ?? fallback}
+                toggleCollapsed={(key, fallback) => setCollapsed((c) => ({ ...c, [key]: !(c[key] ?? fallback) }))}
+                activate={activate}
+                run={run}
+                openDialog={setDialog}
+                openMenu={openMenu}
+                itemMenu={itemMenu}
+                chatMarks={chatMarks}
+                notify={(message, kind) => toasts.push({ message, kind })}
+                onSwitch={switchProfile}
+                onResizeStart={onResizeStart}
+                onHome={goHome}
+                onLook={() => setLookOpen(true)}
+                onSetup={() => navigate(SETUP_KEY)}
+              onServers={() => navigate(SERVERS_KEY)}
+              serversActive={selection?.kind === 'servers'}
+              serverMarks={serverMarks}
+              onProfileSettings={() => setProfileOpen(true)}
+                setupActive={selection?.kind === 'setup'}
+                contextSelected={selection?.kind === 'context' ? selection.name : null}
+              />
+              <MainPane
+                active={active}
+                selected={selection}
+                search={search}
+                setSearch={setSearch}
+                searchRef={searchRef}
+                canGoBack={search.open || history.length > 0}
+                onBack={back}
+                openFolder={openFolder}
+                toast={toasts.push}
+                home={state.home}
+                actions={projectActions}
+                recent={recent[active.id] ?? []}
+                openRecent={openRecent}
+              onServersScan={(scan) => active && setServerScan({ profile: active.id, scan })}
+                onHome={goHome}
+                activate={activate}
+                openExternally={openExternally}
+                startEditing={() => setEditing(true)}
+              />
+              {dialog?.mode === 'note' ? (
+                <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
+              ) : (
+                dialog && <ItemDialog dialog={dialog} agents={Object.keys(profile?.agents ?? {})} onClose={() => setDialog(null)} onSubmit={submitDialog} />
+              )}
+              {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+              <Suspense fallback={null}>
+                {lookOpen && profile && (
+                  <LookPanel profile={profile} profileId={active.id} run={run} pictureMissing={!!pictureName && picture?.name === pictureName && !picture.url} onClose={() => setLookOpen(false)} />
+                )}
+                {switcherOpen && <QuickSwitcher items={switchItems()} onClose={() => setSwitcherOpen(false)} />}
+                {profileOpen && (
+                  <ProfileDialog active={active} profiles={state.profiles} run={run} onSwitch={switchProfile} onChanged={refresh} onClose={() => setProfileOpen(false)} />
+                )}
+                {agentsFor !== null && profile && (
+                  <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
+                )}
+              </Suspense>
+              {closing && (
+                <ConfirmDialog
+                  title={`Close ${chatName(closing)}?`}
+                  action="Close"
+                  onCancel={() => setClosing(null)}
+                  onConfirm={() => {
+                    setClosing(null)
+                    void closeChat(closing)
+                  }}
+                >
+                  {closing.agent === 'claude'
+                    ? 'claude stops. The conversation stays in History, where you can resume it.'
+                    : 'The shell, and anything running in it, stops.'}
+                </ConfirmDialog>
+              )}
+              <Toasts list={toasts.list} dismiss={toasts.dismiss} />
+            </div>
+          </LookCtx.Provider>
+        </ChatsCtx.Provider>
+      </ContextCtx.Provider>
+    </NotesCtx.Provider>
   )
 }

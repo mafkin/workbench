@@ -13,10 +13,13 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ArrowUpRight, ChevronDown, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Blocks, BookOpen, Server, Settings2, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { itemKey, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import { chatProgram, CONTEXT_LABEL, entrySlot, itemKey, projectHost, type ContextFolder, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import { useContextFolders } from '../lib/context.ts'
 import type { Connection } from '../lib/events.ts'
+import { useLocal } from '../lib/local.ts'
+import { useNotes } from '../lib/notes-ctx.ts'
 import { cx, describeTarget, opensExternally, sameList, type DialogState, type DragData, type DropData, type MenuEntry, type MenuState } from '../lib/nav.ts'
 import { EntryIcon } from './EntryIcon.tsx'
 
@@ -30,6 +33,10 @@ export interface NavActions {
   openDialog: (d: DialogState) => void
   openMenu: (m: MenuState) => void
   itemMenu: (addr: ItemAddr, item: NavItem) => (MenuEntry | 'sep')[]
+  /** Running chats, and whether one needs you, per project (`project:<path>`) or chat entry. */
+  chatMarks: Map<string, { running: number; attention: boolean }>
+  /** Servers up (and declared ones down) per project path. */
+  serverMarks: Map<string, { up: number; down: number }>
   notify: (message: string, kind?: 'info' | 'error') => void
 }
 
@@ -41,9 +48,34 @@ interface Props extends NavActions {
   onSwitch: (id: string) => void
   onResizeStart: (e: React.PointerEvent) => void
   onHome: () => void
+  /** Open the theme and background panel. */
+  onLook: () => void
+  /** Open the Claude setup page; `setupActive` while it shows. */
+  onSetup: () => void
+  setupActive: boolean
+  onProfileSettings: () => void
+  /** Open the Servers page; `serversActive` while it shows. */
+  onServers: () => void
+  serversActive: boolean
+  /** The context folder whose page shows, if one does. */
+  contextSelected: ContextFolder | null
 }
 
-const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState }>(null!)
+const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState; showArchive: boolean }>(null!)
+
+const archived = (item: NavItem) => item.type === 'folder' && item.status === 'archived'
+const pinned = (item: NavItem) => item.type === 'folder' && !!item.pinned
+
+function countArchived(profile: Profile): number {
+  let n = 0
+  for (const s of profile.sections) {
+    for (const item of s.items) {
+      if (archived(item)) n++
+      if (item.type === 'group') n += item.items.filter(archived).length
+    }
+  }
+  return n
+}
 
 interface DropHint {
   drag: DragData | null
@@ -100,11 +132,13 @@ function dropTarget(over: DropData, profile: Profile): { to: ListAddr; index: nu
 }
 
 export function NavPanel(props: Props) {
-  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome } = props
+  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook, onSetup, setupActive } = props
   const profile = active.profile
   const [drop, setDrop] = useState<DropHint>({ drag: null, overId: null })
   const [renaming, setRenaming] = useState<number | null>(null)
   const [addingHeading, setAddingHeading] = useState(false)
+  const [showArchive, setShowArchive] = useLocal('showArchive', false)
+  const archivedCount = profile ? countArchived(profile) : 0
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -151,10 +185,20 @@ export function NavPanel(props: Props) {
             WORKBENCH
           </button>
           <span className="spacer" />
+          <button className="icon-btn" onClick={onLook} title="Theme and background" aria-label="Theme and background">
+            <Palette size={13} />
+          </button>
+          <button className={cx('icon-btn', props.serversActive && 'on')} onClick={props.onServers} title="Servers running in your projects" aria-label="Servers" aria-pressed={props.serversActive}>
+            <Server size={13} />
+          </button>
+          <button className={cx('icon-btn', setupActive && 'on')} onClick={onSetup} title="Claude setup: skills, MCP servers, agents…" aria-label="Claude setup" aria-pressed={setupActive}>
+            <Blocks size={13} />
+          </button>
           <button
             className={cx('icon-btn', editing && 'on')}
             onClick={() => setEditing(!editing)}
-            title={editing ? 'Done editing (Esc)' : 'Edit navigation'}
+            disabled={!!active.error}
+            title={active.error ? `Fix ${active.id}.yaml first: editing is paused while it has an error` : editing ? 'Done editing (Esc)' : 'Edit navigation'}
             aria-pressed={editing}
             aria-label="Edit navigation"
           >
@@ -175,6 +219,9 @@ export function NavPanel(props: Props) {
               {p.profile?.name ?? p.id}
             </button>
           ))}
+          <button className="icon-btn profile-gear" onClick={props.onProfileSettings} title="Profile settings" aria-label="Profile settings">
+            <Settings2 size={13} />
+          </button>
         </div>
       </div>
 
@@ -188,6 +235,7 @@ export function NavPanel(props: Props) {
       )}
 
       <div className="nav-scroll">
+        {profile && <ContextBlock selected={props.contextSelected} isCollapsed={props.isCollapsed} toggleCollapsed={props.toggleCollapsed} />}
         {profile && (
           <Ctx.Provider
             value={{
@@ -196,6 +244,7 @@ export function NavPanel(props: Props) {
               profileId: active.id,
               drop,
               renaming: { section: renaming, start: setRenaming },
+              showArchive,
             }}
           >
             <DndContext
@@ -227,6 +276,12 @@ export function NavPanel(props: Props) {
               </DragOverlay>
             </DndContext>
           </Ctx.Provider>
+        )}
+
+        {!editing && archivedCount > 0 && (
+          <button className="archive-toggle" onClick={() => setShowArchive((v) => !v)} aria-pressed={showArchive}>
+            {archivedCount} archived · {showArchive ? 'Hide' : 'Show'}
+          </button>
         )}
 
         {editing && profile && !active.error && (
@@ -333,6 +388,7 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
       y: e.clientY,
       entries: [
         { label: 'Add entry…', icon: <Plus size={14} />, run: addEntry },
+        { label: 'New note…', icon: <FilePlus size={14} />, run: () => ctx.openDialog({ mode: 'note', list: { section: index }, context }) },
         { label: 'Add group…', icon: <Plus size={14} />, run: () => ctx.openDialog({ mode: 'add', list: { section: index }, context, presetType: 'group' }) },
         { label: 'Rename heading', icon: <Pencil size={14} />, run: () => renaming.start(index) },
         {
@@ -392,17 +448,91 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
   )
 }
 
+const CONTEXT_ICON: Record<ContextFolder, LucideIcon> = { context: IdCard, knowledge: BookOpen, processes: Workflow, inbox: Inbox }
+
+/**
+ * The profile's context folders, a fixed heading above the configured ones:
+ * not part of the YAML, so never dragged or edited. Before it is set up, one
+ * row offers to set it up.
+ */
+function ContextBlock({
+  selected,
+  isCollapsed,
+  toggleCollapsed,
+}: {
+  selected: ContextFolder | null
+  isCollapsed: Props['isCollapsed']
+  toggleCollapsed: Props['toggleCollapsed']
+}) {
+  const ctx = useContextFolders()
+  const notes = useNotes()
+  const status = ctx?.status
+  if (!ctx || !status) return null
+  const open = !isCollapsed('context', false)
+  const toggle = () => toggleCollapsed('context', false)
+  return (
+    <div className="section context-section" role="group" aria-label="Context">
+      <div className="section-head">
+        <ChevronDown size={13} className={cx('chevron', !open && 'closed')} onClick={toggle} />
+        <span className="title" onClick={toggle}>
+          Context
+        </span>
+        {!open && status.inbox > 0 && <span className="count" title="In the inbox">{status.inbox}</span>}
+      </div>
+      {open && (
+        <div className="items">
+          {status.ready ? (
+            status.folders.map((f) => {
+              const Icon = CONTEXT_ICON[f.name]
+              const on = selected === f.name
+              return (
+                <div
+                  key={f.name}
+                  role="link"
+                  tabIndex={0}
+                  className={cx('item', on && 'selected', !f.exists && 'missing')}
+                  aria-current={on ? 'page' : undefined}
+                  title={f.exists ? f.path : `${f.path} (not there)`}
+                  onClick={() => ctx.open(f.name)}
+                  onKeyDown={(e) => e.key === 'Enter' && ctx.open(f.name)}
+                >
+                  <Icon size={15} className="icon" />
+                  <span className="label">{CONTEXT_LABEL[f.name]}</span>
+                  {f.name === 'inbox' && status.inbox > 0 && (
+                    <span className="inbox-count" aria-label={`${status.inbox} in the inbox`}>
+                      {status.inbox}
+                    </span>
+                  )}
+                </div>
+              )
+            })
+          ) : (
+            <button className="item context-setup" onClick={() => ctx.setup()} title="Creates context, knowledge, processes and inbox with starter notes">
+              <FolderPlus size={15} className="icon" />
+              <span className="label">Set up context in {status.notes ?? notes.suggestedRoot}</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ItemList({ list, items }: { list: ListAddr; items: NavItem[] }) {
-  const { editing } = useContext(Ctx)
+  const { editing, showArchive } = useContext(Ctx)
   const id = listId(list)
   const { setNodeRef } = useDroppable({ id, data: { kind: 'list', list, length: items.length } satisfies DropData, disabled: !editing })
   const hint = useDropHint(id, 'into')
-  const ids = items.map((_, i) => itemId({ ...list, index: i }))
+  // Pinned projects first and archived ones hidden, except while editing, where
+  // the file's own order shows so a drag lands where it looks like it will.
+  const rows = items.map((item, index) => ({ item, index }))
+  const shown = editing ? rows : rows.filter((r) => showArchive || !archived(r.item)).sort((a, b) => Number(pinned(b.item)) - Number(pinned(a.item)))
+  const ids = shown.map((r) => itemId({ ...list, index: r.index }))
   return (
     <div ref={setNodeRef} className={cx('items', hint)}>
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        {items.map((item, i) => {
-          const addr = { ...list, index: i }
+        {shown.map(({ item, index }, i) => {
+          const addr = { ...list, index }
           return item.type === 'group' ? (
             <GroupBlock key={ids[i]} addr={addr} item={item} />
           ) : (
@@ -474,7 +604,9 @@ function RowActions({ addr, item }: { addr: ItemAddr; item: NavItem }) {
 function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
   const ctx = useContext(Ctx)
   const { setNodeRef, attributes, listeners, isDragging, hint, style } = useItemSortable(addr, item)
-  const selected = ctx.selectedKey === itemKey(addr) && !opensExternally(item)
+  // Launchers and links open outside the app only from their button; the name is just text.
+  const outside = opensExternally(item)
+  const selected = ctx.selectedKey === itemKey(addr) && !outside
   const section = ctx.profile.sections[addr.section]
   const context = addr.group === undefined ? `Under ${section?.title}` : `Under ${section?.title} / ${section?.items[addr.group]?.label}`
 
@@ -482,10 +614,13 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
     <div
       ref={setNodeRef}
       style={style}
-      className={cx('item', selected && 'selected', isDragging && 'dragging', hint)}
-      title={describeTarget(item)}
+      className={cx('item', selected && 'selected', isDragging && 'dragging', archived(item) && 'archived', outside && !ctx.editing && 'outside', hint)}
+      title={item.type === 'folder' && item.description ? `${item.description}\n${describeTarget(item)}` : describeTarget(item)}
       aria-current={selected ? 'page' : undefined}
-      onClick={() => (ctx.editing ? ctx.openDialog({ mode: 'edit', at: addr, item, context }) : ctx.activate(addr, item))}
+      onClick={() => {
+        if (ctx.editing) ctx.openDialog({ mode: 'edit', at: addr, item, context })
+        else if (!outside) ctx.activate(addr, item)
+      }}
       onContextMenu={(e) => {
         e.preventDefault()
         ctx.openMenu({ x: e.clientX, y: e.clientY, entries: ctx.itemMenu(addr, item) })
@@ -496,11 +631,60 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
           <GripVertical size={13} />
         </span>
       )}
-      <EntryIcon type={item.type} icon={item.icon} />
+      <EntryIcon type={item.type} icon={item.icon} agent={item.type === 'chat' ? chatProgram(item.agent) : undefined} />
       <span className="label">{item.label}</span>
-      {!ctx.editing && opensExternally(item) && <ArrowUpRight size={12} className="kind" />}
+      {!ctx.editing && outside && (
+        <button
+          className="open-btn"
+          aria-label={`${item.type === 'launch' ? 'Start' : 'Open'} ${item.label}`}
+          title={item.type === 'launch' ? 'Start' : 'Open in the browser'}
+          onClick={(e) => {
+            e.stopPropagation()
+            ctx.activate(addr, item)
+          }}
+        >
+          {item.type === 'launch' ? <Play size={11} /> : <ExternalLink size={11} />}
+        </button>
+      )}
+      {!ctx.editing && <ChatMark item={item} />}
+      {!ctx.editing && <ServerMark item={item} />}
+      {!ctx.editing && item.type === 'folder' && (
+        <span className="project-marks">
+          {item.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
+          <span className={cx('status-dot', item.status ?? 'active')} title={item.status ?? 'active'} />
+        </span>
+      )}
       <RowActions addr={addr} item={item} />
     </div>
+  )
+}
+
+/** A spark on a project or chat entry with running chats (with a count past one); the accent colour when one needs you. */
+function ChatMark({ item }: { item: NavItem }) {
+  const { chatMarks } = useContext(Ctx)
+  const key = item.type === 'folder' ? projectHost(item.path) : item.type === 'chat' ? entrySlot(item) : null
+  const mark = key ? chatMarks.get(key) : undefined
+  if (!mark || (!mark.running && !mark.attention)) return null
+  const what = `${mark.running} running ${mark.running === 1 ? 'chat' : 'chats'}${mark.attention ? ', one needs you' : ''}`
+  return (
+    <span className={cx('chat-mark', mark.attention && 'attention', item.type !== 'folder' && 'alone')} title={what} aria-label={what}>
+      <Sparkles size={11} />
+      {mark.running > 1 && mark.running}
+    </span>
+  )
+}
+
+/** A small dot on a project with servers running (and a count past one); red when a declared one is down. */
+function ServerMark({ item }: { item: NavItem }) {
+  const { serverMarks } = useContext(Ctx)
+  const mark = item.type === 'folder' ? serverMarks.get(item.path) : undefined
+  if (!mark) return null
+  const what = [mark.up && `${mark.up} ${mark.up === 1 ? 'server' : 'servers'} running`, mark.down && `${mark.down} down`].filter(Boolean).join(', ')
+  return (
+    <span className={cx('server-mark', mark.down > 0 && 'down')} title={what} aria-label={what}>
+      <Server size={10} />
+      {mark.up > 1 && mark.up}
+    </span>
   )
 }
 

@@ -59,6 +59,13 @@ describe('guard', () => {
     expect(check({ ...ok, 'sec-fetch-site': 'cross-site' }, '/api/open')).toMatch(/Cross-site/)
   })
 
+  it('lets a sandboxed report load its own files by ticket, but still checks the Host', () => {
+    const fromReport = { host: '127.0.0.1:7420', origin: 'null', 'sec-fetch-site': 'cross-site' }
+    expect(check(fromReport, '/raw/token/style.css')).toBeNull()
+    expect(check({ ...fromReport, host: 'evil.test:7420' }, '/raw/token/style.css')).toMatch(/Host/)
+    expect(check({ ...fromReport, 'x-workbench': '1' }, '/api/state')).toMatch(/Origin/)
+  })
+
   it('requires the API header', () => {
     expect(check({ host: '127.0.0.1:7420' }, '/api/open')).toMatch(/X-Workbench/)
   })
@@ -117,7 +124,7 @@ sections:
     items:
       - { label: Proj, type: folder, path: ~/proj }
       - { label: Shell, type: launch, command: echo, args: [hi] }
-      - { label: Card, type: project, project: p1 }
+      - { label: Today, type: daily }
 `,
     )
     spawn = fakeSpawn()

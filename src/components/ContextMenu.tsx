@@ -44,13 +44,15 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
             key={i}
             role="menuitem"
             className={cx(e.danger && 'danger')}
+            disabled={e.disabled}
             onClick={() => {
               onClose()
               e.run()
             }}
           >
             {e.icon}
-            {e.label}
+            <span className="menu-label">{e.label}</span>
+            {e.detail && <span className="menu-detail">{e.detail}</span>}
           </button>
         ),
       )}

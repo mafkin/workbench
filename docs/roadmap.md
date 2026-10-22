@@ -33,46 +33,84 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | Part | Scope | Status |
 | --- | --- | --- |
 | 1 | Shell, profiles, configurable nav | Done (`2a8811a`) |
-| 2 | Markdown notes | Next in the suggested order |
-| 3 | File browser | |
-| 4 | Project cards | |
-| 5 | Agent chats | |
-| 6 | Skills & MCP panel | |
-| 7 | Context folders | |
+| 2 | Markdown notes | Done (branch `claude/inspiring-einstein-vwftq8`) |
+| 3 | File browser | Done (branch `claude/inspiring-einstein-vwftq8`) |
+| 3½ | Workflow steps, no repeated nav | Done (same branch); see below |
+| 4 | Project cards | Done (same branch) |
+| 5 | Agent chats | Done (same branch) |
+| 5½ | Agent profiles | Done (same branch); see below |
+| 5¾ | Sidebar open buttons, themes and backgrounds | Done (same branch); see below |
+| 6 | Skills & MCP panel (built as Claude setup) | Done (same branch); see below |
+| 7 | Context folders | Done (same branch); see below |
 | 8 | Polish | |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
-### Part 2: Markdown notes
+### Part 2: Markdown notes (done)
 
 - **In Mr. Mak:** Markdown opens as a formatted document, an Edit switch edits it in the same window, and saving writes back to the file. Images, video and audio preview next to the file tree. It uses `react-markdown` + `remark-gfm`.
-- **Hooks into:** `note` entries, which open in `MainPane` instead of the current placeholder. The "Notes" heading in each seeded profile is empty, waiting for this part.
-- **Ask:**
-  - Where notes live: a notes root per profile (a `notes:` key in the profile YAML, e.g. `~/Documents/work/notes`), or anywhere a note entry points.
-  - Editing style: a raw Markdown textarea with a toggle, side-by-side split, or WYSIWYG-ish.
-  - Whether to have quick-create ("New note" under a heading, which also adds a nav entry), daily notes, search across notes, and wiki links.
-  - Autosave or explicit save, and how to handle a conflict when the file changed on disk (reuse the rev/409 pattern from `config-store`).
-- **Notes:**
-  - File reads and writes need a new API. Scope it to paths under the profile's allowed roots, so the service can't read arbitrary files.
-  - Keep the guard on every route.
+- **Decisions (2026-10-21):**
 
-### Part 3: File browser
+  | Question | Answer |
+  | --- | --- |
+  | Where notes live | A `notes:` folder per profile, plus note entries pointing at any file |
+  | Editing style | View/Edit toggle in place (Ctrl+E); the editor is CodeMirror 6 |
+  | Extras | All four: quick-create, search, wiki links, daily notes |
+  | Saving | Autosave (1 s), paused on a conflict with Reload from disk / Keep mine |
+
+- **Built:**
+  - `server/notes.ts` with confinement by realpath, rev-checked atomic saves, list, search, images and folder watches.
+  - The `setProfileField` op, so the UI can set `notes:` without losing comments.
+  - The `daily` entry type: `folder` and `template` are relative to the notes folder; the template fills `{{date}}` and `{{title}}`.
+  - Back navigation, which part 3's file browser can reuse.
+- **Left for later:** see "Known gaps" in CLAUDE.md (no search index, `#heading` in wiki links, clickable checkboxes, links that follow a rename, code highlighting).
+
+### Part 3: File browser (done)
 
 - **In Mr. Mak:**
   - A right-hand Files rail with Main folders / All files tabs, chips that jump to key folders, a path bar, and a filter by name.
   - A folder tree showing file sizes.
   - Drag to move, delete to the trash, "open in file manager", new item, refresh.
   - Previews for images, video, audio and Markdown.
-- **Hooks into:** `folder` entries (currently a placeholder with "Open in Files"), and each profile's `home:` as the default root.
-- **Ask:**
-  - Placement: the main pane, a rail, or both.
-  - Which quick-jump chips to show, and whether they're configurable per profile.
-  - Which operations: move, rename, delete to trash, new folder or file.
-  - Which previews: image, video, audio, PDF, text/code.
-  - Hidden files on or off, and whether to respect `.gitignore`.
-- **Notes:** use `gio trash` or a trash library for deletes, never permanent deletes by default. Keep paths confined to the profile's roots plus explicit nav paths.
+- **Hooks into:** `folder` entries (before this part, a placeholder with "Open in Files"), and each profile's `home:` as the default root.
+- **Decisions (2026-10-21):**
 
-### Part 4: Project cards
+  | Question | Answer |
+  | --- | --- |
+  | Placement | The main pane |
+  | Chips | Built from the profile: home, notes folder, folder entries |
+  | Operations | All: trash, rename, new folder or file, drag to move |
+  | Previews | All: images, Markdown and text/code, PDF, video and audio |
+  | Folder view | Expandable tree |
+  | Hidden files | Dotfiles hidden (Ctrl+H), `.gitignore` matches dimmed |
+  | Reach | The profile's roots (home, notes, folder entries) |
+  | Markdown in the browser | Editable as notes |
+
+- **Built:**
+  - `server/files.ts`, with confinement in `server/paths.ts` shared with notes.
+  - `/raw/` tickets for media.
+  - `FolderWatcher` shared with notes.
+  - `FileBrowser` and `FilePreview` in the UI.
+  - `files:<path>` selections.
+  - Folder chips on Home.
+- **Left for later:** see "Known gaps" in CLAUDE.md (trash undo, cross-drive moves, copy, upload, folder sizes, virtualized rows).
+
+### Between parts 3 and 4: workflow steps
+
+The user asked for this before part 4: "no overlap in the selections". The centre repeated the nav (Home cards, folder chips). The user wants to "choose a project from the left and preserve the center for my customizable workflow", with workflow items like "assets", "modeling" and "design" that they name and customise.
+
+| Question | Answer |
+| --- | --- |
+| What a step opens | A folder, a note or a launcher |
+| Shared or per project | A profile default (`workflow:`), and each project can customise its own (`steps:`) |
+| Where stored | The profile YAML |
+| Home | Recent work plus today's note, instead of the nav cards |
+
+Built: `StepItem` and the step ops, `ProjectView` with tabs, step mode in the entry dialog, `/api/open` with a step index, and Home as Recent work. The file browser's chips and Home's cards and chips are gone.
+
+Later, in part 6, the user said "No repeated nav is not an explicit rule, if it makes sense it should be implemented." Avoid repeating the nav by default, but a list of projects is fine where it serves a purpose, like the Claude setup page's For picker.
+
+### Part 4: Project cards (done)
 
 - **In Mr. Mak:** a `workspace.json` registry of entities with these fields: `id`, `title`, `description`, `icon`, `category`, `created`, `updated`, `folder`, `steps[] {name, path}` (tabs inside the card), `defaultStep`, `status` (active, done or archived) and `pinned`.
   - The dashboard groups cards by category, with a Pinned section on top.
@@ -80,13 +118,25 @@ The user may pick parts in a different order; ask. For each part, the "Ask" item
   - Clicking the status dot changes status, category, pin or archive. Archived cards can be restored from search or "Show archive".
   - Tabs inside a card hold related iterations: HTML reports in an iframe, Markdown formatted, image previews.
 - **Hooks into:** `project` entries (`project: <id>`). The Home overview could also become or include the card dashboard.
-- **Ask:**
-  - Where the registry lives: per profile in `~/.config/workbench/projects/<profile>.yaml`, or a file inside each project folder.
-  - Which card fields and categories they want.
-  - What a card's tabs can be: notes, folders, URLs, HTML reports.
-  - Whether a project card replaces or sits alongside folder entries.
+  - A card's tabs can reuse `FilePreview` (images, PDF, Markdown, text) and `NoteView` for notes. Any new file access goes through `browseRoots` in `server/paths.ts`.
+  - **Workflow steps already cover Mr. Mak's `steps[]` tabs** for folder entries (`ProjectView`). Ask whether part 4's cards should build on folder entries and their steps rather than add a separate registry with its own tabs. Respect the "no repeated nav" rule: a card dashboard on Home would repeat the nav unless it shows something the nav doesn't (status, category, pinned).
+- **Decisions (2026-10-21):**
 
-### Part 5: Agent chats
+  | Question | Answer |
+  | --- | --- |
+  | Card model | Folder entries are the cards; no separate registry, and `type: project` is removed |
+  | Card details | Description, status (active, paused, done, archived), category (with colours), pinned |
+  | Placement | The project page header and the nav (dots, pinned first, archive toggle); no dashboard |
+  | New tab kinds | HTML report, single file, web link |
+
+- **Built:**
+  - The `setCard` op and `categoryColor`.
+  - The card header in `ProjectView`, plus nav marks and menu.
+  - The report, file and link step kinds.
+  - Folder tickets for reports, and the `/raw/` guard exception for sandboxed reports.
+- **Left for later:** category colours from the UI, and created or updated dates.
+
+### Part 5: Agent chats (done)
 
 - **In Mr. Mak:**
   - Chats are real CLIs in PTYs (`node-pty` 1.1.0 + `@xterm/xterm` 6 + `addon-fit` + `addon-web-links`), with tabs, history, pinning, colours and groups by project.
@@ -104,44 +154,169 @@ The user may pick parts in a different order; ask. For each part, the "Ask" item
 - **Notes:**
   - **Security:** a PTY is shell access, so add a per-start random token on top of the guard. Pass it via the URL fragment or an `HttpOnly` cookie, and check it on the WebSocket upgrade.
   - **Build:** node-pty builds natively; gcc and make are present. Mr. Mak's spawn-helper chmod fix is macOS-only.
+- **Decisions (2026-10-21):**
 
-### Part 6: Skills & MCP panel
+  | Question | Answer |
+  | --- | --- |
+  | View | Terminal only (xterm.js); no Conversation view |
+  | Placement | Tabs in the project, after its workflow steps |
+  | Start points | New chat in a project (and the nav menu), a `chat` workflow step, Chat here in the file browser, a `chat` nav entry |
+  | History | Chats keep running across reloads; a per-project History of Claude sessions, resumed with `claude --resume` |
+  | Agents | Claude plus a shell |
+  | Extras | Drop files as paths, a needs-you marker and notification, pin and colour, summarize and continue |
+  | Nav | A spark on projects (and chat entries) with running chats |
+  | Restart | Tabs come back as Stopped; Resume by hand, nothing starts by itself |
+
+  Approved in the plan: pins, colours and names live in the service's chat list (`~/.local/state/workbench/chats.json`), not the YAML, because they belong to one running session.
+
+- **Built:**
+  - `ChatItem` (`agent`, `path`, `args`) as a nav entry and a step; host and slot keys from paths and labels.
+  - `server/chats.ts`: node-pty (loaded with the first chat) with a headless xterm per chat for screen replay; titles, bell and quiet-after-work for needs-you; the saved list; resume by `--session-id`/`--resume`; handoff via `claude -p --resume <id> --fork-session`.
+  - `server/claude-sessions.ts` for History and message counts.
+  - `/api/chats` routes by address, the `/pty/:id` socket with a per-start token in `Sec-WebSocket-Protocol`, guarded in `preValidation`.
+  - `ChatPane`, the lazy `ChatTerminal`, chat tabs, New chat and History in `ProjectView`, Chat here in the browser, the chat entry page, Other chats on Home, nav marks, notifications.
+- **Left for later:** following `/clear` or `/resume` inside a chat (the tab resumes the session it started with); keeping a running chat when its step is renamed; switching tabs while dragging over them.
+
+### After part 5: agent profiles (done)
+
+The user asked for "agent profiles I can prepare and choose when initiating sessions inside projects or specific folders".
+
+| Question | Answer |
+| --- | --- |
+| What a profile sets | Model and effort, permission mode, instructions (and a first prompt), folders, tools and MCP. "Model and effort can be bypassed if an orchestrator agent is being used" |
+| Orchestrator | A profile can name a Claude Code agent (`--agent`); then model and effort are left to it |
+| Editing | In the app, saved under `agents:` in the profile YAML |
+| Choosing | A menu by New chat (also Chat here as…, New chat as… in the nav) |
+| Defaults | A project names its default (`agent:` on the folder entry, set from a chip in the card); chat steps and entries name theirs |
+| Permissions | All modes; bypass warns in the editor and marks its chats with a shield |
+
+- **Built:** `AgentProfile` and `agents:` in the schema, `chatProgram`, `findAgent`, `agentSummary`; the `setAgent` op (rename updates references, a delete is refused while in use); `server/agents.ts` (`agentArgs`, `claudeAgents`); start-time resolution in `POST /api/chats` (request, else step or entry, else project default); `GET /api/chats/claude-agents`; `AgentProfilesDialog`, `agentEntries` menus, the agent chip, bypass marks.
+- **Fixed on the way:** a comment after `key:` whose value is a block map or list now stays on the key's line through app edits (`applyOps` gets the source text); saves of `chats.json` are serialized (two at once collided on the temp file); `countPrompts` never rejects.
+- **Left for later:** a chat started with a profile keeps its flags when the profile changes (by design); no per-folder rules (a profile can't claim `~/Projects/games/**`).
+
+### After part 5: sidebar open buttons, themes and backgrounds (done)
+
+The user asked: launchers in the sidebar started on a single click of their name; they wanted an explicit button with a hover highlight, and the text as just text. And themes ("a few example themes, your choice") with a background based on the theme, or their own picture.
+
+| Question | Answer |
+| --- | --- |
+| Which entries get the button | Launchers and links |
+| Scope of the look | Per profile (`theme:`, `background:` in its YAML) |
+| How a background shows | Behind everything, frosted panels |
+| Own picture | Picked from a file (file browser or path); the app keeps a copy in `<config>/backgrounds/` |
+
+- **Built:** the open button in `NavPanel` (row click does nothing for launchers and links); `THEMES` and the six themes in `src/lib/themes.ts` (tokens plus a gradient background each); `server/backgrounds.ts` and `/api/backgrounds`; `LookPanel` (palette button in the sidebar header); "Use as background" in the file browser; the `.app.backdrop` frosted layout. The background follows the theme by default; None is the old flat look.
+- **Left for later:** theme colours or new themes from the UI; a light theme (the app stays dark-only); per-picture tint or blur settings.
+
+### Part 6: Skills & MCP panel, built as Claude setup (done)
 
 - **In Mr. Mak:**
   - A right rail with Skills, Knowledge, Workflows, MCP, Settings and Help.
-  - The MCP view lists servers by scope:
-    - global: `~/.claude.json` `mcpServers`
-    - local: `~/.claude.json` `projects[<path>].mcpServers`
-    - project: `.mcp.json`
-    - managed: `managed-mcp.json`
-    - plugins: their `.mcp.json`
+  - The MCP view lists servers by scope: global, local, project, managed and plugins.
   - Each server gets a connection check.
-- **Ask:**
-  - Read-only, or also enable and disable.
-  - Which sources: user skills `~/.claude/skills`, plugin skills, project `.claude/skills`.
-  - Whether to show per-project scope for the profile's folders.
-- **Notes:** mask secret values (env vars, headers, tokens) everywhere. Read-only is the safe default.
+- **Decisions (2026-10-22):**
 
-### Part 7: Context folders
+  | Question | Answer |
+  | --- | --- |
+  | Read-only, or enable and disable too | Read-only for now |
+  | Which skill sources | All: yours, plugin and project skills |
+  | Per-project view | Yes |
+  | Where it shows | Both, to pick one later: a page from the sidebar and a project tab. "No repeated nav is not an explicit rule, if it makes sense it should be implemented. Start with both so I can decide if I want to drop one." |
+  | The page | A page in the main pane, from a button in the sidebar header |
+  | Checks | On demand, per server (and Check all): start it, do the MCP handshake, list its tools, stop it |
+  | Also list | Claude agents, slash commands, hooks, plugins |
+  | Project tab | What applies in this folder: merged user, project, local, plugin and managed config, each item with a scope badge |
+
+- **Built:**
+  - `server/claude-setup.ts` (`readSetup`): every source with its scope, name clashes, MCP states (on, off, not approved, blocked, overridden, broken) and plugins.
+  - `server/mcp-check.ts`: stdio, Streamable HTTP and legacy SSE handshakes, protocol `2025-11-25`, falling back to tools/list without initialize.
+  - `server/mask.ts`.
+  - The routes `/api/claude/{setup,doc,check}`.
+  - `ClaudeSetupView` (a lazy chunk) for the page (`setup:` selection) and the project tab (`setup:` saved tab).
+  - The Theme and Agent profiles dialogs became lazy chunks, to keep the main bundle under 800 kB.
+- **Formats that aren't documented** are read leniently. Shapes that don't match are listed as problems at the top of the page:
+  - the layout of `installed_plugins.json` (v1 object or v2 array per id) and `known_marketplaces.json`,
+  - the shape of `managed-mcp.json` (read like `.mcp.json`),
+  - where `disabledMcpServers` is kept (read from `~/.claude.json` `projects[<folder>]`),
+  - `.claude.json` inside `$CLAUDE_CONFIG_DIR` when that is set.
+- **Left for later:**
+  - Enabling or disabling things from the app.
+  - Watching claude's files (there is a Refresh button instead).
+  - Skills in nested folders below the project (claude loads them when it works there).
+  - Skills, agents or MCP servers passed only on the command line (`--agents`, `--mcp-config`); agent profiles name the latter.
+  - OAuth sign-in for remote servers (done in claude with `/mcp`).
+
+### Part 7: Context folders (done)
 
 - **In Mr. Mak:**
   - `context/` holds identity, preferences and goals; `knowledge/` holds focused reusable notes; `processes/` holds workflows; `inbox/` holds attachments and handoffs.
-  - A table says which kind of request belongs where, e.g. "Remember how I want reports written" goes to `context/preferences.md`.
-- **Ask:**
-  - Per profile or shared.
-  - Where on disk.
-  - Whether agent chats (part 5) should get these folders automatically, e.g. via `--add-dir` or a generated `CLAUDE.md`.
-  - How they show in the nav (a fixed heading or ordinary entries).
+  - A table says which kind of request belongs where.
+- **Decisions (2026-10-22):**
 
-### Part 8: Polish
+  | Question | Answer |
+  | --- | --- |
+  | Per profile or shared | Per profile |
+  | Where on disk | Inside the profile's notes folder: `<notes>/context`, `knowledge`, `processes`, `inbox` |
+  | Chats | Every claude chat gets them automatically |
+  | In the app | A fixed Context heading at the top of the nav |
+  | First time | Set up context: the folders plus starter notes (identity, preferences, goals, the routing note); never by itself |
+  | Routing | An editable note, `context/README.md`, whose text chats get |
+  | Opening an entry | The folder in the file browser; Context also has tabs for its notes |
+  | Inbox extras | Count badge in the nav; Summarize and continue saves its handoff there; Send to inbox in the file browser |
 
-These are candidates; ask which ones matter:
+- **Built:**
+  - `server/context.ts` (`Context`: status, setup, `chatContext`, `saveHandoff`, `sendToInbox`, watching for the inbox count) and `/api/context{,/setup,/inbox}`, with the SSE event `context`.
+  - `agentArgs` merges the context: one `--append-system-prompt` (the profile's instructions first) and one `--add-dir`.
+  - `Chat.context`, shown in the chat bar.
+  - `handoff(id, {onSummary})`.
+  - The nav's `ContextBlock`, `ContextView` (`context:<name>` selection), and Send to inbox in `FileBrowser`.
+- **What chats are told:**
+  - the folders,
+  - the routing note,
+  - identity, preferences and goals pasted in up to 16 KB (later ones are named by path instead).
+  - Knowledge and processes are read on demand.
+  - Flags are fixed when a chat starts, like agent profiles.
+- **Left for later:**
+  - Shared context across profiles.
+  - Turning context off for one agent profile.
+  - Moving files out of the inbox in one click.
+  - Inbox counts for profiles other than the active one.
 
-- Ctrl+K quick switcher across entries and notes.
-- A systemd user service so the GNOME Web app launcher always finds the service running.
-- UI for profile settings (name, accent, home) and for adding profiles.
-- Selection that follows moved entries.
-- Tauri wrapper (needs Rust).
+### Part 8: Polish, the known gaps and Servers (done)
+
+- **Decisions (2026-10-22):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Which polish items | All: Ctrl+K, a systemd user service, profile settings, selection that follows moves |
+  | Tauri | Decide later (still needs Rust) |
+  | Known gaps | All four groups: nav and steps, notes, files, cards and chats |
+  | Ctrl+K | Everything (entries, steps, notes, context, chats, pages) plus actions |
+  | Profiles | Edit, add and remove in the app |
+  | systemd | The service plus a rebuild and restart after `git pull` |
+  | Servers: what counts | Found from `/proc` in project folders, plus optional declared `servers:` with a health check |
+  | Servers: where | A Servers page and marks in the nav (and a line on the card) |
+  | Servers: actions | Open, Stop (asks first), Copy URL; polled every 3 s on the page, 15 s for the nav |
+
+- **Milestone 1, polish** (07eec5d):
+  - `QuickSwitcher.tsx` and `src/lib/switcher.ts` (`fuzzy`, `rank`), lazy.
+  - `ProfileDialog.tsx`; `ConfigStore.createProfile` / `removeProfile` (the file to the Trash); `POST /api/profiles`, `DELETE /api/profiles/:id`.
+  - `bin/workbench --install / --uninstall / --print-units / --update`. The path unit watches `.git/logs/HEAD`.
+  - `entryId` and `resolveEntry` in `src/lib/nav.ts`: the selection and Recent work find an entry again by type, label and path.
+- **Milestone 2, the known gaps** (0824f5a):
+  - The pencil is disabled while the file is broken; a renamed step stays the open tab; renaming a chat step moves its chat (`Chats.moveSlot`).
+  - Notes: heading links, task boxes in View (`src/lib/tasks.ts`), code colours (`src/lib/highlight.ts`, the editor's parsers with `classHighlighter`), midnight rollover, a text cache keyed by mtime and size.
+  - Files: copy (Duplicate, Ctrl+C/V, Ctrl+drag), upload from the desktop, folder sizes, Search all folders (`find`), Undo for Trash (`server/trash.ts`, XDG `.trashinfo`), virtual rows past 400.
+  - Cards: category colours (`setCategory`), created and updated dates (`server/project-dates.ts`).
+  - Chats follow `/clear` and `/resume`: a `SessionStart` hook given with `--settings` runs `server/session-hook.mjs`, which writes `<state>/sessions/<chat>.json`; `Chats` watches it.
+- **Milestone 3, Servers:**
+  - `server/procfs.ts`: listening sockets (`/proc/net/tcp{,6}`, state `0A`), matched to your processes by socket inode; each process's cwd, name, command and start time.
+  - `server/servers.ts`: `scan(profile)` (cached 1 s), rows per project (deepest project wins), declared servers merged by port, an HTTP probe (1.5 s), and `stop`, which re-scans and checks owner, port and project before SIGTERM. Routes `GET /api/servers`, `POST /api/servers/stop`.
+  - `ServersView.tsx` (lazy), the nav button and marks, the card line.
+- **Left for later:**
+  - A Tauri window.
+  - Servers: no logs or restart (Workbench didn't start them), UDP isn't listed, and a server started outside a project folder isn't shown even if it serves that project.
+  - Upload has no progress bar; copying to another drive works, moving there is still refused.
 
 ## Reference
 
