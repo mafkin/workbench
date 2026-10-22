@@ -3427,3 +3427,221 @@ button {
   color: var(--accent);
   font-size: 11px;
 }
+
+/* Profile settings. */
+
+.profile-switch .profile-gear {
+  flex: none;
+  padding: 0 6px;
+}
+
+.profile-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(88vh - 16px);
+  overflow-y: auto;
+}
+
+.profile-dialog .body + .body {
+  border-top: 1px solid var(--border);
+}
+
+.accent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.accent-row .swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+}
+
+.accent-row .swatch.on {
+  border-color: var(--text-strong);
+}
+
+.accent-row input[type='color'] {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: none;
+}
+
+.field .accent-row .hex {
+  width: 96px;
+}
+
+.profile-dialog .form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.profiles-list ul {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.profiles-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 4px;
+}
+
+.profiles-list li.current {
+  background: var(--accent-soft);
+}
+
+.profiles-list .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.profiles-list .name {
+  color: var(--text-strong);
+}
+
+.profiles-list .id {
+  flex: 1;
+  color: var(--faint);
+}
+
+.add-profile {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.add-profile input:not([type='checkbox']) {
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.add-profile .check {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.add-profile .btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.profiles-list .err {
+  display: block;
+  margin-top: 8px;
+  color: var(--danger);
+}
+
+/* Ctrl+K quick switcher. */
+
+.switcher-scrim {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.switcher {
+  width: min(620px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.45);
+}
+
+.switcher-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--faint);
+}
+
+.switcher-input input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font-size: 15px;
+  outline: none;
+}
+
+.switcher-list {
+  max-height: min(420px, 60vh);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.switcher-row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.switcher-row.active {
+  background: var(--accent-soft);
+}
+
+.switcher-row.active::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.switcher-row .label {
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.switcher-row.action .label {
+  color: var(--accent);
+}
+
+.switcher-row .detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switcher-row .kind {
+  flex: none;
+  color: var(--faint);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.switcher-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--faint);
+}

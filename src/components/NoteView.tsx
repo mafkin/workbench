@@ -9,7 +9,9 @@ import * as api from '../lib/api.ts'
 import { onNoteEvent, type NoteEvent } from '../lib/events.ts'
 import { cx } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
-import { Markdown } from './Markdown.tsx'
+
+// react-markdown and remark are a large chunk; they load with the first note shown.
+const Markdown = lazy(() => import('./Markdown.tsx').then((m) => ({ default: m.Markdown })))
 
 const NoteEditor = lazy(() => import('./NoteEditor.tsx'))
 
@@ -313,7 +315,9 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
         ) : (
           <div className="note-surface">
             {draft.trim() ? (
-              <Markdown text={draft} notePath={base?.path ?? path} />
+              <Suspense fallback={null}>
+                <Markdown text={draft} notePath={base?.path ?? path} />
+              </Suspense>
             ) : (
               <p className="note-empty">This note is empty. Press Edit (Ctrl+E) to write.</p>
             )}

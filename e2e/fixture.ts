@@ -143,6 +143,10 @@ const ALPHA_FILES: Record<string, string | Buffer> = {
 
 export async function resetFixture() {
   await fsp.mkdir(path.join(DIR, 'profiles'), { recursive: true })
+  // Profiles a test added would linger in the switcher.
+  for (const f of await fsp.readdir(path.join(DIR, 'profiles'))) {
+    if (f !== 'work.yaml' && f !== 'personal.yaml') await fsp.rm(path.join(DIR, 'profiles', f), { force: true })
+  }
   // Tests create notes and files all over the fake home; start each one from a clean copy.
   await fsp.rm(HOME, { recursive: true, force: true })
   await fsp.rm(TRASH, { recursive: true, force: true })

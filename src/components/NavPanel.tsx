@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Blocks, BookOpen, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
+import { Blocks, BookOpen, Settings2, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, CONTEXT_LABEL, entrySlot, itemKey, projectHost, type ContextFolder, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import { useContextFolders } from '../lib/context.ts'
@@ -51,6 +51,7 @@ interface Props extends NavActions {
   /** Open the Claude setup page; `setupActive` while it shows. */
   onSetup: () => void
   setupActive: boolean
+  onProfileSettings: () => void
   /** The context folder whose page shows, if one does. */
   contextSelected: ContextFolder | null
 }
@@ -209,6 +210,9 @@ export function NavPanel(props: Props) {
               {p.profile?.name ?? p.id}
             </button>
           ))}
+          <button className="icon-btn profile-gear" onClick={props.onProfileSettings} title="Profile settings" aria-label="Profile settings">
+            <Settings2 size={13} />
+          </button>
         </div>
       </div>
 

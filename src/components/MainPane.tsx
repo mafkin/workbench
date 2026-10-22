@@ -19,7 +19,7 @@ import {
 } from '../../shared/config-schema.ts'
 import { useChats } from '../lib/chats.ts'
 import { nameOf } from '../lib/files.ts'
-import { findEntry, FILES_KEY, NOTE_KEY, parseKey, type Selection } from '../lib/nav.ts'
+import { findEntry, FILES_KEY, NOTE_KEY, parseKey, resolveEntry, type Selection } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { ago, type Recent } from '../lib/recent.ts'
 import { ChatPane } from './ChatPane.tsx'
@@ -356,9 +356,10 @@ function describeRecent(profile: NonNullable<ProfileState['profile']>, r: Recent
     const p = r.key.slice(FILES_KEY.length)
     return { icon: <Folder size={15} className="icon" />, label: nameOf(p), where: p }
   }
-  const addr = parseKey(r.key)
+  // Older items have no identity: the address must still hold the same label.
+  const addr = r.entry ? resolveEntry(profile, r.key, r.entry) : parseKey(r.key)
   const item = addr ? getItem(profile, addr) : undefined
-  if (!addr || !item || item.label !== r.label) return null
+  if (!addr || !item || (!r.entry && item.label !== r.label)) return null
   const section = profile.sections[addr.section]
   const group = addr.group !== undefined ? section?.items[addr.group] : undefined
   const where = group ? `${section?.title} / ${group.label}` : (section?.title ?? '')

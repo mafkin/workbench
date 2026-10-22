@@ -1,6 +1,6 @@
 // Recent work for Home: what was opened last in this browser, per profile.
-// Entry keys are addresses, so each item keeps the label it had, and one whose
-// address now holds something else is skipped.
+// Entry keys are addresses; each item also keeps the entry's identity, so an
+// entry that moved is found at its new place, and one that is gone is skipped.
 
 export interface Recent {
   /** A selection key: an entry address, `note:<path>` or `files:<path>`. */
@@ -8,13 +8,16 @@ export interface Recent {
   /** A project's workflow step, by label. */
   step?: string
   label: string
+  /** The entry's identity (entryId), so it is found again after a move. */
+  entry?: string
   at: number
 }
 
 export const MAX_RECENT = 12
 
 export function pushRecent(list: Recent[], item: Recent): Recent[] {
-  return [item, ...list.filter((r) => r.key !== item.key || r.step !== item.step)].slice(0, MAX_RECENT)
+  const same = (r: Recent) => r.step === item.step && (r.key === item.key || (!!item.entry && r.entry === item.entry))
+  return [item, ...list.filter((r) => !same(r))].slice(0, MAX_RECENT)
 }
 
 /** "just now", "5 min ago", "3 h ago", "yesterday", or a date. */

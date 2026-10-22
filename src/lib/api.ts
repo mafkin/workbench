@@ -53,6 +53,10 @@ export const applyOps = (profile: string, rev: string, ops: Op[]) =>
 export const undo = (profile: string, rev: string) =>
   api<{ rev: string }>(`/api/profiles/${encodeURIComponent(profile)}/undo`, { body: { rev } })
 export const setActive = (profile: string) => api('/api/active', { body: { profile } })
+/** A new profile: blank, or a copy of another (its headings and workflow) under a new name. */
+export const createProfile = (id: string, name: string, copyFrom?: string) => api<{ id: string }>('/api/profiles', { body: { id, name, copyFrom } })
+/** The profile's file goes to the Trash. */
+export const removeProfile = (id: string) => api(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' })
 /** Open an entry, or with `step`, start a project's launcher step. */
 export const openEntry = (profile: string, rev: string, at: ItemAddr, step?: number) => api('/api/open', { body: { profile, rev, at, step } })
 export const stat = (path: string) =>

@@ -8,8 +8,10 @@ import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
 import websocket from '@fastify/websocket'
 import Fastify from 'fastify'
+import { Document, parseDocument } from 'yaml'
 import { z } from 'zod'
 import {
+  ACCENTS,
   AgentProfile,
   CHAT_COLORS,
   chatName,
@@ -34,12 +36,12 @@ import { Backgrounds } from './backgrounds.ts'
 import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
 import { frontmatter, readSetup } from './claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
-import { describeIssue } from './config-ops.ts'
+import { applyOps, describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
 import { Context } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { makeGuard } from './guard.ts'
-import { LaunchError, openItem } from './launch.ts'
+import { LaunchError, openItem, runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
 import { Notes, type NoteEvent } from './notes.ts'
@@ -72,6 +74,7 @@ export interface ServerOptions {
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
 const RevBody = z.object({ rev: z.string() })
 const ActiveBody = z.object({ profile: z.string() })
+const NewProfile = z.object({ id: z.string(), name: z.string().trim().min(1, 'A name is required').max(40), copyFrom: z.string().optional() })
 const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr, step: z.int().nonnegative().optional() })
 const PathQuery = z.object({ profile: z.string(), path: z.string() })
 const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string().nullable(), text: z.string() })
@@ -183,6 +186,31 @@ export async function buildServer(opts: ServerOptions) {
   app.post<{ Params: { id: string } }>('/api/profiles/:id/undo', async (req) => {
     const { rev } = parse(RevBody, req.body)
     return store.undo(req.params.id, rev)
+  })
+
+  // Profiles: a new file (blank, or a copy of another with a new name), or one moved to the Trash.
+  app.post('/api/profiles', async (req) => {
+    const b = parse(NewProfile, req.body)
+    let text: string
+    if (b.copyFrom) {
+      const src = store.profile(b.copyFrom)
+      if (!src.profile) throw new StoreError('That profile file is broken', 423)
+      const source = store.text(b.copyFrom)
+      const doc = parseDocument(source)
+      applyOps(doc, [{ op: 'setProfileField', key: 'name', value: b.name }], source)
+      text = doc.toString()
+    } else {
+      const used = store.state().profiles.map((p) => p.profile?.accent)
+      const accent = ACCENTS.find((a) => !used.includes(a)) ?? ACCENTS[0]
+      text = new Document({ name: b.name, accent, sections: [] }).toString()
+    }
+    await store.createProfile(b.id, text)
+    return { id: b.id }
+  })
+
+  app.delete<{ Params: { id: string } }>('/api/profiles/:id', async (req) => {
+    await store.removeProfile(req.params.id, (file) => runToExit({ command: 'gio', args: ['trash', '--', file] }, opts.spawn))
+    return { ok: true }
   })
 
   app.post('/api/active', async (req) => {

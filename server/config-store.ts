@@ -5,9 +5,11 @@ import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { LineCounter, parseDocument } from 'yaml'
+import { isSeq, LineCounter, parseDocument, type Document } from 'yaml'
 import {
   Profile,
+  PROFILE_ID,
+  PROFILE_ID_RULE,
   Settings,
   type AppState,
   type ConfigError,
@@ -121,6 +123,13 @@ export class ConfigStore extends EventEmitter {
     return e
   }
 
+  /** A profile file's text, as last read. */
+  text(id: string): string {
+    const e = this.#entries.get(id)
+    if (!e) throw new StoreError(`No profile "${id}"`, 404)
+    return e.text
+  }
+
   /** Apply edits made in the UI. `rev` is the revision the UI last saw. */
   apply(id: string, rev: string, ops: Op[]): Promise<{ rev: string }> {
     return this.#serial(async () => {
@@ -160,6 +169,53 @@ export class ConfigStore extends EventEmitter {
       this.#applySettingsText(text)
       this.emit('change')
     })
+  }
+
+  /** A new profile file (never over an existing one), last in the switcher. */
+  createProfile(id: string, text: string): Promise<void> {
+    return this.#serial(async () => {
+      if (!PROFILE_ID.test(id)) throw new StoreError(PROFILE_ID_RULE, 400)
+      if (this.#entries.has(id)) throw new StoreError(`There is already a profile "${id}"`, 409)
+      const parsed = parseProfile(text)
+      if (parsed.error) throw new StoreError(parsed.error.message, 400)
+      const file = path.join(this.profilesDir, `${id}.yaml`)
+      await fsp.writeFile(file, text, { flag: 'wx' }).catch((err) => {
+        throw err.code === 'EEXIST' ? new StoreError(`${id}.yaml already exists`, 409) : err
+      })
+      const entry: Entry = { id, file, rev: '', text: '', profile: null, error: null }
+      this.#setText(entry, text)
+      const order = this.state().profiles.map((p) => p.id)
+      this.#entries.set(id, entry)
+      await this.#editSettings((doc) => setOrder(doc, [...order, id]))
+      this.emit('change')
+    })
+  }
+
+  /** Remove a profile: `trash` moves its file to the Trash; it leaves the switcher. The last one stays. */
+  removeProfile(id: string, trash: (file: string) => Promise<void>): Promise<void> {
+    return this.#serial(async () => {
+      const e = this.profile(id)
+      if (this.#entries.size <= 1) throw new StoreError('The last profile cannot be removed', 409)
+      const state = this.state()
+      await trash(e.file)
+      this.#entries.delete(id)
+      const order = state.profiles.map((p) => p.id).filter((p) => p !== id)
+      await this.#editSettings((doc) => {
+        setOrder(doc, order)
+        if (state.activeProfile === id) doc.set('activeProfile', order[0])
+      })
+      this.emit('change')
+    })
+  }
+
+  /** Edit settings.yaml, keeping its comments. */
+  async #editSettings(edit: (doc: Document) => void) {
+    const doc = parseDocument(this.#settingsText || '{}')
+    if (doc.errors.length) throw new StoreError('settings.yaml has an error; fix it first', 423)
+    edit(doc)
+    const text = doc.toString()
+    await writeAtomic(this.settingsFile, text)
+    this.#applySettingsText(text)
   }
 
   #serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -262,6 +318,17 @@ export class ConfigStore extends EventEmitter {
       }),
     )
   }
+}
+
+/** The switcher's order, keeping a flow list (`[work, personal]`) flow. */
+function setOrder(doc: Document, order: string[]) {
+  const node = doc.get('profiles', true)
+  if (isSeq(node)) {
+    const flow = node.flow
+    const seq = doc.createNode(order)
+    seq.flow = flow
+    doc.set('profiles', seq)
+  } else doc.set('profiles', order)
 }
 
 function isProfileFile(name: string) {

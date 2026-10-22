@@ -11,6 +11,7 @@ import {
   joinNotes,
   noteFileName,
   projectHost,
+  stepsOf,
   themeOf,
   type AppState,
   type Chat,
@@ -22,6 +23,7 @@ import {
   type NavItem,
   type NoteSummary,
   type Op,
+  type Profile,
 } from '../shared/config-schema.ts'
 import { agentEntries } from './components/AgentMenu.tsx'
 import { ConfirmDialog } from './components/ConfirmDialog.tsx'
@@ -35,9 +37,10 @@ import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
 import { CHAT_TAB, ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
 import { ContextCtx, type ContextApi } from './lib/context.ts'
+import type { SwitchItem } from './lib/switcher.ts'
 import { followState, onChatsEvent, onContextEvent, type Connection } from './lib/events.ts'
 import { nameOf } from './lib/files.ts'
-import { readLocal, useLocal, writeLocal } from './lib/local.ts'
+import { useLocal } from './lib/local.ts'
 import {
   CHAT_KEY,
   CONTEXT_KEY,
@@ -47,7 +50,9 @@ import {
   listLength,
   NOTE_KEY,
   SETUP_KEY,
+  entryId,
   parseKey,
+  resolveEntry,
   type DialogState,
   type MenuEntry,
   type MenuState,
@@ -61,7 +66,16 @@ import { normalizePath } from './lib/wikilinks.ts'
 
 // Dialogs that open on demand load on demand, to keep the main bundle small.
 const AgentProfilesDialog = lazy(() => import('./components/AgentProfilesDialog.tsx').then((m) => ({ default: m.AgentProfilesDialog })))
+const ProfileDialog = lazy(() => import('./components/ProfileDialog.tsx').then((m) => ({ default: m.ProfileDialog })))
+const QuickSwitcher = lazy(() => import('./components/QuickSwitcher.tsx').then((m) => ({ default: m.QuickSwitcher })))
 const LookPanel = lazy(() => import('./components/LookPanel.tsx').then((m) => ({ default: m.LookPanel })))
+
+/** The identity of the entry at an address key, if the key is one. */
+function idAt(profile: Profile | null | undefined, key: string | undefined): string | undefined {
+  const addr = parseKey(key)
+  const item = addr && profile ? getItem(profile, addr) : undefined
+  return item ? entryId(item) : undefined
+}
 
 const NAV_MIN = 220
 const NAV_MAX = 520
@@ -80,6 +94,8 @@ export function App() {
   }, [])
   const [resizing, setResizing] = useState(false)
   const [selected, setSelected] = useLocal<Record<string, string | undefined>>('selected', {})
+  // Which entry the selection stands for (entryId), so it follows the entry when it moves.
+  const [selectedIds, setSelectedIds] = useLocal<Record<string, string | undefined>>('selectedId', {})
   const [collapsed, setCollapsed] = useLocal<Record<string, boolean>>('collapsed', {})
   const [navWidth, setNavWidth] = useLocal('navWidth', 280)
   const [history, setHistory] = useState<(string | undefined)[]>([])
@@ -117,6 +133,8 @@ export function App() {
   const pictureName = background === 'theme' || background === 'none' ? null : background
   const [picture, setPicture] = useState<{ name: string; url: string | null } | null>(null)
   const [lookOpen, setLookOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   useEffect(() => {
     if (!pictureName) return setPicture(null)
@@ -194,9 +212,9 @@ export function App() {
 
   /** Add to recent work on Home. */
   const remember = useCallback(
-    (key: string, label: string, step?: string) => {
+    (key: string, label: string, step?: string, entry?: string) => {
       const id = activeRef.current?.id
-      if (id) setRecent((all) => ({ ...all, [id]: pushRecent(all[id] ?? [], { key, label, step, at: Date.now() }) }))
+      if (id) setRecent((all) => ({ ...all, [id]: pushRecent(all[id] ?? [], { key, label, step, entry, at: Date.now() }) }))
     },
     [setRecent],
   )
@@ -209,6 +227,7 @@ export function App() {
       const current = selectedRef.current[a.id]
       if (current !== key) setHistory((h) => [...h.slice(-49), current])
       setSelected((s) => ({ ...s, [a.id]: key }))
+      setSelectedIds((s) => ({ ...s, [a.id]: idAt(a.profile, key) }))
       setSearch((s) => (s.open ? { ...s, open: false } : s))
       if (!key) return
       if (key.startsWith(NOTE_KEY) || key.startsWith(FILES_KEY)) remember(key, nameOf(key.slice(key.indexOf(':') + 1)))
@@ -216,10 +235,10 @@ export function App() {
       else {
         const addr = parseKey(key)
         const item = addr && a.profile ? getItem(a.profile, addr) : undefined
-        if (item) remember(key, item.label)
+        if (item) remember(key, item.label, undefined, entryId(item))
       }
     },
-    [setSelected, remember],
+    [setSelected, setSelectedIds, remember],
   )
 
   const back = useCallback(() => {
@@ -233,7 +252,8 @@ export function App() {
     if (!h.length) return
     setHistory(h.slice(0, -1))
     setSelected((s) => ({ ...s, [a.id]: h[h.length - 1] }))
-  }, [search.open, setSelected])
+    setSelectedIds((s) => ({ ...s, [a.id]: idAt(a.profile, h[h.length - 1]) }))
+  }, [search.open, setSelected, setSelectedIds])
 
   /** Open a note or folder by path; one that is also a nav entry opens as that entry. */
   const openPath = useCallback(
@@ -354,12 +374,13 @@ export function App() {
   const openRecent = useCallback(
     (r: Recent) => {
       const a = activeRef.current
-      const addr = parseKey(r.key)
+      const addr = a?.profile && parseKey(r.key) ? resolveEntry(a.profile, r.key, r.entry) : null
       const item = addr && a?.profile ? getItem(a.profile, addr) : undefined
       if (a && r.step && item?.type === 'folder') {
-        writeLocal('projectTab', { ...readLocal<Record<string, string>>('projectTab', {}), [`${a.id}|${item.path}`]: r.step })
+        // Saved for the project, and heard directly by a project page already showing.
+        showProjectTab(a.id, item.path, r.step)
       }
-      navigate(r.key)
+      navigate(addr ? itemKey(addr) : r.key)
     },
     [navigate],
   )
@@ -536,7 +557,7 @@ export function App() {
       },
       rememberStep: (addr, label) => {
         const item = activeRef.current?.profile ? getItem(activeRef.current.profile, addr) : undefined
-        if (item) remember(itemKey(addr), item.label, label)
+        if (item) remember(itemKey(addr), item.label, label, entryId(item))
       },
     }),
     [run, fail, toasts.push, remember],
@@ -631,6 +652,11 @@ export function App() {
           e.preventDefault()
           switchProfile(p.id)
         }
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        // In a terminal, Ctrl+K belongs to the program (it cuts the line in a shell).
+        if ((e.target as HTMLElement | null)?.closest?.('.xterm')) return
+        e.preventDefault()
+        setSwitcherOpen((o) => !o)
       } else if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         searchRef.current?.focus()
@@ -677,11 +703,20 @@ export function App() {
       const name = key.slice(CONTEXT_KEY.length) as ContextFolder
       return CONTEXT_FOLDERS.includes(name) ? { kind: 'context', name } : null
     }
-    const addr = parseKey(key)
+    const addr = key ? resolveEntry(active.profile, key, selectedIds[active.id]) : null
     const item = addr ? getItem(active.profile, addr) : undefined
     if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
     return { kind: 'entry', addr, item }
-  }, [active, selected])
+  }, [active, selected, selectedIds])
+
+  // The selected entry moved or was renamed: keep its new address and identity.
+  useEffect(() => {
+    if (!active || selection?.kind !== 'entry') return
+    const key = itemKey(selection.addr)
+    const id = entryId(selection.item)
+    if (selected[active.id] !== key) setSelected((s) => ({ ...s, [active.id]: key }))
+    if (selectedIds[active.id] !== id) setSelectedIds((s) => ({ ...s, [active.id]: id }))
+  }, [active, selection, selected, selectedIds, setSelected, setSelectedIds])
 
   const lookApi = useMemo<LookApi>(
     () => ({
@@ -743,6 +778,67 @@ export function App() {
     [contextStatus, notesApi, run, navigate, fail, toasts.push],
   )
 
+  /** Everything Ctrl+K offers, built when it opens. */
+  const switchItems = (): SwitchItem[] => {
+    const p = active?.profile
+    if (!active || !p || !state) return []
+    const items: SwitchItem[] = []
+    const where = (addr: ItemAddr) => {
+      const section = p.sections[addr.section]
+      const group = addr.group !== undefined ? section?.items[addr.group] : undefined
+      return group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
+    }
+    for (const [si, section] of p.sections.entries()) {
+      const add = (addr: ItemAddr, item: NavItem) => {
+        if (item.type === 'group') return
+        const key = itemKey(addr)
+        const verb = item.type === 'launch' ? 'Start ' : item.type === 'link' ? 'Open ' : ''
+        items.push({ id: `entry:${entryId(item)}`, kind: 'entry', label: `${verb}${item.label}`, detail: where(addr), run: () => activate(addr, item) })
+        if (item.type !== 'folder') return
+        for (const [i, step] of stepsOf(p, item).entries()) {
+          const outside = step.type === 'launch' || step.type === 'link'
+          items.push({
+            id: `step:${entryId(item)}|${step.label}`,
+            kind: 'step',
+            label: `${item.label} › ${step.label}`,
+            detail: outside ? (step.type === 'launch' ? 'Start in the project' : 'Open link') : where(addr),
+            run: () => (outside ? projectActions.launchStep(addr, i, step.label, step.type as 'launch' | 'link') : openRecent({ key, step: step.label, label: item.label, entry: entryId(item), at: 0 })),
+          })
+        }
+        items.push({ id: `action:chat:${entryId(item)}`, kind: 'action', label: `New chat in ${item.label}`, detail: item.path, run: () => void newChatIn(addr) })
+      }
+      for (const [i, item] of section.items.entries()) {
+        add({ section: si, index: i }, item)
+        if (item.type === 'group') for (const [ci, child] of item.items.entries()) add({ section: si, group: i, index: ci }, child)
+      }
+    }
+    for (const n of notesList) items.push({ id: `note:${n.path}`, kind: 'note', label: n.name, detail: n.rel ?? n.path, run: () => openNote(n.path) })
+    if (contextStatus?.ready) {
+      for (const f of contextStatus.folders) items.push({ id: `context:${f.name}`, kind: 'context', label: CONTEXT_LABEL[f.name], detail: f.path, run: () => navigate(CONTEXT_KEY + f.name) })
+    }
+    for (const c of chatsApi?.list ?? []) items.push({ id: `chat:${c.id}`, kind: 'chat', label: chatName(c), detail: `${c.cwd} · ${c.state}`, run: () => chatsApi?.open(c) })
+    items.push(
+      { id: 'page:home', kind: 'page', label: 'Home', detail: 'Recent work and today', run: goHome },
+      { id: 'page:setup', kind: 'page', label: 'Claude setup', detail: 'Skills, MCP servers, agents, hooks, plugins', run: () => navigate(SETUP_KEY) },
+    )
+    // New note goes under the heading with the notes (the daily entry's), else the last one.
+    const daily = findEntry(p, 'daily') ?? findEntry(p, 'note')
+    const noteSection = daily ? daily.section : p.sections.length - 1
+    if (noteSection >= 0) {
+      items.push({ id: 'action:note', kind: 'action', label: 'New note…', detail: `Under ${p.sections[noteSection].title}`, run: () => setDialog({ mode: 'note', list: { section: noteSection }, context: `Under ${p.sections[noteSection].title}` }) })
+    }
+    items.push(
+      { id: 'action:look', kind: 'action', label: 'Theme and background…', detail: p.name, run: () => setLookOpen(true) },
+      { id: 'action:agents', kind: 'action', label: 'Agent profiles…', detail: p.name, run: () => setAgentsFor(p.home ?? '~') },
+      { id: 'action:profile', kind: 'action', label: 'Profile settings…', detail: p.name, run: () => setProfileOpen(true) },
+      { id: 'action:edit', kind: 'action', label: 'Edit navigation', detail: 'Drag, add, rename, delete', run: () => setEditing(true) },
+    )
+    for (const [i, q] of state.profiles.entries()) {
+      if (q.id !== active.id) items.push({ id: `action:switch:${q.id}`, kind: 'action', label: `Switch to ${q.profile?.name ?? q.id}`, detail: `Ctrl+${i + 1}`, run: () => switchProfile(q.id) })
+    }
+    return items
+  }
+
   if (!state || !active || !notesApi || !chatsApi) {
     return (
       <div className="empty-state">
@@ -778,6 +874,7 @@ export function App() {
                 onHome={goHome}
                 onLook={() => setLookOpen(true)}
                 onSetup={() => navigate(SETUP_KEY)}
+              onProfileSettings={() => setProfileOpen(true)}
                 setupActive={selection?.kind === 'setup'}
                 contextSelected={selection?.kind === 'context' ? selection.name : null}
               />
@@ -809,6 +906,10 @@ export function App() {
               <Suspense fallback={null}>
                 {lookOpen && profile && (
                   <LookPanel profile={profile} profileId={active.id} run={run} pictureMissing={!!pictureName && picture?.name === pictureName && !picture.url} onClose={() => setLookOpen(false)} />
+                )}
+                {switcherOpen && <QuickSwitcher items={switchItems()} onClose={() => setSwitcherOpen(false)} />}
+                {profileOpen && (
+                  <ProfileDialog active={active} profiles={state.profiles} run={run} onSwitch={switchProfile} onChanged={refresh} onClose={() => setProfileOpen(false)} />
                 )}
                 {agentsFor !== null && profile && (
                   <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />

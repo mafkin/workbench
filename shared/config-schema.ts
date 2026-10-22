@@ -194,6 +194,12 @@ export const Profile = z.object({
   sections: list(Section),
 })
 
+/** A profile's id is its file name: `profiles/<id>.yaml`. */
+export const PROFILE_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
+export const PROFILE_ID_RULE = 'A profile id is lower-case letters, digits, - and _ (up to 32), starting with a letter or digit'
+/** Accents offered for new profiles and in Profile settings. */
+export const ACCENTS = ['#7d93ab', '#8fa58a', '#b39b72', '#a58aa5', '#7fa6a1', '#b38a7d']
+
 export const Settings = z.object({
   activeProfile: z.string().optional(),
   profiles: list(z.string()),

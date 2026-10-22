@@ -2,13 +2,15 @@
 // through a short-lived ticket URL, because media elements cannot send the
 // X-Workbench header; text and Markdown come from the text endpoint.
 import { ExternalLink, FileText, FolderOpen } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { FileEntry, FileText as FileTextData } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { formatDate, formatSize, previewKind, type PreviewKind } from '../lib/files.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { FileIcon } from './FileIcon.tsx'
-import { Markdown } from './Markdown.tsx'
+
+// react-markdown and remark are a large chunk; they load with the first note shown.
+const Markdown = lazy(() => import('./Markdown.tsx').then((m) => ({ default: m.Markdown })))
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -118,7 +120,13 @@ export function TextPreview({ entry, markdown }: { entry: Pick<FileEntry, 'path'
   if (!data.text) return <p className="preview-note">Empty file</p>
   return (
     <>
-      {markdown ? <Markdown text={data.text} notePath={entry.path} /> : <pre className="preview-text">{data.text}</pre>}
+      {markdown ? (
+        <Suspense fallback={null}>
+          <Markdown text={data.text} notePath={entry.path} />
+        </Suspense>
+      ) : (
+        <pre className="preview-text">{data.text}</pre>
+      )}
       {data.truncated && <p className="preview-note">Showing the first 200 KB of {formatSize(data.size)}.</p>}
     </>
   )

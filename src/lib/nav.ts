@@ -1,4 +1,4 @@
-import type { ContextFolder, ItemAddr, ItemType, ListAddr, NavItem, Profile, StepItem } from '../../shared/config-schema.ts'
+import { getItem, type ContextFolder, type ItemAddr, type ItemType, type ListAddr, type NavItem, type Profile, type StepItem } from '../../shared/config-schema.ts'
 
 export const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(' ')
 
@@ -62,6 +62,41 @@ export const CHAT_KEY = 'chat:'
 export const SETUP_KEY = 'setup:'
 /** A context folder's page: `context:inbox`. */
 export const CONTEXT_KEY = 'context:'
+
+/** What identifies an entry besides its address: its type, label and path. */
+export function entryId(item: NavItem): string {
+  return `${item.type}|${item.label}|${'path' in item ? (item.path ?? '') : ''}`
+}
+
+/** Every entry with its address, groups' children included. */
+function allEntries(profile: Profile): { addr: ItemAddr; item: NavItem }[] {
+  const out: { addr: ItemAddr; item: NavItem }[] = []
+  for (const [si, section] of profile.sections.entries()) {
+    for (const [i, item] of section.items.entries()) {
+      out.push({ addr: { section: si, index: i }, item })
+      if (item.type === 'group') for (const [ci, child] of item.items.entries()) out.push({ addr: { section: si, group: i, index: ci }, item: child })
+    }
+  }
+  return out
+}
+
+/**
+ * Where the entry saved as `key` (an address) and `id` (entryId) is now: still
+ * there, moved (the same id elsewhere), or renamed (the same type and path).
+ * Null when it is gone. Without an id, the address is trusted.
+ */
+export function resolveEntry(profile: Profile, key: string, id?: string): ItemAddr | null {
+  const addr = parseKey(key)
+  const item = addr ? getItem(profile, addr) : undefined
+  if (!id) return addr && item ? addr : null
+  if (addr && item && entryId(item) === id) return addr
+  const all = allEntries(profile)
+  const same = all.find((e) => entryId(e.item) === id)
+  if (same) return same.addr
+  const [type, , path] = id.split('|')
+  const renamed = path ? all.find((e) => e.item.type === type && 'path' in e.item && e.item.path === path) : undefined
+  return renamed?.addr ?? null
+}
 
 /** The first entry of a type that matches, searching headings and groups. */
 export function findEntry(profile: Profile, type: ItemType, matches: (item: NavItem) => boolean = () => true): ItemAddr | null {
