@@ -4,14 +4,16 @@
 // its HTML page, a file step one file large, and launcher and link steps open
 // outside. Steps are the project's own `steps:` or, until it has any, the
 // profile's `workflow:`. A chat step is claude (or the shell) in its tab, and
-// chats started with New chat are tabs after the steps. "Claude setup", after
-// All files, is what claude loads in the project folder.
+// chats started with New chat are tabs after the steps. "Git", after All files
+// in a project that is in a repository, is its changes, branches and history;
+// "Claude setup" is what claude loads in the project folder.
 import {
   Blocks,
   ChevronDown,
   ExternalLink,
   FastForward,
   FolderOpen,
+  GitBranch,
   History,
   MessageSquarePlus,
   Palette,
@@ -54,6 +56,7 @@ import {
   type Status,
   type StepItem,
 } from '../../shared/config-schema.ts'
+import type { GitMark } from '../../shared/git.ts'
 import * as api from '../lib/api.ts'
 import { byPin, carriesPaths, CHAT_TAB, droppedPaths, onProjectTab, pasteInto, PATHS_TYPE, quotePaths, useChats } from '../lib/chats.ts'
 import { nameOf, parentOf, previewKind } from '../lib/files.ts'
@@ -79,6 +82,10 @@ export interface ProjectActions {
   /** Servers running (or declared and down) in a project folder, from the last check. */
   servers: (path: string) => { up: number; down: number } | undefined
   openServers: () => void
+  /** The project's repository: branch and counts from the last check; undefined when it isn't in one. */
+  git: (path: string) => GitMark | undefined
+  /** Check the repositories again (after a change in the Git tab). */
+  gitChanged: () => void
 }
 
 export const STATUS_LABEL: Record<Status, string> = { active: 'Active', paused: 'Paused', done: 'Done', archived: 'Archived' }
@@ -106,8 +113,11 @@ const describe = (s: StepItem) =>
   s.type === 'launch' ? [s.command, ...s.args].join(' ') : s.type === 'link' ? s.url : s.type === 'chat' ? `${s.agent === 'shell' ? 'Shell' : 'Claude'} in ${s.path ?? 'the project folder'}` : s.path
 
 const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
+const GitView = lazy(() => import('./GitView.tsx'))
 /** The saved tab of a project showing its Claude setup. */
 const SETUP_TAB = 'setup:'
+/** The saved tab of a project showing its Git tab. */
+export const GIT_TAB = 'git:'
 
 /** Names for the chat colours, in the order of CHAT_COLORS. */
 const COLOR_NAMES = ['Slate', 'Sage', 'Sand', 'Heather', 'Teal', 'Clay', 'Grey']
@@ -127,7 +137,9 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   // Until the list arrives, a chat tab cannot be told from a closed one.
   const waitingForChats = saved.startsWith(CHAT_TAB) && !chats.loaded
   const setupOn = saved === SETUP_TAB
-  const active = activeChat || setupOn ? null : (steps.find((s) => s.label === saved && !opensOutside(s)) ?? null)
+  const gitMark = actions.git(item.path)
+  const gitOn = saved === GIT_TAB
+  const active = activeChat || setupOn || gitOn ? null : (steps.find((s) => s.label === saved && !opensOutside(s)) ?? null)
   const tabId = activeChat ? saved : (active?.label ?? '')
   const [browse, setBrowse] = useState<{ tab: string; top: string } | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -142,7 +154,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const lastPoint = useRef({ x: 0, y: 0 })
   const hasAgents = Object.keys(profile.agents ?? {}).length > 0
   const status = item.status ?? 'active'
-  const crumb = activeChat ? chatName(activeChat) : setupOn ? 'Claude setup' : (active?.label ?? null)
+  const crumb = activeChat ? chatName(activeChat) : setupOn ? 'Claude setup' : gitOn ? 'Git' : (active?.label ?? null)
 
   useEffect(() => onTab(crumb), [crumb])
   // A chat opened from elsewhere (the nav menu, a notification) picks its tab here.
@@ -162,6 +174,11 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
 
   const selectSetup = () => {
     setTabs((t) => ({ ...t, [tabKey]: SETUP_TAB }))
+    setBrowse(null)
+  }
+
+  const selectGit = () => {
+    setTabs((t) => ({ ...t, [tabKey]: GIT_TAB }))
     setBrowse(null)
   }
 
@@ -469,7 +486,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           {item.description || 'Add a description'}
         </p>
       )}
-      <CardDates profileId={profileId} path={item.path} servers={actions.servers(item.path)} onServers={actions.openServers} />
+      <CardDates profileId={profileId} path={item.path} servers={actions.servers(item.path)} onServers={actions.openServers} git={gitMark} onGit={selectGit} />
 
       <div
         className="step-tabs"
@@ -480,10 +497,17 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() })
         }}
       >
-        <button role="tab" aria-selected={!active && !activeChat && !setupOn} className={cx('step-tab', !active && !activeChat && !setupOn && 'active')} onClick={() => select(null)}>
+        <button role="tab" aria-selected={!active && !activeChat && !setupOn && !gitOn} className={cx('step-tab', !active && !activeChat && !setupOn && !gitOn && 'active')} onClick={() => select(null)}>
           <FolderOpen size={14} className="icon" />
           All files
         </button>
+        {(gitMark || gitOn) && (
+          <button role="tab" aria-selected={gitOn} className={cx('step-tab', gitOn && 'active')} onClick={selectGit} title="Changes, commits, branches and history of this project's repository">
+            <GitBranch size={14} className="icon" />
+            Git
+            {gitMark && gitMark.changed + gitMark.conflicts > 0 && <span className={cx('tab-count', gitMark.conflicts > 0 && 'danger')}>{gitMark.changed + gitMark.conflicts}</span>}
+          </button>
+        )}
         <button
           role="tab"
           aria-selected={setupOn}
@@ -618,6 +642,10 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
         <Suspense fallback={null}>
           <ClaudeSetupView profileId={profileId} profile={profile} folder={item.path} />
         </Suspense>
+      ) : gitOn ? (
+        <Suspense fallback={null}>
+          <GitView key={`${profileId}|${item.path}`} profileId={profileId} path={item.path} toast={toast} onChanged={actions.gitChanged} />
+        </Suspense>
       ) : waitingForChats ? null : activeChat ? (
         <ChatPane key={activeChat.id} chat={activeChat} />
       ) : active?.type === 'chat' ? (
@@ -671,11 +699,15 @@ function CardDates({
   path,
   servers,
   onServers,
+  git,
+  onGit,
 }: {
   profileId: string
   path: string
   servers?: { up: number; down: number }
   onServers: () => void
+  git?: GitMark
+  onGit: () => void
 }) {
   const [dates, setDates] = useState<{ created: number | null; updated: number | null; source: 'git' | 'files' } | null>(null)
   useEffect(() => {
@@ -689,10 +721,20 @@ function CardDates({
     }
   }, [profileId, path])
   const running = servers && (servers.up || servers.down)
-  if (!running && (!dates || (!dates.created && !dates.updated))) return null
+  if (!running && !git && (!dates || (!dates.created && !dates.updated))) return null
   const day = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
   return (
     <p className="card-dates">
+      {git && (
+        <>
+          <button className={cx('link-btn card-git', git.conflicts > 0 && 'danger')} onClick={onGit} title="Open the Git tab">
+            <GitBranch size={12} /> {git.branch ?? 'detached'}
+            {git.conflicts > 0 ? ` · ${git.conflicts} in conflict` : git.changed ? ` · ${git.changed} changed` : ''}
+            {git.ahead || git.behind ? ` · ↑${git.ahead} ↓${git.behind}` : ''}
+          </button>
+          {(running || (dates && (dates.created || dates.updated))) && ' · '}
+        </>
+      )}
       {servers && running ? (
         <>
           <button className={cx('link-btn card-servers', servers.down > 0 && 'down')} onClick={onServers}>

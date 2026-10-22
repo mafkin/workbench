@@ -34,6 +34,7 @@ import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
 import type { ProjectActions } from './components/ProjectView.tsx'
+import type { GitMark } from '../shared/git.ts'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
 import { CHAT_TAB, ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
@@ -427,6 +428,34 @@ export function App() {
       clearInterval(timer)
     }
   }, [active?.id])
+  // Each project's repository (branch, changed files, ahead and behind) for the
+  // nav, the cards and whether a project has a Git tab: every 15 s, and after a
+  // change in a Git tab.
+  const [gitScan, setGitScan] = useState<{ profile: string; marks: GitMark[] } | null>(null)
+  const gitLoad = useRef<() => void>(() => {})
+  useEffect(() => {
+    const id = active?.id
+    if (!id) return
+    let live = true
+    const load = () =>
+      api.git.marks(id).then(
+        (marks) => live && setGitScan({ profile: id, marks }),
+        () => {},
+      )
+    gitLoad.current = () => void load()
+    void load()
+    const timer = setInterval(load, 15_000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [active?.id])
+  const gitMarks = useMemo(() => {
+    const marks = new Map<string, GitMark>()
+    if (gitScan && gitScan.profile === active?.id) for (const m of gitScan.marks) marks.set(m.path, m)
+    return marks
+  }, [gitScan, active?.id])
+
   const serverMarks = useMemo(() => {
     const marks = new Map<string, { up: number; down: number }>()
     if (!serverScan || serverScan.profile !== active?.id) return marks
@@ -593,8 +622,10 @@ export function App() {
       },
       servers: (path) => serverMarks.get(path),
       openServers: () => navigate(SERVERS_KEY),
+      git: (path) => gitMarks.get(path),
+      gitChanged: () => gitLoad.current(),
     }),
-    [run, fail, toasts.push, remember, serverMarks, navigate],
+    [run, fail, toasts.push, remember, serverMarks, gitMarks, navigate],
   )
 
   const itemMenu = useCallback(

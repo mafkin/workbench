@@ -429,7 +429,8 @@ export class Git {
     const has = (f: string) => fs.existsSync(path.join(r.gitDir, f))
     if (has('MERGE_HEAD')) {
       const msg = await fsp.readFile(path.join(r.gitDir, 'MERGE_MSG'), 'utf8').catch(() => '')
-      return { kind: 'merge', label: msg.split('\n')[0] || null }
+      const first = msg.split('\n')[0]
+      return { kind: 'merge', label: first ? first.split(this.#home + '/').join('~/') : null }
     }
     if (has('rebase-merge') || has('rebase-apply')) return { kind: 'rebase', label: null }
     if (has('CHERRY_PICK_HEAD')) return { kind: 'cherry-pick', label: null }
