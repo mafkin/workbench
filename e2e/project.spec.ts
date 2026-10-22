@@ -8,7 +8,8 @@ const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workflow' })
 const tab = (page: Page, name: string) => tabs(page).getByRole('tab', { name, exact: true })
-const tabNames = (page: Page) => tabs(page).locator('.step-tab:not(.add)').allInnerTexts()
+// Alpha is a git repository, so it has a Git tab (its count of changed files left out).
+const tabNames = async (page: Page) => (await tabs(page).locator('.step-tab:not(.add)').allInnerTexts()).map((t) => t.split('\n')[0].trim())
 const row = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
 const workYaml = () => fsp.readFile(WORK_FILE, 'utf8')
 
@@ -26,7 +27,7 @@ test.beforeEach(async ({ page }) => {
 
 test('a project shows its workflow steps as tabs, and All files is the project', async ({ page }) => {
   await entry(page, 'Alpha').click()
-  expect(await tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
+  expect(await tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme', 'build'])
   await expect(tab(page, 'All files')).toHaveAttribute('aria-selected', 'true')
   await expect(row(page, 'README.md')).toBeVisible()
   await page.screenshot({ path: 'test-results/project-tabs.png' })
@@ -71,7 +72,7 @@ test('adding a step copies the profile steps into the project, and a missing fol
   await expect(dialog).toContainText('Not found on disk')
   await dialog.getByRole('button', { name: 'Add' }).click()
   await expect(dialog).toHaveCount(0)
-  expect(await tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build', 'assets'])
+  expect(await tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme', 'build', 'assets'])
 
   const yaml = await workYaml()
   expect(yaml).toMatch(/path: ~\/alpha\n\s+steps:\n/)
@@ -95,20 +96,20 @@ test('steps can be edited, reordered and removed; Reset brings back the profile 
   await expect(tab(page, 'intro')).toBeVisible()
 
   await tabs(page).getByRole('button', { name: 'build' }).dragTo(tab(page, 'sources'))
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'build', 'sources', 'intro'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'build', 'sources', 'intro'])
 
   await stepMenu(page, 'intro', 'Remove')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'build', 'sources'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'build', 'sources'])
 
   await stepMenu(page, 'sources', 'Reset to profile steps')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme', 'build'])
   expect(await workYaml()).not.toContain('steps:')
 })
 
 test("one project's steps can become every project's", async ({ page }) => {
   await entry(page, 'Alpha').click()
   await stepMenu(page, 'build', 'Remove')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme'])
   await stepMenu(page, 'readme', 'Use these steps for every project')
   await expect.poll(async () => (await workYaml()).includes('command: make')).toBe(false)
   expect(await workYaml()).not.toContain('steps:')

@@ -2,8 +2,9 @@
 // A stand-in for the claude CLI in tests: no network, no model. It prints what it
 // was started with, echoes what you type, keeps a transcript where claude would,
 // rings the bell on "ring", works for a while on "work", and answers -p with a
-// canned summary. Runs SessionStart hooks from --settings, and "clear" starts
-// a new session as /clear does.
+// canned summary (or, asked for a commit message, one made from the diff on
+// stdin). Runs SessionStart hooks from --settings, and "clear" starts a new
+// session as /clear does.
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -17,7 +18,7 @@ const flag = (name) => {
 }
 // Flags that take one value, and lists that take every word up to the next flag.
 const VALUED = new Set(['--settings', '--session-id', '--resume', '-r', '--model', '-n', '--name', '--agent', '--effort', '--permission-mode', '--append-system-prompt'])
-const LISTS = new Set(['--add-dir', '--allowedTools', '--disallowedTools', '--mcp-config'])
+const LISTS = new Set(['--add-dir', '--allowedTools', '--disallowedTools', '--mcp-config', '--tools'])
 const positional = []
 for (let i = 0; i < argv.length; i++) {
   if (VALUED.has(argv[i])) i++
@@ -48,6 +49,14 @@ function sessionStart(source) {
 }
 
 if (argv.includes('-p') || argv.includes('--print')) {
+  // A commit message: drafted from the diff on stdin, naming the first file and the tools flag.
+  if (positional.join(' ').includes('commit message')) {
+    const diff = fs.readFileSync(0, 'utf8')
+    const file = /^diff --git a\/(\S+)/m.exec(diff)?.[1] ?? 'nothing'
+    const tools = argv.includes('--tools') ? JSON.stringify(argv[argv.indexOf('--tools') + 1]) : 'default'
+    process.stdout.write(`Update ${file}\n\nDrafted from ${diff.split('\n').length} lines; tools=${tools}.\n`)
+    process.exit(0)
+  }
   process.stdout.write(`SUMMARY of ${session}: fixed the parser; next, the tests.\n`)
   process.exit(0)
 }

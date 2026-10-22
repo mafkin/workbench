@@ -42,7 +42,8 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 5¾ | Sidebar open buttons, themes and backgrounds | Done (same branch); see below |
 | 6 | Skills & MCP panel (built as Claude setup) | Done (same branch); see below |
 | 7 | Context folders | Done (same branch); see below |
-| 8 | Polish | |
+| 8 | Polish, the known gaps, Servers | Done (same branch); merged to `main` with parts 2–7 (PR #1) |
+| 9 | Git per project | Done; merged to `main`; see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -317,6 +318,32 @@ The user asked: launchers in the sidebar started on a single click of their name
   - A Tauri window.
   - Servers: no logs or restart (Workbench didn't start them), UDP isn't listed, and a server started outside a project folder isn't shown even if it serves that project.
   - Upload has no progress bar; copying to another drive works, moving there is still refused.
+
+### Part 9: Git per project (done)
+
+- **Decisions (2026-10-22):**
+
+  | Question | Answer |
+  | --- | --- |
+  | What part 9 is | Git per project (over project tasks and logs, a tasks board from notes, and assets and media) |
+  | Actions | Stage and commit; pull, push and fetch; branches; discard and stash |
+  | Staging | By hunk, unified diff |
+  | Marks | Card and nav |
+  | Commit messages | A Draft button (`claude -p` on the staged diff); never commits by itself |
+  | Fetch | Every 10 minutes in the background, and when the tab opens |
+  | History | A list plus commit details |
+  | Conflicts | Listed; resolved elsewhere (note, default app, or Ask claude in a chat); Mark resolved and Abort |
+  | The tab | Built in after All files, in every project that is in a repository |
+
+- **Built:**
+  - `server/git.ts` (`Git`), `shared/git.ts`, routes `/api/git/*`; `Chats.print` for Draft (`-p <prompt> --no-session-persistence --tools ""`).
+  - `GitView.tsx`, `GitDiff.tsx`, `src/lib/git.ts`; the tab and card line in `ProjectView`, `GitMarkView` in the nav, marks polled in `App`, Ctrl+K "<project> › Git".
+  - Safety: `core.fsmonitor` off for every git run (tested with a monitor script that would make a file), no prompts, no shell, requests name the project and only things git lists, hunks found again by hash, error text masked.
+- **Choices made while building:**
+  - A conflicted file that isn't Markdown opens in its default app (where it can be edited), not in the read-only file preview.
+  - Untracked files are listed one by one (`--untracked-files=all`) in the tab; the nav's counts use `normal` (a new folder counts once) to stay cheap.
+  - Discard's Undo is kept in memory for an hour; the content itself is a git object.
+- **Left for later:** rebase, cherry-pick, tags, submodules, force push, editing remotes, `git init` and clone, a branch graph, resolving conflicts inside the tab (ours/theirs per file).
 
 ## Reference
 

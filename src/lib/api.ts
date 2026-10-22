@@ -17,6 +17,7 @@ import type {
   ServersScan,
 } from '../../shared/config-schema.ts'
 import type { ClaudeSetup, McpCheck } from '../../shared/claude-setup.ts'
+import type { Branch, Commit, CommitDetail, DiscardResult, GitDiff, GitMark, GitStatus } from '../../shared/git.ts'
 
 export class ApiError extends Error {
   status: number
@@ -167,4 +168,35 @@ export async function noteImage(profile: string, path: string): Promise<Blob> {
   const res = await fetch(`/api/notes/asset?${query({ profile, path })}`, { headers: { 'x-workbench': '1' } })
   if (!res.ok) throw new ApiError(res.statusText, res.status)
   return res.blob()
+}
+
+// Git per project: `path` is the project's folder entry path, as in the config.
+type GitAt = { profile: string; path: string }
+type GitChange = { files?: string[]; all?: boolean; hunk?: { file: string; id: string } }
+/** A change answers with what it did and the status it left. */
+type GitDone<T = object> = T & { status: GitStatus }
+export const git = {
+  marks: (profile: string) => api<GitMark[]>(`/api/git/marks?${query({ profile })}`),
+  status: (at: GitAt) => api<GitStatus>(`/api/git/status?${query(at)}`),
+  diff: (at: GitAt, file: string, staged: boolean) => api<GitDiff>(`/api/git/diff?${query({ ...at, file, staged: staged ? '1' : '0' })}`),
+  stage: (at: GitAt, change: GitChange) => api<GitDone>('/api/git/stage', { body: { ...at, ...change } }),
+  unstage: (at: GitAt, change: GitChange) => api<GitDone>('/api/git/unstage', { body: { ...at, ...change } }),
+  discard: (at: GitAt, change: GitChange) => api<GitDone<DiscardResult>>('/api/git/discard', { body: { ...at, ...change } }),
+  undo: (at: GitAt, undo: string) => api<GitDone<{ restored: string[]; skipped: { path: string; reason: string }[] }>>('/api/git/undo', { body: { ...at, undo } }),
+  commit: (at: GitAt, message: string, amend: boolean) => api<GitDone<{ commit: Commit }>>('/api/git/commit', { body: { ...at, message, amend } }),
+  draft: (at: GitAt) => api<{ message: string }>('/api/git/draft', { body: at }),
+  branches: (at: GitAt) => api<Branch[]>(`/api/git/branches?${query(at)}`),
+  branch: (at: GitAt, b: { action: 'switch' | 'create' | 'rename' | 'delete'; name: string; to?: string; carry?: 'carry' | 'stash'; force?: boolean }) =>
+    api<GitDone>('/api/git/branch', { body: { ...at, ...b } }),
+  stash: (at: GitAt, s: { action: 'push' | 'pop' | 'apply' | 'drop'; index?: number; hash?: string; message?: string }) =>
+    api<GitDone<{ conflicts: boolean }>>('/api/git/stash', { body: { ...at, ...s } }),
+  fetch: (at: GitAt, quiet = false) => api<GitDone>('/api/git/fetch', { body: { ...at, quiet } }),
+  pull: (at: GitAt, merge = false) => api<GitDone<{ conflicts: boolean }>>('/api/git/pull', { body: { ...at, merge } }),
+  push: (at: GitAt, publish = false) => api<GitDone>('/api/git/push', { body: { ...at, publish } }),
+  resolve: (at: GitAt, file: string, force = false) => api<GitDone>('/api/git/resolve', { body: { ...at, file, force } }),
+  abort: (at: GitAt) => api<GitDone>('/api/git/abort', { body: at }),
+  ask: (at: GitAt, files: string[]) => api<Chat>('/api/git/ask', { body: { ...at, files } }),
+  log: (at: GitAt, skip = 0) => api<Commit[]>(`/api/git/log?${query({ ...at, skip: String(skip) })}`),
+  commitDetail: (at: GitAt, hash: string) => api<CommitDetail>(`/api/git/commit?${query({ ...at, hash })}`),
+  commitDiff: (at: GitAt, hash: string, file: string) => api<GitDiff>(`/api/git/commit?${query({ ...at, hash, file })}`),
 }
