@@ -13,11 +13,13 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Blocks, ChevronDown, ExternalLink, FilePlus, GripVertical, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { Blocks, BookOpen, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { chatProgram, entrySlot, itemKey, projectHost, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import { chatProgram, CONTEXT_LABEL, entrySlot, itemKey, projectHost, type ContextFolder, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import { useContextFolders } from '../lib/context.ts'
 import type { Connection } from '../lib/events.ts'
 import { useLocal } from '../lib/local.ts'
+import { useNotes } from '../lib/notes-ctx.ts'
 import { cx, describeTarget, opensExternally, sameList, type DialogState, type DragData, type DropData, type MenuEntry, type MenuState } from '../lib/nav.ts'
 import { EntryIcon } from './EntryIcon.tsx'
 
@@ -49,6 +51,8 @@ interface Props extends NavActions {
   /** Open the Claude setup page; `setupActive` while it shows. */
   onSetup: () => void
   setupActive: boolean
+  /** The context folder whose page shows, if one does. */
+  contextSelected: ContextFolder | null
 }
 
 const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState; showArchive: boolean }>(null!)
@@ -218,6 +222,7 @@ export function NavPanel(props: Props) {
       )}
 
       <div className="nav-scroll">
+        {profile && <ContextBlock selected={props.contextSelected} isCollapsed={props.isCollapsed} toggleCollapsed={props.toggleCollapsed} />}
         {profile && (
           <Ctx.Provider
             value={{
@@ -426,6 +431,76 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
         </span>
       </div>
       {open && <ItemList list={{ section: index }} items={items} />}
+    </div>
+  )
+}
+
+const CONTEXT_ICON: Record<ContextFolder, LucideIcon> = { context: IdCard, knowledge: BookOpen, processes: Workflow, inbox: Inbox }
+
+/**
+ * The profile's context folders, a fixed heading above the configured ones:
+ * not part of the YAML, so never dragged or edited. Before it is set up, one
+ * row offers to set it up.
+ */
+function ContextBlock({
+  selected,
+  isCollapsed,
+  toggleCollapsed,
+}: {
+  selected: ContextFolder | null
+  isCollapsed: Props['isCollapsed']
+  toggleCollapsed: Props['toggleCollapsed']
+}) {
+  const ctx = useContextFolders()
+  const notes = useNotes()
+  const status = ctx?.status
+  if (!ctx || !status) return null
+  const open = !isCollapsed('context', false)
+  const toggle = () => toggleCollapsed('context', false)
+  return (
+    <div className="section context-section" role="group" aria-label="Context">
+      <div className="section-head">
+        <ChevronDown size={13} className={cx('chevron', !open && 'closed')} onClick={toggle} />
+        <span className="title" onClick={toggle}>
+          Context
+        </span>
+        {!open && status.inbox > 0 && <span className="count" title="In the inbox">{status.inbox}</span>}
+      </div>
+      {open && (
+        <div className="items">
+          {status.ready ? (
+            status.folders.map((f) => {
+              const Icon = CONTEXT_ICON[f.name]
+              const on = selected === f.name
+              return (
+                <div
+                  key={f.name}
+                  role="link"
+                  tabIndex={0}
+                  className={cx('item', on && 'selected', !f.exists && 'missing')}
+                  aria-current={on ? 'page' : undefined}
+                  title={f.exists ? f.path : `${f.path} (not there)`}
+                  onClick={() => ctx.open(f.name)}
+                  onKeyDown={(e) => e.key === 'Enter' && ctx.open(f.name)}
+                >
+                  <Icon size={15} className="icon" />
+                  <span className="label">{CONTEXT_LABEL[f.name]}</span>
+                  {f.name === 'inbox' && status.inbox > 0 && (
+                    <span className="inbox-count" aria-label={`${status.inbox} in the inbox`}>
+                      {status.inbox}
+                    </span>
+                  )}
+                </div>
+              )
+            })
+          ) : (
+            <button className="item context-setup" onClick={() => ctx.setup()} title="Creates context, knowledge, processes and inbox with starter notes">
+              <FolderPlus size={15} className="icon" />
+              <span className="label">Set up context in {status.notes ?? notes.suggestedRoot}</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

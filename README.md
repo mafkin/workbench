@@ -158,6 +158,29 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - A chat keeps the settings it started with: **Resume** uses them, **New session** uses the profile as it is now (and sends its first prompt again), and Summarize and continue keeps the flags but not the first prompt.
 - Renaming a profile updates everything that names it. A profile still in use can't be deleted; the message says where it's used.
 
+### Context
+
+- **Context** is claude's standing memory for a profile: who you are, how you like things done, what you're aiming for, what you've learned, the workflows you repeat, and an inbox. It lives in the profile's notes folder:
+  - `context/`: `identity.md`, `preferences.md`, `goals.md`, and `README.md`, the routing note ("Remember how I want reports written" → `context/preferences.md`).
+  - `knowledge/`: facts and how-tos, one topic per note.
+  - `processes/`: workflows you repeat.
+  - `inbox/`: handoffs and files to look at later.
+- **Setting it up:**
+  - The **Context** heading at the top of the sidebar starts with **Set up context in ~/notes**. It creates the folders and starter notes, never overwriting a file.
+  - A profile without `notes:` gets `notes: ~/notes` (or `<home>/notes`) at the same time.
+  - After that, the heading lists **Context**, **Knowledge**, **Processes** and **Inbox**.
+- **Context** opens with tabs for its notes (Identity, Preferences, Goals, **Where things go**), editable in place, beside All files. The other three open their folder in the file browser. They're ordinary notes, so search and `[[wiki links]]` find them.
+- **Every claude chat** (not shells) starts with the context:
+  - `--add-dir` for the four folders, so claude can read and update them.
+  - Appended to its system prompt: where the folders are, the routing note, and the text of identity, preferences and goals (up to 16 KB).
+  - Agent profiles keep their own instructions and folders, and the context is added after them.
+  - The chat bar shows **context**.
+  - A chat keeps what it started with; a new chat picks up your edits.
+- **Inbox:**
+  - The nav shows how many things are in it.
+  - **Summarize and continue** also saves its summary there as `YYYY-MM-DD HH.MM <chat>.md`.
+  - **Send to inbox** in the file browser's right-click menu copies a file there. A name that's taken gets a number, and nothing is overwritten.
+
 ### Claude setup
 
 - **Claude setup** shows what claude loads, read-only: **skills**, **MCP servers**, **agents**, **commands**, **hooks** and **plugins**. Each item has a badge for where it comes from:
@@ -227,13 +250,15 @@ Paths are checked after resolving symlinks, so `..` or a link can't reach anythi
 
 Agent profiles only choose flags for claude (`--model`, `--permission-mode` and the rest), from your YAML; a request names a profile, never flags. A chat is shell access, so its terminal socket (`/pty/`) needs more: browsers can't add the `X-Workbench` header to a WebSocket, so it must come from Workbench's own `Origin`, and it carries a random token that changes every time the service starts, which only the app can read through the API. Chats start from an entry or step in your config, by its position; a request never carries a command or arguments, and **Chat here** only works inside the profile's folders. Claude's transcripts in `~/.claude/projects/` are read for History, never written.
 
+**Context** is set up only when you ask, and only inside the profile's notes folder; it never overwrites a file. **Send to inbox** copies only files from the profile's folders (checked after resolving symlinks), under a free name.
+
 **Claude setup** reads claude's files and never writes them. Secret values are masked in the service, so they never reach the browser, and only the MCP servers' keys and the open folder's entry are read from `~/.claude.json`. A check names a server by its id; the command or URL comes from claude's files, read again at that moment, never from the request. It runs only servers claude would start. One that claude hasn't approved yet runs only after you confirm. Folders are limited to the profile's own.
 
 ## Development
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, Claude setup, MCP checks, HTTP API
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, HTTP API
 npm run e2e        # Playwright against a throwaway config; programs are not started, chats and MCP checks run stand-ins
 npm run build      # type check + production build
 ```
@@ -249,9 +274,10 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/files.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; the folders a profile may reach; folder watching |
 | `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
 | `server/chats.ts`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list; reading claude's transcripts for History; agent profiles as claude flags |
+| `server/context.ts` | context folders: status, setup, what a chat is told, handoffs and files into the inbox |
 | `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
-| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats, Claude setup |
+| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats, context, Claude setup |
 
 ## Roadmap
 
@@ -262,5 +288,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 4 | Project cards (done) |
 | 5 | Agent chats (done) |
 | 6 | Claude setup: skills, MCP servers and more (done) |
-| 7 | Context folders |
+| 7 | Context folders (done) |
 | 8 | Polish (Ctrl+K switcher, systemd user service) |

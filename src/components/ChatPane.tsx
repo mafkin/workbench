@@ -117,6 +117,11 @@ export function ChatPane({ chat, start, historyPath }: Props) {
             <ShieldAlert size={13} />
           </span>
         )}
+        {chat.context && (
+          <span className="chat-context" title="Started with this profile's context folders: --add-dir and the routing note">
+            context
+          </span>
+        )}
         <span className="mono chat-where" title={chat.cwd}>
           {chat.cwd}
         </span>

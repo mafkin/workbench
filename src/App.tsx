@@ -2,6 +2,8 @@ import { Archive, ArchiveRestore, ExternalLink, FilePlus, FolderOpen, Pencil, Pi
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   chatName,
+  CONTEXT_FOLDERS,
+  CONTEXT_LABEL,
   entrySlot,
   expandHome,
   getItem,
@@ -12,6 +14,8 @@ import {
   themeOf,
   type AppState,
   type Chat,
+  type ContextFolder,
+  type ContextStatus,
   type ItemAddr,
   type ItemInput,
   type ListAddr,
@@ -30,11 +34,13 @@ import type { ProjectActions } from './components/ProjectView.tsx'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
 import { CHAT_TAB, ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
-import { followState, onChatsEvent, type Connection } from './lib/events.ts'
+import { ContextCtx, type ContextApi } from './lib/context.ts'
+import { followState, onChatsEvent, onContextEvent, type Connection } from './lib/events.ts'
 import { nameOf } from './lib/files.ts'
 import { readLocal, useLocal, writeLocal } from './lib/local.ts'
 import {
   CHAT_KEY,
+  CONTEXT_KEY,
   cx,
   FILES_KEY,
   findEntry,
@@ -206,6 +212,7 @@ export function App() {
       setSearch((s) => (s.open ? { ...s, open: false } : s))
       if (!key) return
       if (key.startsWith(NOTE_KEY) || key.startsWith(FILES_KEY)) remember(key, nameOf(key.slice(key.indexOf(':') + 1)))
+      else if (key.startsWith(CONTEXT_KEY)) remember(key, CONTEXT_LABEL[key.slice(CONTEXT_KEY.length) as ContextFolder] ?? 'Context')
       else {
         const addr = parseKey(key)
         const item = addr && a.profile ? getItem(a.profile, addr) : undefined
@@ -377,6 +384,23 @@ export function App() {
     refreshChats()
     return onChatsEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshChats())
   }, [active?.id, refreshChats])
+
+  // The active profile's context folders: the nav heading, the context pages, Send to inbox.
+  const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null)
+  const refreshContext = useCallback(() => {
+    const a = activeRef.current
+    if (!a?.profile) return setContextStatus(null)
+    const id = a.id
+    api.contextStatus(id).then(
+      (s) => activeRef.current?.id === id && setContextStatus(s),
+      () => activeRef.current?.id === id && setContextStatus(null),
+    )
+  }, [])
+  useEffect(() => {
+    setContextStatus(null)
+    refreshContext()
+    return onContextEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshContext())
+  }, [active?.id, active?.profile?.notes, refreshContext])
 
   /** Put a chat the service just returned into the list, so its tab shows before the next event. */
   const upsertChat = useCallback((chat: Chat) => {
@@ -649,6 +673,10 @@ export function App() {
     if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
     if (key?.startsWith(CHAT_KEY)) return { kind: 'chat', id: key.slice(CHAT_KEY.length) }
     if (key === SETUP_KEY) return { kind: 'setup' }
+    if (key?.startsWith(CONTEXT_KEY)) {
+      const name = key.slice(CONTEXT_KEY.length) as ContextFolder
+      return CONTEXT_FOLDERS.includes(name) ? { kind: 'context', name } : null
+    }
     const addr = parseKey(key)
     const item = addr ? getItem(active.profile, addr) : undefined
     if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
@@ -687,6 +715,34 @@ export function App() {
     }
   }, [active, setRoot, notesList, openNote, missingNote, notesChanged, toasts.push, fresh])
 
+  const contextApi = useMemo<ContextApi>(
+    () => ({
+      status: contextStatus,
+      setup: async () => {
+        const a = activeRef.current
+        if (!a?.profile) return
+        // Context lives in the notes folder; a profile without one gets the usual one first.
+        if (!a.profile.notes && notesApi && !(await run([{ op: 'setProfileField', key: 'notes', value: notesApi.suggestedRoot }], `Notes folder set to ${notesApi.suggestedRoot}`))) return
+        try {
+          setContextStatus(await api.setupContext(a.id))
+          navigate(CONTEXT_KEY + 'context')
+        } catch (err) {
+          fail(err)
+        }
+      },
+      open: (name) => navigate(CONTEXT_KEY + name),
+      sendToInbox: (path) => {
+        const a = activeRef.current
+        if (!a) return
+        api.sendToInbox(a.id, path).then(
+          (r) => toasts.push({ message: `Copied to the inbox as ${nameOf(r.path)}`, action: { label: 'Open inbox', run: () => navigate(CONTEXT_KEY + 'inbox') } }),
+          fail,
+        )
+      },
+    }),
+    [contextStatus, notesApi, run, navigate, fail, toasts.push],
+  )
+
   if (!state || !active || !notesApi || !chatsApi) {
     return (
       <div className="empty-state">
@@ -697,84 +753,87 @@ export function App() {
 
   return (
     <NotesCtx.Provider value={notesApi}>
-      <ChatsCtx.Provider value={chatsApi}>
-        <LookCtx.Provider value={lookApi}>
-          <div className={cx('app', resizing && 'resizing', background !== 'none' && 'backdrop')} style={{ '--nav-w': `${navWidth}px` } as React.CSSProperties}>
-            <NavPanel
-              profiles={state.profiles}
-              active={active}
-              connection={connection}
-              editing={editing && !active.error}
-              setEditing={setEditing}
-              selectedKey={selection?.kind === 'entry' ? itemKey(selection.addr) : undefined}
-              isCollapsed={(key, fallback) => collapsed[key] ?? fallback}
-              toggleCollapsed={(key, fallback) => setCollapsed((c) => ({ ...c, [key]: !(c[key] ?? fallback) }))}
-              activate={activate}
-              run={run}
-              openDialog={setDialog}
-              openMenu={openMenu}
-              itemMenu={itemMenu}
-              chatMarks={chatMarks}
-              notify={(message, kind) => toasts.push({ message, kind })}
-              onSwitch={switchProfile}
-              onResizeStart={onResizeStart}
-              onHome={goHome}
-              onLook={() => setLookOpen(true)}
-              onSetup={() => navigate(SETUP_KEY)}
-              setupActive={selection?.kind === 'setup'}
-            />
-            <MainPane
-              active={active}
-              selected={selection}
-              search={search}
-              setSearch={setSearch}
-              searchRef={searchRef}
-              canGoBack={search.open || history.length > 0}
-              onBack={back}
-              openFolder={openFolder}
-              toast={toasts.push}
-              home={state.home}
-              actions={projectActions}
-              recent={recent[active.id] ?? []}
-              openRecent={openRecent}
-              onHome={goHome}
-              activate={activate}
-              openExternally={openExternally}
-              startEditing={() => setEditing(true)}
-            />
-            {dialog?.mode === 'note' ? (
-              <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
-            ) : (
-              dialog && <ItemDialog dialog={dialog} agents={Object.keys(profile?.agents ?? {})} onClose={() => setDialog(null)} onSubmit={submitDialog} />
-            )}
-            {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
-            <Suspense fallback={null}>
-              {lookOpen && profile && (
-                <LookPanel profile={profile} profileId={active.id} run={run} pictureMissing={!!pictureName && picture?.name === pictureName && !picture.url} onClose={() => setLookOpen(false)} />
+      <ContextCtx.Provider value={contextApi}>
+        <ChatsCtx.Provider value={chatsApi}>
+          <LookCtx.Provider value={lookApi}>
+            <div className={cx('app', resizing && 'resizing', background !== 'none' && 'backdrop')} style={{ '--nav-w': `${navWidth}px` } as React.CSSProperties}>
+              <NavPanel
+                profiles={state.profiles}
+                active={active}
+                connection={connection}
+                editing={editing && !active.error}
+                setEditing={setEditing}
+                selectedKey={selection?.kind === 'entry' ? itemKey(selection.addr) : undefined}
+                isCollapsed={(key, fallback) => collapsed[key] ?? fallback}
+                toggleCollapsed={(key, fallback) => setCollapsed((c) => ({ ...c, [key]: !(c[key] ?? fallback) }))}
+                activate={activate}
+                run={run}
+                openDialog={setDialog}
+                openMenu={openMenu}
+                itemMenu={itemMenu}
+                chatMarks={chatMarks}
+                notify={(message, kind) => toasts.push({ message, kind })}
+                onSwitch={switchProfile}
+                onResizeStart={onResizeStart}
+                onHome={goHome}
+                onLook={() => setLookOpen(true)}
+                onSetup={() => navigate(SETUP_KEY)}
+                setupActive={selection?.kind === 'setup'}
+                contextSelected={selection?.kind === 'context' ? selection.name : null}
+              />
+              <MainPane
+                active={active}
+                selected={selection}
+                search={search}
+                setSearch={setSearch}
+                searchRef={searchRef}
+                canGoBack={search.open || history.length > 0}
+                onBack={back}
+                openFolder={openFolder}
+                toast={toasts.push}
+                home={state.home}
+                actions={projectActions}
+                recent={recent[active.id] ?? []}
+                openRecent={openRecent}
+                onHome={goHome}
+                activate={activate}
+                openExternally={openExternally}
+                startEditing={() => setEditing(true)}
+              />
+              {dialog?.mode === 'note' ? (
+                <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
+              ) : (
+                dialog && <ItemDialog dialog={dialog} agents={Object.keys(profile?.agents ?? {})} onClose={() => setDialog(null)} onSubmit={submitDialog} />
               )}
-              {agentsFor !== null && profile && (
-                <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
+              {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+              <Suspense fallback={null}>
+                {lookOpen && profile && (
+                  <LookPanel profile={profile} profileId={active.id} run={run} pictureMissing={!!pictureName && picture?.name === pictureName && !picture.url} onClose={() => setLookOpen(false)} />
+                )}
+                {agentsFor !== null && profile && (
+                  <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
+                )}
+              </Suspense>
+              {closing && (
+                <ConfirmDialog
+                  title={`Close ${chatName(closing)}?`}
+                  action="Close"
+                  onCancel={() => setClosing(null)}
+                  onConfirm={() => {
+                    setClosing(null)
+                    void closeChat(closing)
+                  }}
+                >
+                  {closing.agent === 'claude'
+                    ? 'claude stops. The conversation stays in History, where you can resume it.'
+                    : 'The shell, and anything running in it, stops.'}
+                </ConfirmDialog>
               )}
-            </Suspense>
-            {closing && (
-              <ConfirmDialog
-                title={`Close ${chatName(closing)}?`}
-                action="Close"
-                onCancel={() => setClosing(null)}
-                onConfirm={() => {
-                  setClosing(null)
-                  void closeChat(closing)
-                }}
-              >
-                {closing.agent === 'claude'
-                  ? 'claude stops. The conversation stays in History, where you can resume it.'
-                  : 'The shell, and anything running in it, stops.'}
-              </ConfirmDialog>
-            )}
-            <Toasts list={toasts.list} dismiss={toasts.dismiss} />
-          </div>
-        </LookCtx.Provider>
-      </ChatsCtx.Provider>
+              <Toasts list={toasts.list} dismiss={toasts.dismiss} />
+            </div>
+          </LookCtx.Provider>
+        </ChatsCtx.Provider>
+      </ContextCtx.Provider>
     </NotesCtx.Provider>
   )
 }

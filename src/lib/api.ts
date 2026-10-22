@@ -2,6 +2,7 @@ import type {
   AppState,
   Chat,
   ClaudeSession,
+  ContextStatus,
   FileListing,
   FileOp,
   FileOpResult,
@@ -104,6 +105,11 @@ export const chatHistory = (profile: string, path: string) => api<ClaudeSession[
 export const claudeAgents = (profile: string, path: string) => api<string[]>(`/api/chats/claude-agents?${query({ profile, path })}`)
 /** The token a chat's terminal socket needs; new each time the service starts. */
 export const chatToken = () => api<{ token: string }>('/api/chats/token').then((r) => r.token)
+
+// Context folders: set up on request; files are copied into the inbox, never overwriting.
+export const contextStatus = (profile: string) => api<ContextStatus>(`/api/context?${query({ profile })}`)
+export const setupContext = (profile: string) => api<ContextStatus>('/api/context/setup', { body: { profile } })
+export const sendToInbox = (profile: string, path: string) => api<{ path: string }>('/api/context/inbox', { body: { profile, path } })
 
 // Claude setup: read-only and masked. `folder` adds that folder's project and local items.
 const inFolder = (folder: string | null): Record<string, string> => (folder ? { path: folder } : {})

@@ -14,6 +14,7 @@ import {
   FolderOpen,
   FolderPlus,
   ImageIcon,
+  Inbox,
   ListFilter,
   PencilLine,
   Trash2,
@@ -22,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { expandHome, type FileEntry, type FileOp, type FileOpResult, type MoveResult } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { PATHS_TYPE } from '../lib/chats.ts'
+import { useContextFolders } from '../lib/context.ts'
 import { PICTURE_EXT, useLook } from '../lib/look.ts'
 import { onFilesEvent } from '../lib/events.ts'
 import { formatDate, formatSize, isMarkdown, nameOf, parentOf, segments, uniqueName } from '../lib/files.ts'
@@ -67,6 +69,8 @@ function sorted(entries: FileEntry[], key: SortKey, dir: 1 | -1): FileEntry[] {
 export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: Props) {
   const notes = useNotes()
   const look = useLook()
+  const context = useContextFolders()
+  const inbox = context?.status?.ready ? context.status.folders.find((f) => f.name === 'inbox' && f.exists)?.path : undefined
   const profile = notes.profile
   const [listings, setListings] = useState<Record<string, Listing>>({})
   const listingsRef = useRef(listings)
@@ -375,6 +379,9 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
         { label: 'Open folder in Files', icon: <FolderOpen size={14} />, run: () => void openDefault(dir ? entry.path : parentOf(entry.path)) },
         { label: 'Copy path', icon: <Copy size={14} />, run: () => void copyPath(entry.path) },
         ...(look && !dir && PICTURE_EXT.test(entry.name) ? [{ label: 'Use as background', icon: <ImageIcon size={14} />, run: () => look.pictureFrom(entry.path) }] : []),
+        ...(inbox && !dir && !norm(entry.path).startsWith(`${norm(inbox)}/`)
+          ? [{ label: 'Send to inbox', icon: <Inbox size={14} />, run: () => context!.sendToInbox(entry.path) }]
+          : []),
         ...chatEntries(dir ? entry.path : parentOf(entry.path)),
         'sep',
         { label: 'Rename', icon: <PencilLine size={14} />, run: () => setRenaming(entry.path) },

@@ -23,6 +23,7 @@ export interface ChatsEvent {
 const noteListeners = new Set<(e: NoteEvent | 'reconnected') => void>()
 const filesListeners = new Set<(e: FilesEvent | 'reconnected') => void>()
 const chatsListeners = new Set<(e: ChatsEvent | 'reconnected') => void>()
+const contextListeners = new Set<(e: ChatsEvent | 'reconnected') => void>()
 
 export function onNoteEvent(fn: (e: NoteEvent | 'reconnected') => void): () => void {
   noteListeners.add(fn)
@@ -35,6 +36,14 @@ export function onFilesEvent(fn: (e: FilesEvent | 'reconnected') => void): () =>
   filesListeners.add(fn)
   return () => {
     filesListeners.delete(fn)
+  }
+}
+
+/** A profile's context folders changed (set up, inbox count). Same shape as a chats event. */
+export function onContextEvent(fn: (e: ChatsEvent | 'reconnected') => void): () => void {
+  contextListeners.add(fn)
+  return () => {
+    contextListeners.delete(fn)
   }
 }
 
@@ -65,6 +74,7 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
           for (const fn of noteListeners) fn('reconnected')
           for (const fn of filesListeners) fn('reconnected')
           for (const fn of chatsListeners) fn('reconnected')
+          for (const fn of contextListeners) fn('reconnected')
         }
         connectedBefore = true
         delay = 500
@@ -93,6 +103,9 @@ export function followState(onState: (s: AppState) => void, onConnection: (c: Co
             } else if (event === 'chats') {
               const e = JSON.parse(data) as ChatsEvent
               for (const fn of chatsListeners) fn(e)
+            } else if (event === 'context') {
+              const e = JSON.parse(data) as ChatsEvent
+              for (const fn of contextListeners) fn(e)
             } else {
               onState(JSON.parse(data))
             }

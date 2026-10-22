@@ -1,4 +1,4 @@
-import type { ItemAddr, ItemType, ListAddr, NavItem, Profile, StepItem } from '../../shared/config-schema.ts'
+import type { ContextFolder, ItemAddr, ItemType, ListAddr, NavItem, Profile, StepItem } from '../../shared/config-schema.ts'
 
 export const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(' ')
 
@@ -44,7 +44,7 @@ export type DialogState =
 /**
  * What the main pane shows: a nav entry, a note opened by path (a link or a
  * search result), a folder opened by path (a chip, the path bar, a subfolder),
- * a chat whose project or entry is gone, or the Claude setup page.
+ * a chat whose project or entry is gone, the Claude setup page, or a context folder.
  */
 export type Selection =
   | { kind: 'entry'; addr: ItemAddr; item: NavItem }
@@ -52,6 +52,7 @@ export type Selection =
   | { kind: 'files'; path: string }
   | { kind: 'chat'; id: string }
   | { kind: 'setup' }
+  | { kind: 'context'; name: ContextFolder }
 
 /** Selection key prefixes for a note, folder or chat opened on its own; other keys are entry addresses. */
 export const NOTE_KEY = 'note:'
@@ -59,6 +60,8 @@ export const FILES_KEY = 'files:'
 export const CHAT_KEY = 'chat:'
 /** The Claude setup page. */
 export const SETUP_KEY = 'setup:'
+/** A context folder's page: `context:inbox`. */
+export const CONTEXT_KEY = 'context:'
 
 /** The first entry of a type that matches, searching headings and groups. */
 export function findEntry(profile: Profile, type: ItemType, matches: (item: NavItem) => boolean = () => true): ItemAddr | null {

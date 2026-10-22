@@ -41,7 +41,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 5½ | Agent profiles | Done (same branch); see below |
 | 5¾ | Sidebar open buttons, themes and backgrounds | Done (same branch); see below |
 | 6 | Skills & MCP panel (built as Claude setup) | Done (same branch); see below |
-| 7 | Context folders | |
+| 7 | Context folders | Done (same branch); see below |
 | 8 | Polish | |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
@@ -246,16 +246,41 @@ The user asked: launchers in the sidebar started on a single click of their name
   - Skills, agents or MCP servers passed only on the command line (`--agents`, `--mcp-config`); agent profiles name the latter.
   - OAuth sign-in for remote servers (done in claude with `/mcp`).
 
-### Part 7: Context folders
+### Part 7: Context folders (done)
 
 - **In Mr. Mak:**
   - `context/` holds identity, preferences and goals; `knowledge/` holds focused reusable notes; `processes/` holds workflows; `inbox/` holds attachments and handoffs.
-  - A table says which kind of request belongs where, e.g. "Remember how I want reports written" goes to `context/preferences.md`.
-- **Ask:**
-  - Per profile or shared.
-  - Where on disk.
-  - Whether agent chats (part 5) should get these folders automatically, e.g. via `--add-dir` or a generated `CLAUDE.md`.
-  - How they show in the nav (a fixed heading or ordinary entries).
+  - A table says which kind of request belongs where.
+- **Decisions (2026-10-22):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Per profile or shared | Per profile |
+  | Where on disk | Inside the profile's notes folder: `<notes>/context`, `knowledge`, `processes`, `inbox` |
+  | Chats | Every claude chat gets them automatically |
+  | In the app | A fixed Context heading at the top of the nav |
+  | First time | Set up context: the folders plus starter notes (identity, preferences, goals, the routing note); never by itself |
+  | Routing | An editable note, `context/README.md`, whose text chats get |
+  | Opening an entry | The folder in the file browser; Context also has tabs for its notes |
+  | Inbox extras | Count badge in the nav; Summarize and continue saves its handoff there; Send to inbox in the file browser |
+
+- **Built:**
+  - `server/context.ts` (`Context`: status, setup, `chatContext`, `saveHandoff`, `sendToInbox`, watching for the inbox count) and `/api/context{,/setup,/inbox}`, with the SSE event `context`.
+  - `agentArgs` merges the context: one `--append-system-prompt` (the profile's instructions first) and one `--add-dir`.
+  - `Chat.context`, shown in the chat bar.
+  - `handoff(id, {onSummary})`.
+  - The nav's `ContextBlock`, `ContextView` (`context:<name>` selection), and Send to inbox in `FileBrowser`.
+- **What chats are told:**
+  - the folders,
+  - the routing note,
+  - identity, preferences and goals pasted in up to 16 KB (later ones are named by path instead).
+  - Knowledge and processes are read on demand.
+  - Flags are fixed when a chat starts, like agent profiles.
+- **Left for later:**
+  - Shared context across profiles.
+  - Turning context off for one agent profile.
+  - Moving files out of the inbox in one click.
+  - Inbox counts for profiles other than the active one.
 
 ### Part 8: Polish
 

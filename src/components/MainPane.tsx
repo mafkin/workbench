@@ -3,6 +3,7 @@ import { lazy, Suspense, useRef, useState } from 'react'
 import {
   chatName,
   chatProgram,
+  CONTEXT_LABEL,
   entrySlot,
   folderRoots,
   getItem,
@@ -22,6 +23,7 @@ import { findEntry, FILES_KEY, NOTE_KEY, parseKey, type Selection } from '../lib
 import { useNotes } from '../lib/notes-ctx.ts'
 import { ago, type Recent } from '../lib/recent.ts'
 import { ChatPane } from './ChatPane.tsx'
+import { ContextView } from './ContextView.tsx'
 import { DailyView } from './DailyView.tsx'
 import { agentIcon, EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
@@ -123,6 +125,17 @@ export function MainPane(props: Props) {
               <span className="sep">/</span>
               <span className="current">Claude setup</span>
             </>
+          ) : selected?.kind === 'context' ? (
+            <>
+              <span className="sep">/</span>
+              <span>Context</span>
+              {selected.name !== 'context' && (
+                <>
+                  <span className="sep">/</span>
+                  <span className="current">{CONTEXT_LABEL[selected.name]}</span>
+                </>
+              )}
+            </>
           ) : selected && selected.kind !== 'entry' ? (
             <>
               <span className="sep">/</span>
@@ -178,6 +191,8 @@ export function MainPane(props: Props) {
           <Browser key={`${active.id}:${selected.path}`} top={selected.path} kicker="Files" heading={nameOf(selected.path)} pane={props} />
         ) : selected?.kind === 'chat' ? (
           <LoneChat key={selected.id} id={selected.id} />
+        ) : selected?.kind === 'context' ? (
+          <ContextView key={`${active.id}:${selected.name}`} name={selected.name} profileId={active.id} profile={profile} home={props.home} openFolder={props.openFolder} toast={props.toast} />
         ) : selected?.kind === 'setup' ? (
           <Suspense fallback={null}>
             <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} />
