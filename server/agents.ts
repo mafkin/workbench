@@ -6,6 +6,12 @@ import { expandHome, type AgentProfile } from '../shared/config-schema.ts'
 import { claudeDir } from './claude-sessions.ts'
 import { frontmatter } from './claude-setup.ts'
 
+/** A profile's context for a chat: folders to add and text to append (server/context.ts). */
+export interface ChatContext {
+  prompt: string
+  dirs: string[]
+}
+
 export interface AgentStart {
   args: string[]
   /** The first prompt of a new session. */
@@ -18,7 +24,7 @@ export interface AgentStart {
  * word, so they come last; the chat adds its session flag after them, which
  * ends the list before the first prompt.
  */
-export function agentArgs(p: AgentProfile, home: string, cwd: string): AgentStart {
+export function agentArgs(p: AgentProfile, home: string, cwd: string, context?: ChatContext | null): AgentStart {
   const file = (v: string) => path.resolve(cwd, expandHome(v.trim(), home))
   const args: string[] = []
   // An agent (an orchestrator, say) brings its own model and effort.
@@ -28,10 +34,12 @@ export function agentArgs(p: AgentProfile, home: string, cwd: string): AgentStar
     if (p.effort) args.push('--effort', p.effort)
   }
   if (p.permission) args.push('--permission-mode', p.permission)
-  if (p.instructions?.trim()) args.push('--append-system-prompt', p.instructions.trim())
+  // The profile's instructions, then the context: claude takes one --append-system-prompt.
+  const instructions = [p.instructions?.trim(), context?.prompt.trim()].filter(Boolean).join('\n\n')
+  if (instructions) args.push('--append-system-prompt', instructions)
   if (p.mcp) args.push('--mcp-config', file(p.mcp))
-  const folders = p.folders.map((f) => f.trim()).filter(Boolean)
-  if (folders.length) args.push('--add-dir', ...folders.map(file))
+  const folders = [...p.folders.map((f) => f.trim()).filter(Boolean).map(file), ...(context?.dirs ?? [])]
+  if (folders.length) args.push('--add-dir', ...folders)
   if (p.allowedTools.length) args.push('--allowedTools', ...p.allowedTools)
   if (p.disallowedTools.length) args.push('--disallowedTools', ...p.disallowedTools)
   return { args, prompt: p.prompt?.trim() || undefined, bypass: p.permission === 'bypassPermissions' }

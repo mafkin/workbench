@@ -109,6 +109,22 @@ describe('agent profile flags', () => {
     })
   })
 
+  it('context folders and text merge into one --add-dir and one --append-system-prompt', () => {
+    const context = { prompt: 'Your context lives in ~/notes/context.', dirs: ['/home/u/notes/context', '/home/u/notes/inbox'] }
+    const p = AgentProfile.parse({ model: 'opus', instructions: 'Review only.', folders: ['~/shared'], allowedTools: ['Read'] })
+    expect(agentArgs(p, home, cwd, context).args).toEqual([
+      '--model', 'opus',
+      '--append-system-prompt', 'Review only.\n\nYour context lives in ~/notes/context.',
+      '--add-dir', '/home/u/shared', '/home/u/notes/context', '/home/u/notes/inbox',
+      '--allowedTools', 'Read',
+    ])
+    // Plain claude: just the context.
+    expect(agentArgs(AgentProfile.parse({}), home, cwd, context).args).toEqual([
+      '--append-system-prompt', 'Your context lives in ~/notes/context.',
+      '--add-dir', '/home/u/notes/context', '/home/u/notes/inbox',
+    ])
+  })
+
   it('a Claude agent decides the model and effort', () => {
     const p = AgentProfile.parse({ agent: 'orchestrator', model: 'opus', effort: 'max', permission: 'bypassPermissions' })
     expect(agentArgs(p, home, cwd)).toEqual({ args: ['--agent', 'orchestrator', '--permission-mode', 'bypassPermissions'], prompt: undefined, bypass: true })

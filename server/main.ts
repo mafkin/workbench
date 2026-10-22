@@ -10,7 +10,9 @@ import websocket from '@fastify/websocket'
 import Fastify from 'fastify'
 import { z } from 'zod'
 import {
+  AgentProfile,
   CHAT_COLORS,
+  chatName,
   chatProgram,
   entrySlot,
   expandHome,
@@ -34,6 +36,7 @@ import { frontmatter, readSetup } from './claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
+import { Context } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { makeGuard } from './guard.ts'
 import { LaunchError, openItem } from './launch.ts'
@@ -128,6 +131,7 @@ export async function buildServer(opts: ServerOptions) {
   const notes = new Notes(store, home)
   const files = new Files(store, home, { spawn: opts.spawn })
   const backgrounds = new Backgrounds(path.join(opts.configDir, 'backgrounds'), store, home)
+  const context = new Context(store, home)
   const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
   await chats.init()
   // A chat's terminal is shell access. Besides the guard, its socket needs this
@@ -149,6 +153,7 @@ export async function buildServer(opts: ServerOptions) {
     store.close()
     notes.close()
     files.close()
+    context.close()
     await chats.shutdown()
   })
   // The token comes as a second subprotocol, so it never appears in a URL or a log;
@@ -323,12 +328,15 @@ export async function buildServer(opts: ServerOptions) {
   app.get('/api/chats/token', async () => ({ token: ptyToken }))
 
   /** What a chat's `agent:` starts: the shell, plain claude, or claude with an agent profile's flags. */
-  function agentFor(profile: Profile, name: string | undefined, cwd: string, args: string[]) {
-    if (!name || isReservedAgent(name)) return { agent: chatProgram(name), args, agentProfile: null, bypass: false }
-    const found = findAgent(profile, name)
-    if (!found) throw new StoreError(`No agent profile named ${name}`, 422)
-    const start = agentArgs(found[1], home, cwd)
-    return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found[0], bypass: start.bypass, firstPrompt: start.prompt }
+  /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up. */
+  async function agentFor(id: string, profile: Profile, name: string | undefined, cwd: string, args: string[]) {
+    const program = name && isReservedAgent(name) ? chatProgram(name) : 'claude'
+    const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
+    if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
+    if (program === 'shell') return { agent: program, args, agentProfile: null, bypass: false, context: false }
+    const ctx = await context.chatContext(id)
+    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, ctx)
+    return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
   }
 
   app.post('/api/chats', async (req) => {
@@ -341,17 +349,17 @@ export async function buildServer(opts: ServerOptions) {
     if (item.type === 'chat') {
       const slot = entrySlot(item)
       const cwd = await chatFolder(p.profile, item.path ?? '~', false)
-      spec = { profile: body.profile, host: slot, slot, cwd, ...agentFor(p.profile, item.agent, cwd, item.args) }
+      spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, item.agent, cwd, item.args)) }
     } else if (item.type === 'folder' && body.step !== undefined) {
       const step = stepsOf(p.profile, item)[body.step]
       if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
       const entry = stepEntry(item.path, step) as typeof step
       const cwd = await chatFolder(p.profile, entry.path ?? item.path, false)
-      spec = { profile: body.profile, host: projectHost(item.path), slot: stepSlot(item.path, step.label), cwd, ...agentFor(p.profile, step.agent, cwd, step.args) }
+      spec = { profile: body.profile, host: projectHost(item.path), slot: stepSlot(item.path, step.label), cwd, ...(await agentFor(body.profile, p.profile, step.agent, cwd, step.args)) }
     } else if (item.type === 'folder') {
       const cwd = body.path === undefined ? await chatFolder(p.profile, item.path, false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(item.path), slot: null, cwd, ...agentFor(p.profile, body.agent ?? item.agent, cwd, []) }
+      spec = { profile: body.profile, host: projectHost(item.path), slot: null, cwd, ...(await agentFor(body.profile, p.profile, body.agent ?? item.agent, cwd, [])) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -376,7 +384,18 @@ export async function buildServer(opts: ServerOptions) {
     return { ok: true }
   })
 
-  app.post<{ Params: { id: string } }>('/api/chats/:id/handoff', async (req) => chats.handoff(req.params.id))
+  // The summary is also kept in the profile's inbox, when it has one.
+  app.post<{ Params: { id: string } }>('/api/chats/:id/handoff', async (req) =>
+    chats.handoff(req.params.id, { onSummary: (summary, chat) => context.saveHandoff(chat.profile, chatName(chat), chat.session, summary) }),
+  )
+
+  // Context folders: status, setup on request, and files sent to the inbox.
+  app.get('/api/context', async (req) => context.status(parse(ProfileQuery, req.query).profile))
+  app.post('/api/context/setup', async (req) => context.setup(parse(ProfileQuery, req.body).profile))
+  app.post('/api/context/inbox', async (req) => {
+    const b = parse(PathQuery, req.body)
+    return context.sendToInbox(b.profile, b.path)
+  })
 
   app.delete<{ Params: { id: string } }>('/api/chats/:id', async (req) => {
     await chats.close(req.params.id)
@@ -485,11 +504,13 @@ export async function buildServer(opts: ServerOptions) {
     const sendNote = (e: NoteEvent) => res.write(`event: note\ndata: ${JSON.stringify(e)}\n\n`)
     const sendFiles = (e: FilesEvent) => res.write(`event: files\ndata: ${JSON.stringify(e)}\n\n`)
     const sendChats = (e: { profile: string }) => res.write(`event: chats\ndata: ${JSON.stringify(e)}\n\n`)
+    const sendContext = (e: { profile: string }) => res.write(`event: context\ndata: ${JSON.stringify(e)}\n\n`)
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000)
     store.on('change', send)
     notes.on('note', sendNote)
     files.on('files', sendFiles)
     chats.on('chats', sendChats)
+    context.on('context', sendContext)
     send()
     req.raw.on('close', () => {
       clearInterval(ping)
@@ -497,6 +518,7 @@ export async function buildServer(opts: ServerOptions) {
       notes.off('note', sendNote)
       files.off('files', sendFiles)
       chats.off('chats', sendChats)
+      context.off('context', sendContext)
     })
   })
 
@@ -511,7 +533,7 @@ export async function buildServer(opts: ServerOptions) {
     })
   }
 
-  return { app, store, notes, files, chats }
+  return { app, store, notes, files, chats, context }
 }
 
 if (import.meta.main) {

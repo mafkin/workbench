@@ -557,6 +557,24 @@ export interface Chat {
   /** Your prompts in the Claude session, when counted. */
   messages: number
   createdAt: number
+  /** Started with the profile's context folders (--add-dir and appended instructions). */
+  context: boolean
+}
+
+/** A profile's context folders, inside its notes folder; set up once `context/` exists. */
+export const CONTEXT_FOLDERS = ['context', 'knowledge', 'processes', 'inbox'] as const
+export type ContextFolder = (typeof CONTEXT_FOLDERS)[number]
+export const CONTEXT_LABEL: Record<ContextFolder, string> = { context: 'Context', knowledge: 'Knowledge', processes: 'Processes', inbox: 'Inbox' }
+
+export interface ContextStatus {
+  /** The profile's notes folder as written, or null without one. */
+  notes: string | null
+  /** `context/` exists: chats get the context. */
+  ready: boolean
+  /** In `~/…` form; empty without a notes folder. */
+  folders: { name: ContextFolder; path: string; exists: boolean }[]
+  /** Things in the inbox (dotfiles not counted). */
+  inbox: number
 }
 
 /** A past Claude session in a folder, from claude's own transcripts. */

@@ -52,6 +52,8 @@ export interface ChatSpec {
   bypass?: boolean
   /** The agent profile's first prompt: sent on a new session, not on a resume. */
   firstPrompt?: string
+  /** `args` carry the profile's context folders. */
+  context?: boolean
 }
 
 /** Receives frames for one view: `r` + the whole screen (reset), `o` + output. */
@@ -165,8 +167,16 @@ export class Chats extends EventEmitter {
     for (const s of saved) {
       if (typeof s?.id !== 'string' || typeof s.dir !== 'string') continue
       const { args, dir, firstPrompt, ...chat } = s
-      // Lists saved before agent profiles have no agentProfile or bypass.
-      this.#chats.set(s.id, { ...chat, agentProfile: chat.agentProfile ?? null, bypass: chat.bypass ?? false, state: 'stopped', exitCode: null, attention: false })
+      // Lists saved before agent profiles or context have no agentProfile, bypass or context.
+      this.#chats.set(s.id, {
+        ...chat,
+        agentProfile: chat.agentProfile ?? null,
+        bypass: chat.bypass ?? false,
+        context: chat.context ?? false,
+        state: 'stopped',
+        exitCode: null,
+        attention: false,
+      })
       this.#meta.set(s.id, {
         args: Array.isArray(args) ? args.map(String) : [],
         firstPrompt: typeof firstPrompt === 'string' ? firstPrompt : undefined,
@@ -212,6 +222,7 @@ export class Chats extends EventEmitter {
       attention: false,
       messages: 0,
       createdAt: Date.now(),
+      context: spec.context ?? false,
     }
     this.#meta.set(id, { args: spec.args, firstPrompt: spec.firstPrompt, dir: spec.cwd, cols: 100, rows: 30 })
     try {
@@ -334,9 +345,10 @@ export class Chats extends EventEmitter {
    * Summarize and continue: claude writes a handoff of the session in the
    * background (a fork, so the session itself is untouched), and a new chat
    * starts with it. A chat step or entry moves to the new chat; a tab started
-   * with New chat stays open beside it.
+   * with New chat stays open beside it. `onSummary` gets the summary first
+   * (the service keeps a copy in the inbox); its failure does not stop the handoff.
    */
-  async handoff(id: string): Promise<Chat> {
+  async handoff(id: string, { onSummary }: { onSummary?: (summary: string, chat: Chat) => Promise<unknown> } = {}): Promise<Chat> {
     const chat = this.#need(id)
     if (chat.agent !== 'claude' || !chat.session) throw new StoreError('Only a Claude chat can be summarized', 422)
     if (this.#handing.has(id)) throw new StoreError('Already summarizing this chat', 409)
@@ -354,6 +366,7 @@ export class Chats extends EventEmitter {
         ),
       )
       if (!summary) throw new StoreError('claude gave no summary', 502)
+      await onSummary?.(summary, { ...chat }).catch((err) => console.error('[chats] keeping the handoff:', err))
       const next = await this.start({
         profile: chat.profile,
         host: chat.host,
@@ -367,6 +380,7 @@ export class Chats extends EventEmitter {
         agentProfile: chat.agentProfile,
         bypass: chat.bypass,
         firstPrompt: meta.firstPrompt,
+        context: chat.context,
       })
       if (chat.slot) await this.close(id)
       return next
