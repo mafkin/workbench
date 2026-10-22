@@ -282,15 +282,41 @@ The user asked: launchers in the sidebar started on a single click of their name
   - Moving files out of the inbox in one click.
   - Inbox counts for profiles other than the active one.
 
-### Part 8: Polish
+### Part 8: Polish, the known gaps and Servers (done)
 
-These are candidates; ask which ones matter:
+- **Decisions (2026-10-22):**
 
-- Ctrl+K quick switcher across entries and notes.
-- A systemd user service so the GNOME Web app launcher always finds the service running.
-- UI for profile settings (name, accent, home) and for adding profiles.
-- Selection that follows moved entries.
-- Tauri wrapper (needs Rust).
+  | Question | Answer |
+  | --- | --- |
+  | Which polish items | All: Ctrl+K, a systemd user service, profile settings, selection that follows moves |
+  | Tauri | Decide later (still needs Rust) |
+  | Known gaps | All four groups: nav and steps, notes, files, cards and chats |
+  | Ctrl+K | Everything (entries, steps, notes, context, chats, pages) plus actions |
+  | Profiles | Edit, add and remove in the app |
+  | systemd | The service plus a rebuild and restart after `git pull` |
+  | Servers: what counts | Found from `/proc` in project folders, plus optional declared `servers:` with a health check |
+  | Servers: where | A Servers page and marks in the nav (and a line on the card) |
+  | Servers: actions | Open, Stop (asks first), Copy URL; polled every 3 s on the page, 15 s for the nav |
+
+- **Milestone 1, polish** (07eec5d):
+  - `QuickSwitcher.tsx` and `src/lib/switcher.ts` (`fuzzy`, `rank`), lazy.
+  - `ProfileDialog.tsx`; `ConfigStore.createProfile` / `removeProfile` (the file to the Trash); `POST /api/profiles`, `DELETE /api/profiles/:id`.
+  - `bin/workbench --install / --uninstall / --print-units / --update`. The path unit watches `.git/logs/HEAD`.
+  - `entryId` and `resolveEntry` in `src/lib/nav.ts`: the selection and Recent work find an entry again by type, label and path.
+- **Milestone 2, the known gaps** (0824f5a):
+  - The pencil is disabled while the file is broken; a renamed step stays the open tab; renaming a chat step moves its chat (`Chats.moveSlot`).
+  - Notes: heading links, task boxes in View (`src/lib/tasks.ts`), code colours (`src/lib/highlight.ts`, the editor's parsers with `classHighlighter`), midnight rollover, a text cache keyed by mtime and size.
+  - Files: copy (Duplicate, Ctrl+C/V, Ctrl+drag), upload from the desktop, folder sizes, Search all folders (`find`), Undo for Trash (`server/trash.ts`, XDG `.trashinfo`), virtual rows past 400.
+  - Cards: category colours (`setCategory`), created and updated dates (`server/project-dates.ts`).
+  - Chats follow `/clear` and `/resume`: a `SessionStart` hook given with `--settings` runs `server/session-hook.mjs`, which writes `<state>/sessions/<chat>.json`; `Chats` watches it.
+- **Milestone 3, Servers:**
+  - `server/procfs.ts`: listening sockets (`/proc/net/tcp{,6}`, state `0A`), matched to your processes by socket inode; each process's cwd, name, command and start time.
+  - `server/servers.ts`: `scan(profile)` (cached 1 s), rows per project (deepest project wins), declared servers merged by port, an HTTP probe (1.5 s), and `stop`, which re-scans and checks owner, port and project before SIGTERM. Routes `GET /api/servers`, `POST /api/servers/stop`.
+  - `ServersView.tsx` (lazy), the nav button and marks, the card line.
+- **Left for later:**
+  - A Tauri window.
+  - Servers: no logs or restart (Workbench didn't start them), UDP isn't listed, and a server started outside a project folder isn't shown even if it serves that project.
+  - Upload has no progress bar; copying to another drive works, moving there is still refused.
 
 ## Reference
 

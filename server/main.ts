@@ -45,6 +45,7 @@ import { LaunchError, openItem, runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
 import { projectDates } from './project-dates.ts'
+import { Servers } from './servers.ts'
 import { Notes, type NoteEvent } from './notes.ts'
 import { absPath, browseRoots, realish, within } from './paths.ts'
 
@@ -82,6 +83,7 @@ const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string
 const ProfileQuery = z.object({ profile: z.string() })
 const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
 const FileOpBody = z.object({ profile: z.string(), op: FileOp })
+const StopServer = z.object({ profile: z.string(), pid: z.int().positive(), port: z.int().min(1).max(65535) })
 const FindQuery = z.object({ profile: z.string(), path: z.string(), q: z.string().default(''), hidden: z.string().optional() })
 const UploadQuery = z.object({ profile: z.string(), dir: z.string(), name: z.string() })
 const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.boolean().optional() })
@@ -138,6 +140,7 @@ export async function buildServer(opts: ServerOptions) {
   const files = new Files(store, home, { spawn: opts.spawn })
   const backgrounds = new Backgrounds(path.join(opts.configDir, 'backgrounds'), store, home)
   const context = new Context(store, home)
+  const servers = new Servers(store, home)
   const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
   await chats.init()
   // A chat's terminal is shell access. Besides the guard, its socket needs this
@@ -476,6 +479,14 @@ export async function buildServer(opts: ServerOptions) {
     const p = store.profile(id)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
     return sessionsIn(await chatFolder(p.profile, raw, true), home)
+  })
+
+  // Servers running in the profile's projects (from /proc) and the ones they declare.
+  app.get('/api/servers', async (req) => servers.scan(parse(ProfileQuery, req.query).profile))
+  app.post('/api/servers/stop', async (req) => {
+    const b = parse(StopServer, req.body)
+    await servers.stop(b.profile, b.pid, b.port)
+    return { ok: true }
   })
 
   // A project card's dates: when its folder was made and last worked on.

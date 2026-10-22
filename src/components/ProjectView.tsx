@@ -76,6 +76,9 @@ export interface ProjectActions {
   /** Start a launcher step, or open a link step in the browser. */
   launchStep: (addr: ItemAddr, index: number, label: string, kind: 'launch' | 'link') => void
   rememberStep: (addr: ItemAddr, label: string) => void
+  /** Servers running (or declared and down) in a project folder, from the last check. */
+  servers: (path: string) => { up: number; down: number } | undefined
+  openServers: () => void
 }
 
 export const STATUS_LABEL: Record<Status, string> = { active: 'Active', paused: 'Paused', done: 'Done', archived: 'Archived' }
@@ -466,7 +469,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           {item.description || 'Add a description'}
         </p>
       )}
-      <CardDates profileId={profileId} path={item.path} />
+      <CardDates profileId={profileId} path={item.path} servers={actions.servers(item.path)} onServers={actions.openServers} />
 
       <div
         className="step-tabs"
@@ -663,7 +666,17 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
 }
 
 /** "Created 3 Mar 2026 · Updated 2 h ago": the folder's birth, and its last commit or newest file. */
-function CardDates({ profileId, path }: { profileId: string; path: string }) {
+function CardDates({
+  profileId,
+  path,
+  servers,
+  onServers,
+}: {
+  profileId: string
+  path: string
+  servers?: { up: number; down: number }
+  onServers: () => void
+}) {
   const [dates, setDates] = useState<{ created: number | null; updated: number | null; source: 'git' | 'files' } | null>(null)
   useEffect(() => {
     let live = true
@@ -675,13 +688,24 @@ function CardDates({ profileId, path }: { profileId: string; path: string }) {
       live = false
     }
   }, [profileId, path])
-  if (!dates || (!dates.created && !dates.updated)) return null
+  const running = servers && (servers.up || servers.down)
+  if (!running && (!dates || (!dates.created && !dates.updated))) return null
   const day = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
   return (
     <p className="card-dates">
-      {dates.created && <span title={new Date(dates.created).toLocaleString()}>Created {day(dates.created)}</span>}
-      {dates.created && dates.updated && ' · '}
-      {dates.updated && (
+      {servers && running ? (
+        <>
+          <button className={cx('link-btn card-servers', servers.down > 0 && 'down')} onClick={onServers}>
+            {servers.up ? `${servers.up} ${servers.up === 1 ? 'server' : 'servers'} running` : ''}
+            {servers.up && servers.down ? ', ' : ''}
+            {servers.down ? `${servers.down} down` : ''}
+          </button>
+          {dates && (dates.created || dates.updated) && ' · '}
+        </>
+      ) : null}
+      {dates?.created && <span title={new Date(dates.created).toLocaleString()}>Created {day(dates.created)}</span>}
+      {dates?.created && dates.updated && ' · '}
+      {dates?.updated && (
         <span title={`${dates.source === 'git' ? 'Last commit' : 'Newest file'}: ${new Date(dates.updated).toLocaleString()}`}>
           Updated {ago(dates.updated)}
           {dates.source === 'git' ? ' (last commit)' : ''}

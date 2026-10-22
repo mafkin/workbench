@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Blocks, BookOpen, Settings2, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
+import { Blocks, BookOpen, Server, Settings2, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, CONTEXT_LABEL, entrySlot, itemKey, projectHost, type ContextFolder, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import { useContextFolders } from '../lib/context.ts'
@@ -35,6 +35,8 @@ export interface NavActions {
   itemMenu: (addr: ItemAddr, item: NavItem) => (MenuEntry | 'sep')[]
   /** Running chats, and whether one needs you, per project (`project:<path>`) or chat entry. */
   chatMarks: Map<string, { running: number; attention: boolean }>
+  /** Servers up (and declared ones down) per project path. */
+  serverMarks: Map<string, { up: number; down: number }>
   notify: (message: string, kind?: 'info' | 'error') => void
 }
 
@@ -52,6 +54,9 @@ interface Props extends NavActions {
   onSetup: () => void
   setupActive: boolean
   onProfileSettings: () => void
+  /** Open the Servers page; `serversActive` while it shows. */
+  onServers: () => void
+  serversActive: boolean
   /** The context folder whose page shows, if one does. */
   contextSelected: ContextFolder | null
 }
@@ -182,6 +187,9 @@ export function NavPanel(props: Props) {
           <span className="spacer" />
           <button className="icon-btn" onClick={onLook} title="Theme and background" aria-label="Theme and background">
             <Palette size={13} />
+          </button>
+          <button className={cx('icon-btn', props.serversActive && 'on')} onClick={props.onServers} title="Servers running in your projects" aria-label="Servers" aria-pressed={props.serversActive}>
+            <Server size={13} />
           </button>
           <button className={cx('icon-btn', setupActive && 'on')} onClick={onSetup} title="Claude setup: skills, MCP servers, agents…" aria-label="Claude setup" aria-pressed={setupActive}>
             <Blocks size={13} />
@@ -639,6 +647,7 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
         </button>
       )}
       {!ctx.editing && <ChatMark item={item} />}
+      {!ctx.editing && <ServerMark item={item} />}
       {!ctx.editing && item.type === 'folder' && (
         <span className="project-marks">
           {item.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
@@ -661,6 +670,20 @@ function ChatMark({ item }: { item: NavItem }) {
     <span className={cx('chat-mark', mark.attention && 'attention', item.type !== 'folder' && 'alone')} title={what} aria-label={what}>
       <Sparkles size={11} />
       {mark.running > 1 && mark.running}
+    </span>
+  )
+}
+
+/** A small dot on a project with servers running (and a count past one); red when a declared one is down. */
+function ServerMark({ item }: { item: NavItem }) {
+  const { serverMarks } = useContext(Ctx)
+  const mark = item.type === 'folder' ? serverMarks.get(item.path) : undefined
+  if (!mark) return null
+  const what = [mark.up && `${mark.up} ${mark.up === 1 ? 'server' : 'servers'} running`, mark.down && `${mark.down} down`].filter(Boolean).join(', ')
+  return (
+    <span className={cx('server-mark', mark.down > 0 && 'down')} title={what} aria-label={what}>
+      <Server size={10} />
+      {mark.up > 1 && mark.up}
     </span>
   )
 }

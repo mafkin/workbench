@@ -16,6 +16,7 @@ import {
   type Profile,
   type ProfileState,
   type SearchHit,
+  type ServersScan,
 } from '../../shared/config-schema.ts'
 import { useChats } from '../lib/chats.ts'
 import { nameOf } from '../lib/files.ts'
@@ -34,6 +35,7 @@ import { SearchView } from './SearchView.tsx'
 import type { ToastInput } from './Toast.tsx'
 
 const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
+const ServersView = lazy(() => import('./ServersView.tsx'))
 
 export interface SearchState {
   open: boolean
@@ -60,6 +62,8 @@ interface Props {
   /** Recently opened, newest first, for Home. */
   recent: Recent[]
   openRecent: (r: Recent) => void
+  /** The Servers page's checks, so the nav's marks follow it. */
+  onServersScan: (scan: ServersScan) => void
 }
 
 const noteName = (path: string) => (path.split('/').pop() ?? path).replace(NOTE_EXT, '')
@@ -124,6 +128,11 @@ export function MainPane(props: Props) {
             <>
               <span className="sep">/</span>
               <span className="current">Claude setup</span>
+            </>
+          ) : selected?.kind === 'servers' ? (
+            <>
+              <span className="sep">/</span>
+              <span className="current">Servers</span>
             </>
           ) : selected?.kind === 'context' ? (
             <>
@@ -193,6 +202,10 @@ export function MainPane(props: Props) {
           <LoneChat key={selected.id} id={selected.id} />
         ) : selected?.kind === 'context' ? (
           <ContextView key={`${active.id}:${selected.name}`} name={selected.name} profileId={active.id} profile={profile} home={props.home} openFolder={props.openFolder} toast={props.toast} />
+        ) : selected?.kind === 'servers' ? (
+          <Suspense fallback={null}>
+            <ServersView key={active.id} profileId={active.id} onScan={props.onServersScan} toast={props.toast} />
+          </Suspense>
         ) : selected?.kind === 'setup' ? (
           <Suspense fallback={null}>
             <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} />

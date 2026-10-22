@@ -24,6 +24,7 @@ import {
   type NoteSummary,
   type Op,
   type Profile,
+  type ServersScan,
 } from '../shared/config-schema.ts'
 import { agentEntries } from './components/AgentMenu.tsx'
 import { ConfirmDialog } from './components/ConfirmDialog.tsx'
@@ -49,6 +50,7 @@ import {
   findEntry,
   listLength,
   NOTE_KEY,
+  SERVERS_KEY,
   SETUP_KEY,
   entryId,
   parseKey,
@@ -406,6 +408,36 @@ export function App() {
     return onChatsEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshChats())
   }, [active?.id, refreshChats])
 
+  // Servers running in the active profile's projects, for the nav's marks and the
+  // project cards: checked every 15 s here, every 3 s while the Servers page is open.
+  const [serverScan, setServerScan] = useState<{ profile: string; scan: ServersScan } | null>(null)
+  useEffect(() => {
+    const id = active?.id
+    if (!id) return
+    let live = true
+    const load = () =>
+      api.servers(id).then(
+        (scan) => live && setServerScan({ profile: id, scan }),
+        () => {},
+      )
+    void load()
+    const timer = setInterval(load, 15_000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [active?.id])
+  const serverMarks = useMemo(() => {
+    const marks = new Map<string, { up: number; down: number }>()
+    if (!serverScan || serverScan.profile !== active?.id) return marks
+    for (const p of serverScan.scan.projects) {
+      const down = p.rows.filter((r) => r.health.state === 'down').length
+      const up = p.rows.length - down
+      if (up || down) marks.set(p.path, { up, down })
+    }
+    return marks
+  }, [serverScan, active?.id])
+
   // The active profile's context folders: the nav heading, the context pages, Send to inbox.
   const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null)
   const refreshContext = useCallback(() => {
@@ -559,8 +591,10 @@ export function App() {
         const item = activeRef.current?.profile ? getItem(activeRef.current.profile, addr) : undefined
         if (item) remember(itemKey(addr), item.label, label, entryId(item))
       },
+      servers: (path) => serverMarks.get(path),
+      openServers: () => navigate(SERVERS_KEY),
     }),
-    [run, fail, toasts.push, remember],
+    [run, fail, toasts.push, remember, serverMarks, navigate],
   )
 
   const itemMenu = useCallback(
@@ -707,6 +741,7 @@ export function App() {
     if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
     if (key?.startsWith(CHAT_KEY)) return { kind: 'chat', id: key.slice(CHAT_KEY.length) }
     if (key === SETUP_KEY) return { kind: 'setup' }
+    if (key === SERVERS_KEY) return { kind: 'servers' }
     if (key?.startsWith(CONTEXT_KEY)) {
       const name = key.slice(CONTEXT_KEY.length) as ContextFolder
       return CONTEXT_FOLDERS.includes(name) ? { kind: 'context', name } : null
@@ -828,6 +863,7 @@ export function App() {
     items.push(
       { id: 'page:home', kind: 'page', label: 'Home', detail: 'Recent work and today', run: goHome },
       { id: 'page:setup', kind: 'page', label: 'Claude setup', detail: 'Skills, MCP servers, agents, hooks, plugins', run: () => navigate(SETUP_KEY) },
+      { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your projects', run: () => navigate(SERVERS_KEY) },
     )
     // New note goes under the heading with the notes (the daily entry's), else the last one.
     const daily = findEntry(p, 'daily') ?? findEntry(p, 'note')
@@ -882,6 +918,9 @@ export function App() {
                 onHome={goHome}
                 onLook={() => setLookOpen(true)}
                 onSetup={() => navigate(SETUP_KEY)}
+              onServers={() => navigate(SERVERS_KEY)}
+              serversActive={selection?.kind === 'servers'}
+              serverMarks={serverMarks}
               onProfileSettings={() => setProfileOpen(true)}
                 setupActive={selection?.kind === 'setup'}
                 contextSelected={selection?.kind === 'context' ? selection.name : null}
@@ -900,6 +939,7 @@ export function App() {
                 actions={projectActions}
                 recent={recent[active.id] ?? []}
                 openRecent={openRecent}
+              onServersScan={(scan) => active && setServerScan({ profile: active.id, scan })}
                 onHome={goHome}
                 activate={activate}
                 openExternally={openExternally}

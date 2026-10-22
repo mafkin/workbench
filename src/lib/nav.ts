@@ -52,6 +52,7 @@ export type Selection =
   | { kind: 'files'; path: string }
   | { kind: 'chat'; id: string }
   | { kind: 'setup' }
+  | { kind: 'servers' }
   | { kind: 'context'; name: ContextFolder }
 
 /** Selection key prefixes for a note, folder or chat opened on its own; other keys are entry addresses. */
@@ -60,6 +61,8 @@ export const FILES_KEY = 'files:'
 export const CHAT_KEY = 'chat:'
 /** The Claude setup page. */
 export const SETUP_KEY = 'setup:'
+/** The Servers page. */
+export const SERVERS_KEY = 'servers:'
 /** A context folder's page: `context:inbox`. */
 export const CONTEXT_KEY = 'context:'
 

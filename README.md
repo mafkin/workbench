@@ -20,6 +20,19 @@ For a window without browser chrome:
 
 After that, `bin/workbench` opens the web app instead of your default browser.
 
+### Keep it running (systemd)
+
+```sh
+bin/workbench --install       # once
+```
+
+This writes three user units to `~/.config/systemd/user/` and starts the service:
+
+- `workbench.service` runs the service, starts it at login and restarts it if it crashes.
+- `workbench-update.path` notices a `git pull` (or checkout, or commit) in this folder and runs `workbench-update.service`. That runs `npm ci` if `package-lock.json` changed, rebuilds the UI and restarts the service. Its log is `~/.local/state/workbench/update.log`.
+
+`bin/workbench --print-units` shows the units without writing anything, and `bin/workbench --uninstall` removes them. After `--install`, `bin/workbench` only opens the window.
+
 ## Configuration
 
 Config lives in `~/.config/workbench/`. Set `WORKBENCH_CONFIG_DIR` to use another location.
@@ -27,7 +40,7 @@ Config lives in `~/.config/workbench/`. Set `WORKBENCH_CONFIG_DIR` to use anothe
 | File | Holds |
 | --- | --- |
 | `settings.yaml` | active profile and profile order |
-| `profiles/<id>.yaml` | one file per profile; add a file to add a profile |
+| `profiles/<id>.yaml` | one file per profile; add a file (or use **Profile settings**) to add a profile |
 
 You can edit the files by hand or through the app (the pencil at the top of the nav panel). App edits keep your comments, key order and formatting. Hand edits show up live. If a file stops parsing, the app shows the error and line, keeps showing the last good version, and won't write over your file until it is fixed.
 
@@ -72,6 +85,9 @@ sections:
         category: game
         pinned: true
         agent: Reviewer         # what New chat starts here (default: plain Claude)
+        servers:                # optional: servers to check even when they're not running
+          - { name: web, port: 5173 }
+          - { name: api, url: "http://127.0.0.1:9000/health" }
         steps:                  # this project's own steps instead of the workflow
           - { label: sprites, type: folder, path: assets/sprites }
           - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
@@ -96,7 +112,10 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 
 ## Using it
 
-- **Ctrl+1 / Ctrl+2** switch profiles. **Esc** leaves edit mode.
+- **Ctrl+1 / Ctrl+2** (and on, in profile order) switch profiles. **Esc** leaves edit mode.
+- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Claude setup, Servers), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile). Letters match in order, word starts first; with an empty box, your recent picks come first.
+- **Profile settings** (the sliders button on the profile switcher, or Ctrl+K) edits the profile's name, accent, home and notes folder, keeping your YAML comments; Undo works. **Add a profile** makes a blank one or a copy of the current one's headings and workflow. **Remove** asks first and moves the file to the Trash; the last profile stays.
+- The selected entry and **Recent work** follow an entry you move or rename, in the app or by hand.
 - **Edit mode** (pencil):
   - Drag headings and entries to reorder them, or move entries between headings and groups.
   - **+** adds an entry, the pencil renames or edits, and the bin deletes.
@@ -120,6 +139,8 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
   - a **status** (active, paused, done, archived),
   - a **pin**,
   - a **description** you click to edit.
+- **Under the description:** when the folder was created and last updated (the last commit in a git repository, else the newest file), and how many servers are running there.
+- **Categories** get colours from the category menu (**Colour of …**: a palette or any colour), saved in `categories:`.
 - **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, mark it or archive it.
 - Below the card is a row of tabs: **All files** (the project folder), then the project's workflow steps.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
@@ -206,25 +227,39 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - **Secret values are hidden everywhere:** env values, headers, passwords and keys in URLs, values after flags like `--token`, and known token shapes. `${VAR}` references stay readable.
 - To change anything, use claude (`claude mcp`, `/plugin`, `/mcp`) or edit its files, then **Refresh**.
 
+### Servers
+
+The **Servers** page (the stacked-boxes button in the nav header, or Ctrl+K) shows what's running in the profile's projects, checked every 3 s while it's open:
+
+- **Found by itself:** any of your programs listening on a TCP port whose working folder is inside a project (the deepest project wins), read from `/proc`. Each row shows the port, the program, its folder, how long it has been up, and a quick HTTP check: `200 OK`, another status, or `listening` if it doesn't speak HTTP. Workbench itself and other users' programs are left out.
+- **Declared:** a project's `servers:` list. A declared server with a `port` merges with what runs there; one that isn't running shows red (**down**), and a `url` is what gets checked.
+- **Actions:** **Open** (in your browser), **Copy URL**, and **Stop**, which asks first and then sends SIGTERM, as Ctrl+C would.
+- **In the nav,** a project with a server up gets a small green mark (with a count past one), checked every 15 s; red when a declared one is down. The project card says "2 servers running" and links to the page.
+
 ### Notes
 
 - A **note** entry opens formatted (GitHub-flavoured Markdown: tables, task lists, images next to the note). **Edit** or **Ctrl+E** switches to the editor in the same place, and back.
 - Edits **save automatically** a second after you stop typing, and when you leave the note. **Ctrl+S** saves at once.
 - A note changed on disk (another editor, `git pull`) reloads while it's open. If you have unsaved edits at that moment, autosave pauses and a banner offers **Reload from disk** or **Keep mine**.
 - **New note…** in the right-click menu of a heading or group creates `<notes>/<Title>.md` and its entry in one step.
-- `[[Name]]` links to the note with that file name in the notes folder (`[[folder/Name]]` and `[[Name|shown text]]` work too). A link to a note that doesn't exist yet looks faint; clicking it offers to create the note. Relative links like `[x](other.md)` open in the app too.
+- `[[Name]]` links to the note with that file name in the notes folder (`[[folder/Name]]`, `[[Name|shown text]]` and `[[Name#Heading]]`, which scrolls to the heading, work too). A link to a note that doesn't exist yet looks faint; clicking it offers to create the note. Relative links like `[x](other.md)` open in the app too.
 - **Search** (the box in the top bar, **Ctrl+Shift+F**) finds notes containing every word you type, across the notes folder and your note entries. With no words it lists notes by date. **Enter** opens the first result.
-- A **daily** entry opens today's note, `<notes>/daily/YYYY-MM-DD.md`, creating it from `<notes>/templates/daily.md` the first time (`{{date}}` and `{{title}}` are filled in). The arrows step to other days.
+- A **daily** entry opens today's note, `<notes>/daily/YYYY-MM-DD.md`, creating it from `<notes>/templates/daily.md` the first time (`{{date}}` and `{{title}}` are filled in). The arrows step to other days. Left open past midnight, it moves to the new day.
+- **Task boxes** (`- [ ]`) tick in the formatted view too; the change saves like an edit.
+- **Code blocks** are coloured for JavaScript and TypeScript (with JSX), JSON, CSS, HTML and Markdown; other languages stay plain.
 - Without `notes:` in a profile, the app offers to set it to `<home>/notes` with one click. The folder is created with the first note.
 
 ### Files
 
 - A project's **All files** and folder-step tabs show a file browser: a tree with sizes and dates, and a preview of the selected file on the right.
 - Click the arrow to expand a folder in place; **double-click** (or **Enter**) to make it the top. The path bar jumps back up, and so does **Backspace** or **Alt+←**.
-- **Filter by name** narrows the tree to matching names in the folders you have open. Click a column header to sort.
+- **Filter by name** narrows the tree to matching names in the folders you have open; **Search all folders** looks through the closed ones too. Click a column header to sort.
 - Dotfiles are hidden; **Ctrl+H** shows them. In a git repository, files `.gitignore` excludes (`node_modules`, `dist`, logs) are shown dimmed.
 - Previews: images, PDF, video and audio, Markdown formatted, and other text as plain text (the first 200 KB). **Open as note** (or Enter) opens Markdown in the notes view, where you can edit it.
-- **F2** renames in place, **Delete** moves the selection to the GNOME Trash (`gio trash`; restore it from Trash in Files), and the toolbar makes a new folder or file. Drag files onto a folder or a path-bar step to move them. Rename and move have **Undo**; nothing is ever overwritten.
+- **F2** renames in place, **Delete** moves the selection to the GNOME Trash (`gio trash`), and the toolbar makes a new folder or file. Drag files onto a folder or a path-bar step to move them; hold **Ctrl** to copy instead. **Ctrl+C / Ctrl+V** copy and paste, and **Duplicate** makes `name copy.txt`. Rename, move and Trash have **Undo** (Trash puts the item back unless something has taken its place); nothing is ever overwritten.
+- Files dragged in from Files or the desktop are copied into the folder under the pointer (up to 2 GB each).
+- **Compute size** (a folder's menu, or the toolbar for every folder shown) adds up a folder; very big ones stop after 10 s and show "≥".
+- Very large folders draw only the rows in view.
 - Right-click for the rest: open in the default app, open the folder in Files, copy the path.
 - The tree follows changes on disk while it is open.
 
@@ -244,11 +279,15 @@ Notes can only touch:
 - the files of that profile's note entries,
 - images inside those places, read-only.
 
-The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file, and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
+The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file (copies, uploads and restores from the Trash take a free name or refuse), and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
 
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else. Background pictures are copied only from the profile's folders, only raster types (no SVG, which can carry scripts), and served only by plain name from the backgrounds folder.
 
 Agent profiles only choose flags for claude (`--model`, `--permission-mode` and the rest), from your YAML; a request names a profile, never flags. A chat is shell access, so its terminal socket (`/pty/`) needs more: browsers can't add the `X-Workbench` header to a WebSocket, so it must come from Workbench's own `Origin`, and it carries a random token that changes every time the service starts, which only the app can read through the API. Chats start from an entry or step in your config, by its position; a request never carries a command or arguments, and **Chat here** only works inside the profile's folders. Claude's transcripts in `~/.claude/projects/` are read for History, never written.
+
+**Servers** lists only your own processes whose folder is inside one of the profile's projects. **Stop** names a process and port; the service checks again that this process is yours, still listens on that port and runs in a project before it sends SIGTERM, and refuses anything else.
+
+Each claude chat starts with a `SessionStart` hook (passed with `--settings`, merged with your own hooks) that runs `server/session-hook.mjs`. It only writes the chat's new session id to `~/.local/state/workbench/sessions/`, so a chat's tab follows `/clear` and `/resume`.
 
 **Context** is set up only when you ask, and only inside the profile's notes folder; it never overwrites a file. **Send to inbox** copies only files from the profile's folders (checked after resolving symlinks), under a free name.
 
@@ -258,7 +297,7 @@ Agent profiles only choose flags for claude (`--model`, `--permission-mode` and 
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, HTTP API
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, servers, profiles, HTTP API
 npm run e2e        # Playwright against a throwaway config; programs are not started, chats and MCP checks run stand-ins
 npm run build      # type check + production build
 ```
@@ -271,13 +310,16 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/config-ops.ts` | edits applied to the YAML document |
 | `server/config-store.ts` | loading, validation, atomic writes, watching and undo |
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
-| `server/files.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; the folders a profile may reach; folder watching |
+| `server/files.ts`, `server/trash.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; putting things back from the Trash; the folders a profile may reach; folder watching |
+| `server/servers.ts`, `server/procfs.ts` | servers running in projects: listening sockets and their processes from `/proc`, declared servers, health checks, Stop |
+| `server/project-dates.ts` | a project's created and updated dates |
 | `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
-| `server/chats.ts`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list; reading claude's transcripts for History; agent profiles as claude flags |
+| `server/chats.ts`, `server/session-hook.mjs`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list, following `/clear`; reading claude's transcripts for History; agent profiles as claude flags |
 | `server/context.ts` | context folders: status, setup, what a chat is told, handoffs and files into the inbox |
 | `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
-| `src/` | the UI: nav panel, main pane, dialogs, notes (view, editor, search, daily), file browser, project page, chats, context, Claude setup |
+| `bin/workbench` | opens the window; installs, removes and prints the systemd units; the update step after a pull |
+| `src/` | the UI: nav panel, main pane, dialogs, Ctrl+K, profile settings, notes (view, editor, search, daily), file browser, project page, chats, context, Claude setup, servers |
 
 ## Roadmap
 
@@ -289,4 +331,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 5 | Agent chats (done) |
 | 6 | Claude setup: skills, MCP servers and more (done) |
 | 7 | Context folders (done) |
-| 8 | Polish (Ctrl+K switcher, systemd user service) |
+| 8 | Polish: Ctrl+K, profile settings, systemd service, the known gaps, Servers (done) |
+| later | A Tauri window, if wanted |

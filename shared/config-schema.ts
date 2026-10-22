@@ -140,8 +140,20 @@ export const CARD_FIELDS = ['description', 'status', 'category', 'pinned', 'agen
  * the agent profile New chat starts there (`agent`, default plain claude).
  * Without `steps:` it uses the profile's `workflow:`; an empty `steps:` means none.
  */
+/** A server a project names, for a health check and to show "down" when it is not running. */
+export const ServerDecl = z
+  .object({
+    name: z.string().trim().min(1, 'A server needs a name'),
+    port: z.int().min(1).max(65535).optional(),
+    url: z.string().regex(/^https?:\/\//, 'A server url starts with http:// or https://').optional(),
+  })
+  .refine((s) => s.port !== undefined || s.url !== undefined, 'A server needs a port or a url')
+export type ServerDecl = z.output<typeof ServerDecl>
+
 export const FolderItem = z.object({
   ...folderFields,
+  /** Servers the Servers page checks for this project, besides those it finds running. */
+  servers: z.array(ServerDecl).optional(),
   description: z.string().optional(),
   status: z.enum(STATUSES, 'Status must be active, paused, done or archived').optional(),
   category: z.string().trim().min(1).optional(),
@@ -556,6 +568,45 @@ export interface FolderSize {
 export interface FileFind {
   hits: FileEntry[]
   complete: boolean
+}
+
+// Servers running in projects (part 8)
+
+export interface ServerHealth {
+  /** up: answers HTTP; listening: takes connections but not HTTP; down: nothing there. */
+  state: 'up' | 'listening' | 'down'
+  code?: number
+  text: string
+}
+
+export interface ServerRow {
+  /** Stable within a project: the port, or the declared name. */
+  id: string
+  /** A declared server's name. */
+  name?: string
+  declared: boolean
+  port: number | null
+  pid?: number
+  /** The process name and command line. */
+  process?: string
+  command?: string
+  /** Where it runs, `~/…`. */
+  cwd?: string
+  /** Start time, ms since the epoch. */
+  started?: number
+  url: string | null
+  health: ServerHealth
+}
+
+export interface ProjectServers {
+  label: string
+  path: string
+  rows: ServerRow[]
+}
+
+export interface ServersScan {
+  at: number
+  projects: ProjectServers[]
 }
 
 // Agent chats (part 5)

@@ -14,6 +14,7 @@ import type {
   NoteSummary,
   Op,
   SearchHit,
+  ServersScan,
 } from '../../shared/config-schema.ts'
 import type { ClaudeSetup, McpCheck } from '../../shared/claude-setup.ts'
 
@@ -130,6 +131,11 @@ export const chatHistory = (profile: string, path: string) => api<ClaudeSession[
 export const claudeAgents = (profile: string, path: string) => api<string[]>(`/api/chats/claude-agents?${query({ profile, path })}`)
 /** The token a chat's terminal socket needs; new each time the service starts. */
 export const chatToken = () => api<{ token: string }>('/api/chats/token').then((r) => r.token)
+
+// Servers running in the profile's projects.
+export const servers = (profile: string) => api<ServersScan>(`/api/servers?${query({ profile })}`)
+/** SIGTERM to a server the scan lists; the service checks it again first. */
+export const stopServer = (profile: string, pid: number, port: number) => api('/api/servers/stop', { body: { profile, pid, port } })
 
 // Context folders: set up on request; files are copied into the inbox, never overwriting.
 export const contextStatus = (profile: string) => api<ContextStatus>(`/api/context?${query({ profile })}`)

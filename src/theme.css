@@ -3750,3 +3750,185 @@ button {
   color: var(--faint);
   font-size: 12px;
 }
+
+/* Servers: marks on project rows, the line on the card, and the Servers page. */
+
+.server-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--ok);
+  font-size: 11px;
+}
+
+.chat-mark + .server-mark {
+  margin-left: 6px;
+}
+
+.server-mark + .project-marks {
+  margin-left: 6px;
+}
+
+.server-mark.down {
+  color: var(--danger);
+}
+
+.card-servers {
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.card-servers.down {
+  color: var(--danger);
+}
+
+.servers-page {
+  max-width: 980px;
+}
+
+.servers-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.servers-bar .spacer {
+  flex: 1;
+}
+
+.servers-bar .hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.servers-bar .err {
+  color: var(--danger);
+}
+
+.servers-none {
+  padding: 18px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.servers-project {
+  margin: 0 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.servers-project h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.servers-project h2 .mono {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.servers-project ul {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+}
+
+.server-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 90px 130px auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 10px;
+  border-radius: 5px;
+}
+
+.server-row:hover {
+  background: var(--hover);
+}
+
+.server-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.server-dot.up {
+  background: var(--ok);
+}
+
+.server-dot.listening {
+  background: var(--accent);
+}
+
+.server-dot.down {
+  background: var(--danger);
+}
+
+.server-what {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.server-what .port {
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.server-name {
+  color: var(--text);
+}
+
+.server-process {
+  color: var(--muted);
+}
+
+.server-cwd {
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+}
+
+.server-up {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.server-health {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.server-health.up {
+  color: var(--ok);
+}
+
+.server-health.down {
+  color: var(--danger);
+}
+
+.server-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.servers-quiet p {
+  color: var(--muted);
+}
