@@ -82,12 +82,15 @@ export const searchNotes = (profile: string, q: string) => api<SearchHit[]>(`/ap
 export const listFiles = (profile: string, path: string) => api<FileListing>(`/api/files/list?${query({ profile, path })}`)
 export const fileText = (profile: string, path: string) => api<FileText>(`/api/files/text?${query({ profile, path })}`)
 /** A short-lived URL for media elements, which cannot send the X-Workbench header. */
-/** With `folder`, an HTML report's URL also serves the files next to it. */
+/** With `folder`, an HTML report's or a 3D model's URL also serves the files next to it. */
 export const fileTicket = (profile: string, path: string, folder = false) =>
   api<{ url: string }>('/api/files/ticket', { body: { profile, path, folder } })
 export const fileOp = <T extends FileOpResult = FileOpResult>(profile: string, op: FileOp) =>
   api<T>('/api/files/op', { body: { profile, op } })
 export const openFile = (profile: string, path: string) => api('/api/files/open', { body: { profile, path } })
+/** The program a file opens in (the profile's openWith:, or Blender and Godot when installed); null for the default app. */
+export const openWithLabel = (profile: string, path: string) => api<{ label: string | null }>(`/api/files/open-with?${query({ profile, path })}`)
+export const openWith = (profile: string, path: string) => api<{ label: string }>('/api/files/open-with', { body: { profile, path } })
 /** When a project's folder was made and last worked on (git, else its files). */
 export const projectDates = (profile: string, path: string) =>
   api<{ created: number | null; updated: number | null; source: 'git' | 'files' }>(`/api/projects/dates?${query({ profile, path })}`)

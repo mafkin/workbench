@@ -5,6 +5,8 @@ import path from 'node:path'
 
 export const PORT = 7431
 export const DIR = path.resolve(import.meta.dirname, '.tmp-config')
+/** The gallery's thumbnail cache (cleared with each reset); outside the config folder, as ~/.cache is. */
+export const THUMBS = path.resolve(import.meta.dirname, '.tmp-thumbs')
 export const HOME = path.join(DIR, 'home')
 export const SPAWN_LOG = path.join(DIR, 'spawned.log')
 export const WORK_FILE = path.join(DIR, 'profiles/work.yaml')
@@ -153,6 +155,7 @@ export async function resetFixture() {
   await fsp.rm(TRASH, { recursive: true, force: true })
   await fsp.rm(path.join(DIR, 'backgrounds'), { recursive: true, force: true })
   await fsp.rm(MANAGED, { recursive: true, force: true })
+  await fsp.rm(THUMBS, { recursive: true, force: true })
   await fsp.mkdir(ALPHA, { recursive: true })
   for (const [rel, data] of Object.entries(ALPHA_FILES)) {
     await fsp.mkdir(path.dirname(path.join(ALPHA, rel)), { recursive: true })

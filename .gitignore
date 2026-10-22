@@ -4,3 +4,4 @@ test-results/
 playwright-report/
 e2e/.tmp-config/
 *.log
+e2e/.tmp-thumbs/
