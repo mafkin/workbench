@@ -40,6 +40,7 @@ import { applyOps, describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
 import { Context } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
+import { Git, type Repo } from './git.ts'
 import { makeGuard } from './guard.ts'
 import { LaunchError, openItem, runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
@@ -71,6 +72,8 @@ export interface ServerOptions {
   managedDir?: string
   /** How long an MCP check waits for a server. */
   mcpTimeoutMs?: number
+  /** How often the active profile's repositories are fetched; 0 for never (tests). */
+  gitFetchEveryMs?: number
 }
 
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
@@ -108,6 +111,31 @@ const ChatPatch = z.object({
 })
 const ChatRestart = z.object({ fresh: z.boolean().default(false) })
 const SetupQuery = z.object({ profile: z.string(), path: z.string().optional() })
+// Git: every request names a project (its path as written in the config).
+const GitQuery = z.object({ profile: z.string(), path: z.string() })
+const GitHunk = z.object({ file: z.string().min(1), id: z.string().regex(/^[0-9a-f]{16}$/, 'Not a hunk') })
+const GitFiles = GitQuery.extend({ files: z.array(z.string().min(1)).max(5000).optional(), all: z.boolean().optional(), hunk: GitHunk.optional() })
+const GitDiffQuery = GitQuery.extend({ file: z.string().min(1), staged: z.enum(['0', '1']).default('0') })
+const GitUndo = GitQuery.extend({ undo: z.string().uuid() })
+const GitCommit = GitQuery.extend({ message: z.string().max(100_000), amend: z.boolean().default(false) })
+const GitBranch = GitQuery.extend({
+  action: z.enum(['switch', 'create', 'rename', 'delete']),
+  name: z.string().min(1).max(250),
+  to: z.string().min(1).max(250).optional(),
+  carry: z.enum(['carry', 'stash']).optional(),
+  force: z.boolean().default(false),
+})
+const GitStash = GitQuery.extend({
+  action: z.enum(['push', 'pop', 'apply', 'drop']),
+  index: z.int().nonnegative().optional(),
+  hash: z.string().regex(/^[0-9a-f]{40,64}$/).optional(),
+  message: z.string().max(500).optional(),
+})
+const GitRemote = GitQuery.extend({ quiet: z.boolean().default(false), merge: z.boolean().default(false), publish: z.boolean().default(false) })
+const GitResolve = GitQuery.extend({ file: z.string().min(1), force: z.boolean().default(false) })
+const GitAsk = GitQuery.extend({ files: z.array(z.string().min(1)).min(1).max(200) })
+const GitLog = GitQuery.extend({ skip: z.coerce.number().int().nonnegative().default(0) })
+const GitShow = GitQuery.extend({ hash: z.string().regex(/^[0-9a-f]{4,64}$/, 'Not a commit'), file: z.string().optional() })
 const DocQuery = SetupQuery.extend({ id: z.string() })
 const CheckBody = SetupQuery.extend({ id: z.string(), confirm: z.boolean().optional() })
 
@@ -143,6 +171,12 @@ export async function buildServer(opts: ServerOptions) {
   const servers = new Servers(store, home)
   const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
   await chats.init()
+  const git = new Git(store, home, {
+    spawn: opts.spawn,
+    draft: (cwd, prompt, input) => chats.print(cwd, prompt, input),
+    fetchEveryMs: opts.gitFetchEveryMs ?? 10 * 60_000,
+    activeProfile: () => store.state().activeProfile ?? null,
+  })
   // A chat's terminal is shell access. Besides the guard, its socket needs this
   // token, new on every start, which only the app can read (through the API).
   const ptyToken = randomBytes(32).toString('hex')
@@ -163,6 +197,7 @@ export async function buildServer(opts: ServerOptions) {
     notes.close()
     files.close()
     context.close()
+    git.close()
     await chats.shutdown()
   })
   // The token comes as a second subprotocol, so it never appears in a URL or a log;
@@ -489,6 +524,120 @@ export async function buildServer(opts: ServerOptions) {
     return { ok: true }
   })
 
+  // Git per project: the repository a project of the profile is in. Files,
+  // branches, stashes and commits are checked against what git lists; hunks are
+  // found again by their hash. A request never carries a patch, a command or flags.
+  const repoOf = (q: { profile: string; path: string }) => git.need(q.profile, q.path)
+  /** A change, then the status it leaves. */
+  const gitDone = async (r: Repo, extra: object = {}) => ({ ...extra, status: await git.status(r) })
+
+  app.get('/api/git/marks', async (req) => git.marks(parse(ProfileQuery, req.query).profile))
+  app.get('/api/git/status', async (req) => git.status(await repoOf(parse(GitQuery, req.query))))
+  app.get('/api/git/diff', async (req) => {
+    const q = parse(GitDiffQuery, req.query)
+    return git.diff(await repoOf(q), q.file, q.staged === '1')
+  })
+  app.post('/api/git/stage', async (req) => {
+    const b = parse(GitFiles, req.body)
+    const r = await repoOf(b)
+    await git.stage(r, b)
+    return gitDone(r)
+  })
+  app.post('/api/git/unstage', async (req) => {
+    const b = parse(GitFiles, req.body)
+    const r = await repoOf(b)
+    await git.unstage(r, b)
+    return gitDone(r)
+  })
+  app.post('/api/git/discard', async (req) => {
+    const b = parse(GitFiles, req.body)
+    const r = await repoOf(b)
+    return gitDone(r, await git.discard(r, b))
+  })
+  app.post('/api/git/undo', async (req) => {
+    const b = parse(GitUndo, req.body)
+    const r = await repoOf(b)
+    return gitDone(r, await git.undoDiscard(r, b.undo))
+  })
+  app.post('/api/git/commit', async (req) => {
+    const b = parse(GitCommit, req.body)
+    const r = await repoOf(b)
+    return gitDone(r, { commit: await git.commit(r, b.message, b.amend) })
+  })
+  app.post('/api/git/draft', async (req) => ({ message: await git.draft(await repoOf(parse(GitQuery, req.body))) }))
+  app.get('/api/git/branches', async (req) => git.branches(await repoOf(parse(GitQuery, req.query))))
+  app.post('/api/git/branch', async (req) => {
+    const b = parse(GitBranch, req.body)
+    const r = await repoOf(b)
+    if (b.action === 'switch') await git.switchTo(r, b.name, b.carry)
+    else if (b.action === 'create') await git.createBranch(r, b.name)
+    else if (b.action === 'rename') {
+      if (!b.to) throw new StoreError('A new name is required', 400)
+      await git.renameBranch(r, b.name, b.to)
+    } else await git.deleteBranch(r, b.name, b.force)
+    return gitDone(r)
+  })
+  app.post('/api/git/stash', async (req) => {
+    const b = parse(GitStash, req.body)
+    const r = await repoOf(b)
+    return gitDone(r, await git.stash(r, b))
+  })
+  app.post('/api/git/fetch', async (req) => {
+    const b = parse(GitRemote, req.body)
+    const r = await repoOf(b)
+    await git.fetch(r, { quiet: b.quiet })
+    return gitDone(r)
+  })
+  app.post('/api/git/pull', async (req) => {
+    const b = parse(GitRemote, req.body)
+    const r = await repoOf(b)
+    return gitDone(r, await git.pull(r, b.merge))
+  })
+  app.post('/api/git/push', async (req) => {
+    const b = parse(GitRemote, req.body)
+    const r = await repoOf(b)
+    await git.push(r, b.publish)
+    return gitDone(r)
+  })
+  app.post('/api/git/resolve', async (req) => {
+    const b = parse(GitResolve, req.body)
+    const r = await repoOf(b)
+    await git.resolve(r, b.file, b.force)
+    return gitDone(r)
+  })
+  app.post('/api/git/abort', async (req) => {
+    const b = parse(GitQuery, req.body)
+    const r = await repoOf(b)
+    await git.abort(r)
+    return gitDone(r)
+  })
+  app.get('/api/git/log', async (req) => {
+    const q = parse(GitLog, req.query)
+    return git.log(await repoOf(q), q.skip)
+  })
+  app.get('/api/git/commit', async (req) => {
+    const q = parse(GitShow, req.query)
+    const r = await repoOf(q)
+    return q.file ? git.commitDiff(r, q.hash, q.file) : git.commitDetail(r, q.hash)
+  })
+  // Ask claude: a new chat in the project, with a prompt written here from the conflicted files' names.
+  app.post('/api/git/ask', async (req) => {
+    const b = parse(GitAsk, req.body)
+    const r = await repoOf(b)
+    const p = store.profile(b.profile)
+    if (!p.profile) throw new StoreError('The profile file is broken', 423)
+    const s = await git.status(r)
+    const files = b.files.filter((f) => s.conflicts.some((c) => c.path === f))
+    if (!files.length) throw new StoreError('None of those files has a conflict', 409)
+    const what = s.operation === 'merge' ? (s.operationLabel ?? 'a merge') : 'a stash that was applied'
+    const prompt =
+      `This repository has merge conflicts from ${what}. Resolve the conflicts in ${files.join(', ')}` +
+      ` (paths from the repository's top folder${s.sub ? `; this chat runs in ${s.sub}` : ''}): keep what both sides meant,` +
+      ` remove the conflict markers, and say what you chose. Don't stage, commit or abort; I'll mark the files resolved myself.`
+    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, r.project.agent, r.dir, [])) }
+    return chats.start({ ...spec, prompt, label: 'Conflicts' })
+  })
+
   // A project card's dates: when its folder was made and last worked on.
   app.get('/api/projects/dates', async (req) => {
     const { profile: id, path: raw } = parse(PathQuery, req.query)
@@ -613,7 +762,7 @@ export async function buildServer(opts: ServerOptions) {
     })
   }
 
-  return { app, store, notes, files, chats, context }
+  return { app, store, notes, files, chats, context, git }
 }
 
 if (import.meta.main) {

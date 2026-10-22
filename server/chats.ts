@@ -394,6 +394,24 @@ export class Chats extends EventEmitter {
   }
 
   /**
+   * A one-off answer from claude (a commit message): `claude -p` in `cwd` with
+   * `input` on stdin, no tools, and no session kept, so it stays out of History.
+   */
+  print(cwd: string, prompt: string, input: string, timeoutMs = 90_000): Promise<string> {
+    const cmd = this.#program('claude')
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        cmd,
+        ['-p', prompt, '--no-session-persistence', '--tools', ''],
+        { cwd, env: this.#env(cmd), timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+        (err, stdout) => (err ? reject(new StoreError(`claude could not answer: ${err.killed ? 'it took too long' : err.message}`, 502)) : resolve(stdout)),
+      )
+      child.stdin?.on('error', () => {})
+      child.stdin?.end(input)
+    })
+  }
+
+  /**
    * Summarize and continue: claude writes a handoff of the session in the
    * background (a fork, so the session itself is untouched), and a new chat
    * starts with it. A chat step or entry moves to the new chat; a tab started
