@@ -33,7 +33,7 @@ import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
-import type { ProjectActions } from './components/ProjectView.tsx'
+import { GIT_TAB, type ProjectActions } from './components/ProjectView.tsx'
 import type { GitMark } from '../shared/git.ts'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
@@ -879,6 +879,19 @@ export function App() {
             run: () => (outside ? projectActions.launchStep(addr, i, step.label, step.type as 'launch' | 'link') : openRecent({ key, step: step.label, label: item.label, entry: entryId(item), at: 0 })),
           })
         }
+        if (gitMarks.has(item.path)) {
+          const mark = gitMarks.get(item.path)!
+          items.push({
+            id: `step:${entryId(item)}|git:`,
+            kind: 'step',
+            label: `${item.label} › Git`,
+            detail: [mark.branch ?? 'detached', mark.changed && `${mark.changed} changed`].filter(Boolean).join(' · '),
+            run: () => {
+              showProjectTab(active.id, item.path, GIT_TAB)
+              activate(addr, item)
+            },
+          })
+        }
         items.push({ id: `action:chat:${entryId(item)}`, kind: 'action', label: `New chat in ${item.label}`, detail: item.path, run: () => void newChatIn(addr) })
       }
       for (const [i, item] of section.items.entries()) {
@@ -952,6 +965,7 @@ export function App() {
               onServers={() => navigate(SERVERS_KEY)}
               serversActive={selection?.kind === 'servers'}
               serverMarks={serverMarks}
+              gitMarks={gitMarks}
               onProfileSettings={() => setProfileOpen(true)}
                 setupActive={selection?.kind === 'setup'}
                 contextSelected={selection?.kind === 'context' ? selection.name : null}

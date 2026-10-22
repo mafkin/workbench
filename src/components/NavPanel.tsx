@@ -16,6 +16,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { Blocks, BookOpen, Server, Settings2, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, CONTEXT_LABEL, entrySlot, itemKey, projectHost, type ContextFolder, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import type { GitMark } from '../../shared/git.ts'
 import { useContextFolders } from '../lib/context.ts'
 import type { Connection } from '../lib/events.ts'
 import { useLocal } from '../lib/local.ts'
@@ -37,6 +38,8 @@ export interface NavActions {
   chatMarks: Map<string, { running: number; attention: boolean }>
   /** Servers up (and declared ones down) per project path. */
   serverMarks: Map<string, { up: number; down: number }>
+  /** Each project's repository (branch, changed files, ahead/behind, conflicts) per project path. */
+  gitMarks: Map<string, GitMark>
   notify: (message: string, kind?: 'info' | 'error') => void
 }
 
@@ -648,6 +651,7 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       )}
       {!ctx.editing && <ChatMark item={item} />}
       {!ctx.editing && <ServerMark item={item} />}
+      {!ctx.editing && <GitMarkView item={item} />}
       {!ctx.editing && item.type === 'folder' && (
         <span className="project-marks">
           {item.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
@@ -684,6 +688,28 @@ function ServerMark({ item }: { item: NavItem }) {
     <span className={cx('server-mark', mark.down > 0 && 'down')} title={what} aria-label={what}>
       <Server size={10} />
       {mark.up > 1 && mark.up}
+    </span>
+  )
+}
+
+/** Uncommitted changes as a dot, ↑ with commits to push, ↓ with commits to pull; red with conflicts. */
+function GitMarkView({ item }: { item: NavItem }) {
+  const { gitMarks } = useContext(Ctx)
+  const mark = item.type === 'folder' ? gitMarks.get(item.path) : undefined
+  if (!mark || (!mark.changed && !mark.ahead && !mark.behind && !mark.conflicts)) return null
+  const what = [
+    mark.conflicts && `${mark.conflicts} in conflict`,
+    mark.changed && `${mark.changed} uncommitted ${mark.changed === 1 ? 'change' : 'changes'}`,
+    mark.ahead && `${mark.ahead} to push`,
+    mark.behind && `${mark.behind} to pull`,
+  ]
+    .filter(Boolean)
+    .join(', ')
+  return (
+    <span className={cx('git-mark', mark.conflicts > 0 && 'conflict')} title={`${mark.branch ?? 'detached'}: ${what}`} aria-label={what}>
+      {(mark.changed > 0 || mark.conflicts > 0) && <span className="git-dot" />}
+      {mark.ahead > 0 && <span>↑</span>}
+      {mark.behind > 0 && <span>↓</span>}
     </span>
   )
 }

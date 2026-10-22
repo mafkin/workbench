@@ -72,9 +72,12 @@ test('stage one hunk, draft the message with claude, commit and push', async ({ 
   expect(sh(ALPHA, 'diff')).toContain('+LINE TWENTY-FIVE')
   await expect(page.locator('.git-ab')).toContainText('↑1')
 
+  // The nav shows uncommitted changes and a commit to push; Push clears the arrow.
+  await expect(entry(page, 'Alpha').locator('.git-mark')).toHaveAttribute('aria-label', /\d+ uncommitted changes?, 1 to push/)
   await page.getByRole('button', { name: 'Push', exact: true }).click()
   await expect(page.locator('.toast').last()).toContainText('Pushed main')
   await expect(page.locator('.git-ab')).toContainText('↑0')
+  await expect(entry(page, 'Alpha').locator('.git-mark')).not.toHaveAttribute('aria-label', /to push/)
   expect(sh(REMOTE, 'log', '-1', '--format=%s')).toBe('Say line two louder\n')
 
   await page.getByRole('region', { name: 'History' }).locator('.git-commit-row').first().click()
@@ -127,6 +130,7 @@ test('a pull that conflicts: the banner, Ask claude, and Abort', async ({ page }
   await page.getByRole('alertdialog', { name: 'Merge to pull?' }).getByRole('button', { name: 'Merge' }).click()
   const banner = page.getByRole('alert', { name: 'Conflicts' })
   await expect(banner).toContainText('conflicts in 1 file')
+  await expect(entry(page, 'Alpha').locator('.git-mark.conflict')).toHaveAttribute('aria-label', /^1 in conflict/)
   await expect(banner).toContainText('notes.txt')
   await page.screenshot({ path: 'test-results/git-conflict.png' })
 
@@ -137,4 +141,12 @@ test('a pull that conflicts: the banner, Ask claude, and Abort', async ({ page }
   await page.getByRole('alertdialog').getByRole('button', { name: 'Abort merge' }).click()
   await expect(page.getByRole('alert', { name: 'Conflicts' })).toHaveCount(0)
   expect(fs.readFileSync(path.join(ALPHA, 'notes.txt'), 'utf8')).toContain('ours')
+})
+
+test('Ctrl+K opens a project’s Git tab', async ({ page }) => {
+  await page.keyboard.press('Control+k')
+  await page.keyboard.type('alpha git')
+  await page.getByRole('option', { name: /Alpha › Git/ }).first().click()
+  await expect(page.getByRole('tab', { name: /^Git/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.git-branch')).toContainText('main')
 })

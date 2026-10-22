@@ -236,6 +236,31 @@ The **Servers** page (the stacked-boxes button in the nav header, or Ctrl+K) sho
 - **Actions:** **Open** (in your browser), **Copy URL**, and **Stop**, which asks first and then sends SIGTERM, as Ctrl+C would.
 - **In the nav,** a project with a server up gets a small green mark (with a count past one), checked every 15 s; red when a declared one is down. The project card says "2 servers running" and links to the page.
 
+### Git
+
+A project in a git repository (or in a folder of one) gets a **Git** tab after All files, with its count of changed files.
+
+- **Changes:** staged files and changes (new files included), each with Stage, Unstage and Discard. Space stages the selected file; **Stage all**, **Unstage all** and **Discard all** do the whole list.
+- **The diff** of the selected file is on the right. Each hunk has **Stage hunk**, **Unstage hunk** or **Discard hunk**, so you can commit part of a file.
+- **Discard** asks first. Undo in the toast that follows puts your edits back. New files go to the Trash.
+- **Commit:**
+  - Write the message (Ctrl+Enter commits), or click **Draft** and claude writes one from the staged diff, in the style of your recent commits. You edit it before committing; Draft never commits.
+  - **Amend** changes the last commit, until it is pushed.
+- **Branch bar:**
+  - The branch name opens a menu: switch (remote branches get a local one that tracks them), **New branch…**, **Rename…** and **Delete…**. Deleting a branch with unmerged commits names them and asks again.
+  - Switching with uncommitted changes asks whether to stash them first or bring them along.
+  - ↑↓ show how far you are ahead of and behind the upstream.
+  - **Fetch**, **Pull** and **Push** (**Publish** for a branch that isn't on the remote yet). Pull only fast-forwards; when both sides have new commits, it offers to merge. There is no force push.
+- **Fetching:** each repository of the active profile is fetched quietly every 10 minutes, and when you open its tab. Git uses your own SSH keys and credential helper and never waits for a password prompt; a failed fetch shows in the tab.
+- **Conflicts** (after a merge or a stash pop): a banner lists the files.
+  - **Open** opens a Markdown file as a note, and anything else in its default app.
+  - **Ask claude** starts a chat in the project that's asked to resolve them.
+  - **Mark resolved** stages the file, and asks first if conflict markers are still in it.
+  - **Abort merge** goes back to how things were.
+- **Stashes:** **Stash…** in Changes. Each stash has **Pop**, and right-click for Apply and Drop.
+- **History:** the branch's last 200 commits, with **Load more**. Click a commit for its message, files and diffs; right-click it to copy its hash.
+- **In the nav,** a project shows a small dot for uncommitted changes, ↑ for commits to push and ↓ for commits to pull, in red when there are conflicts. The card shows the branch and the same counts; click it to open the Git tab. **Ctrl+K** has "<project> › Git".
+
 ### Notes
 
 - A **note** entry opens formatted (GitHub-flavoured Markdown: tables, task lists, images next to the note). **Edit** or **Ctrl+E** switches to the editor in the same place, and back.
@@ -287,6 +312,8 @@ Agent profiles only choose flags for claude (`--model`, `--permission-mode` and 
 
 **Servers** lists only your own processes whose folder is inside one of the profile's projects. **Stop** names a process and port; the service checks again that this process is yours, still listens on that port and runs in a project before it sends SIGTERM, and refuses anything else.
 
+**Git** works only on the repositories of the profile's projects. A request names the project; files, branches, stashes and commits must be ones git lists. A hunk is found again by its hash before it is applied, so the page never sends a patch. Git runs with no shell and never prompts. It also runs with `core.fsmonitor` off: a repository's config could otherwise name a program to run on a plain `git status`, so looking at a cloned repository never runs anything from it. Committing, merging and switching branches run the repository's hooks, as git in a terminal does. Error messages have credentials in URLs masked. **Draft** runs `claude -p` with no tools and no saved session; only the staged diff (up to 60 KB) and your recent commit subjects are sent.
+
 Each claude chat starts with a `SessionStart` hook (passed with `--settings`, merged with your own hooks) that runs `server/session-hook.mjs`. It only writes the chat's new session id to `~/.local/state/workbench/sessions/`, so a chat's tab follows `/clear` and `/resume`.
 
 **Context** is set up only when you ask, and only inside the profile's notes folder; it never overwrites a file. **Send to inbox** copies only files from the profile's folders (checked after resolving symlinks), under a free name.
@@ -297,7 +324,7 @@ Each claude chat starts with a `SessionStart` hook (passed with `--settings`, me
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, servers, profiles, HTTP API
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, servers, git, profiles, HTTP API
 npm run e2e        # Playwright against a throwaway config; programs are not started, chats and MCP checks run stand-ins
 npm run build      # type check + production build
 ```
@@ -312,6 +339,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/trash.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; putting things back from the Trash; the folders a profile may reach; folder watching |
 | `server/servers.ts`, `server/procfs.ts` | servers running in projects: listening sockets and their processes from `/proc`, declared servers, health checks, Stop |
+| `server/git.ts`, `shared/git.ts` | git per project: status, diffs and hunks, stage, discard with Undo, commit, Draft, branches, stash, fetch, pull, push, conflicts, history, the nav's marks |
 | `server/project-dates.ts` | a project's created and updated dates |
 | `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
 | `server/chats.ts`, `server/session-hook.mjs`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list, following `/clear`; reading claude's transcripts for History; agent profiles as claude flags |
@@ -319,7 +347,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
 | `bin/workbench` | opens the window; installs, removes and prints the systemd units; the update step after a pull |
-| `src/` | the UI: nav panel, main pane, dialogs, Ctrl+K, profile settings, notes (view, editor, search, daily), file browser, project page, chats, context, Claude setup, servers |
+| `src/` | the UI: nav panel, main pane, dialogs, Ctrl+K, profile settings, notes (view, editor, search, daily), file browser, project page, Git tab, chats, context, Claude setup, servers |
 
 ## Roadmap
 
@@ -332,4 +360,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 6 | Claude setup: skills, MCP servers and more (done) |
 | 7 | Context folders (done) |
 | 8 | Polish: Ctrl+K, profile settings, systemd service, the known gaps, Servers (done) |
+| 9 | Git per project: changes, hunks, commit with Draft, branches, stash, pull and push, conflicts, history (done) |
 | later | A Tauri window, if wanted |

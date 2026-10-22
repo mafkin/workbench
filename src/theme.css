@@ -4506,3 +4506,39 @@ button {
     max-height: none;
   }
 }
+
+.git-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.chat-mark + .git-mark,
+.server-mark + .git-mark {
+  margin-left: 6px;
+}
+
+.git-mark + .project-marks {
+  margin-left: 6px;
+}
+
+.git-mark .git-dot {
+  width: 5px;
+  height: 5px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.git-mark.conflict {
+  color: var(--danger);
+}
+
+.git-mark.conflict .git-dot {
+  background: var(--danger);
+}
