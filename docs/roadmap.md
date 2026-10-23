@@ -44,7 +44,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 7 | Context folders | Done (same branch); see below |
 | 8 | Polish, the known gaps, Servers | Done (same branch); merged to `main` with parts 2–7 (PR #1) |
 | 9 | Git per project | Done; merged to `main`; see below |
-| 10 | Assets and media | Done (branch restarted from `main`); see below |
+| 10 | Assets and media | Done (branch restarted from `main`); merged to `main` with the profile menu, drawers, MCP switches and items (PR #3); see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
