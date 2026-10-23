@@ -20,6 +20,7 @@ sections:
       - { label: Alpha, type: folder, path: ~/alpha }
       - { label: Scratch, type: chat, path: ~/scratch }
       - { label: Docs, type: note, path: ~/alpha/README.md }
+      - { label: Loose, type: item, id: abc12345, steps: [{ label: talk, type: chat }] }
 `
 
 let dir: string
@@ -74,14 +75,15 @@ describe('chat routes', { timeout: 15_000 }, () => {
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
     expect(adhoc.status).toBe(200)
     expect(adhoc.body).toMatchObject({ host: 'project:~/alpha', slot: null, agent: 'claude', cwd: '~/alpha', state: 'running' })
+    // Alpha has no steps: of its own: All files and Claude setup come before the workflow.
 
-    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 0 })
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
     expect(step.body).toMatchObject({ host: 'project:~/alpha', slot: 'step:~/alpha|agent', cwd: '~/alpha' })
-    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 0 })
+    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
     expect(again.body.id).toBe(step.body.id)
     await until(() => server.chats.text(step.body.id).includes('args=["--model","opus"'), 'the step args')
 
-    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
+    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 3 })
     expect(shell.body).toMatchObject({ agent: 'shell', cwd: '~/alpha/src', session: null })
 
     const entry = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 1 } })
@@ -89,6 +91,16 @@ describe('chat routes', { timeout: 15_000 }, () => {
 
     const list = await call<Chat[]>('GET', '/api/chats?profile=work')
     expect(list.body.map((c) => c.id)).toEqual([adhoc.body.id, step.body.id, shell.body.id, entry.body.id])
+  })
+
+  test('an item without a folder: its chats run in home, keyed by its id; marks and servers skip it', async () => {
+    const loose = { section: 0, index: 3 }
+    const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose })
+    expect(adhoc.body).toMatchObject({ host: 'project:id:abc12345', slot: null, cwd: '~' })
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose, step: 0 })
+    expect(step.body).toMatchObject({ host: 'project:id:abc12345', slot: 'step:id:abc12345|talk', cwd: '~' })
+    expect((await call('GET', '/api/git/marks?profile=work')).status).toBe(200)
+    expect((await call('GET', '/api/servers?profile=work')).status).toBe(200)
   })
 
   test('requests name entries, never commands; paths stay in the profile folders; resume takes only a session id', async () => {
@@ -116,14 +128,14 @@ describe('chat routes', { timeout: 15_000 }, () => {
   })
 
   test('renaming a chat step in the app keeps its chat', async () => {
-    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 0 })
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
     const renamed = await call('POST', '/api/profiles/work/ops', {
       rev: rev(),
-      ops: [{ op: 'updateStep', at: { section: 0, index: 0 }, index: 0, step: { label: 'claude', type: 'chat', args: ['--model', 'opus'] } }],
+      ops: [{ op: 'updateStep', at: { section: 0, index: 0 }, index: 2, step: { label: 'claude', type: 'chat', args: ['--model', 'opus'] } }],
     })
     expect(renamed.status).toBe(200)
     expect(server.chats.get(step.body.id)?.slot).toBe('step:~/alpha|claude')
-    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 0 })
+    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
     expect(again.body.id).toBe(step.body.id)
   })
 

@@ -66,7 +66,7 @@ test('adding a step copies the profile steps into the project, and a missing fol
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('button', { name: 'Add step' }).click()
   const dialog = page.getByRole('form', { name: 'Add step' })
-  await expect(dialog.getByRole('radio')).toHaveCount(7)
+  await expect(dialog.getByRole('radio')).toHaveCount(10)
   await dialog.locator('input[name=label]').fill('assets')
   await dialog.locator('input[name=path]').fill('art/assets')
   await expect(dialog).toContainText('Not found on disk')
@@ -76,6 +76,9 @@ test('adding a step copies the profile steps into the project, and a missing fol
 
   const yaml = await workYaml()
   expect(yaml).toMatch(/path: ~\/alpha\n\s+steps:\n/)
+  // The tabs it showed are now its own steps, built-in ones included.
+  expect(yaml).toContain('- { label: All files, type: files }')
+  expect(yaml).toContain('- { label: Git, type: git }')
   expect(yaml).toContain('- { label: assets, type: folder, path: art/assets }')
   expect(yaml).toContain('# Every project starts with these')
   expect(yaml).toContain('# first entry comment')
@@ -87,7 +90,7 @@ test('adding a step copies the profile steps into the project, and a missing fol
   await page.screenshot({ path: 'test-results/project-new-step.png' })
 })
 
-test('steps can be edited, reordered and removed; Reset brings back the profile steps', async ({ page }) => {
+test('steps can be edited, reordered and removed, built-in ones too; Add profile steps brings back the missing ones', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await stepMenu(page, 'readme', 'Edit…')
   const dialog = page.getByRole('form', { name: 'Edit step' })
@@ -98,21 +101,50 @@ test('steps can be edited, reordered and removed; Reset brings back the profile 
   await tabs(page).getByRole('button', { name: 'build' }).dragTo(tab(page, 'sources'))
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'build', 'sources', 'intro'])
 
-  await stepMenu(page, 'intro', 'Remove')
+  await stepMenu(page, 'intro', 'Remove tab')
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'build', 'sources'])
+  await expect(page.locator('.toast')).toContainText('its files stay')
+  // The note itself is still there.
+  expect(fs.existsSync(path.join(ALPHA, 'README.md'))).toBe(true)
 
-  await stepMenu(page, 'sources', 'Reset to profile steps')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme', 'build'])
-  expect(await workYaml()).not.toContain('steps:')
+  // A built-in tab goes the same way: Delete on the focused tab.
+  await tab(page, 'Claude setup').focus()
+  await page.keyboard.press('Delete')
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'build', 'sources'])
+  expect(await workYaml()).not.toContain('type: setup')
+
+  await stepMenu(page, 'sources', 'Add profile steps')
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'build', 'sources', 'readme'])
+})
+
+test('the Git tab can be removed like any step, and comes back as a step', async ({ page }) => {
+  await entry(page, 'Alpha').click()
+  await tabs(page).getByRole('tab', { name: /^Git/ }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: /Remove tab/ }).click()
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
+  const yaml = await workYaml()
+  expect(yaml).not.toContain('type: git')
+  expect(yaml).toContain('- { label: All files, type: files }')
+  // The repository itself is untouched.
+  expect(fs.existsSync(path.join(ALPHA, '.git'))).toBe(true)
+  // It stays gone after a reload, and + brings it back.
+  await page.reload()
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
+  await tabs(page).getByRole('button', { name: 'Add step' }).click()
+  const dialog = page.getByRole('form', { name: 'Add step' })
+  await dialog.getByRole('radio', { name: 'Git' }).click()
+  await dialog.getByRole('button', { name: 'Add' }).click()
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build', 'Git'])
 })
 
 test("one project's steps can become every project's", async ({ page }) => {
   await entry(page, 'Alpha').click()
-  await stepMenu(page, 'build', 'Remove')
+  await stepMenu(page, 'build', 'Remove tab')
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme'])
-  await stepMenu(page, 'readme', 'Use these steps for every project')
+  await stepMenu(page, 'readme', 'Save as profile steps')
   await expect.poll(async () => (await workYaml()).includes('command: make')).toBe(false)
-  expect(await workYaml()).not.toContain('steps:')
+  // Alpha keeps its own steps; Beta, still on the profile's, follows (no Git: it is not a repository).
+  expect(await workYaml()).toContain('steps:')
   await entry(page, 'Beta').click()
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme'])
 })

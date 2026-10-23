@@ -15,6 +15,7 @@ import {
   joinNotes,
   noteFileName,
   projectHost,
+  projectRef,
   sectionsOf,
   sharedRefs,
   stepsOf,
@@ -40,7 +41,7 @@ import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
-import { GIT_TAB, type ProjectActions } from './components/ProjectView.tsx'
+import type { ProjectActions } from './components/ProjectView.tsx'
 import type { GitMark } from '../shared/git.ts'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
@@ -423,7 +424,7 @@ export function App() {
       const item = addr && a?.profile ? entryAt(a.profile, addr)?.item : undefined
       if (a && r.step && item?.type === 'folder') {
         // Saved for the project, and heard directly by a project page already showing.
-        showProjectTab(a.id, item.path, r.step)
+        showProjectTab(a.id, projectRef(item), r.step)
       }
       navigate(addr ? itemKey(addr) : r.key)
     },
@@ -537,10 +538,10 @@ export function App() {
       const a = activeRef.current
       const p = a?.profile
       if (!a || !p) return
-      const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(item.path) === chat.host, drawerRef.current)
+      const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(projectRef(item)) === chat.host, drawerRef.current)
       const item = project && getItem(p, project)
       if (project && item?.type === 'folder') {
-        showProjectTab(a.id, item.path, chat.slot ? slotStep(chat.slot) : CHAT_TAB + chat.id)
+        showProjectTab(a.id, projectRef(item), chat.slot ? slotStep(chat.slot) : CHAT_TAB + chat.id)
         return navigate(itemKey(project))
       }
       const entry = findEntry(p, 'chat', (it) => it.type === 'chat' && entrySlot(it) === chat.host, drawerRef.current)
@@ -707,7 +708,7 @@ export function App() {
                       entries: agentEntries(activeRef.current?.profile?.agents, {
                         current: item.agent,
                         run: (agent) => void newChatIn(addr, agent),
-                        edit: () => setAgentsFor(item.path),
+                        edit: () => setAgentsFor(item.path ?? null),
                       }),
                     }),
                 },
@@ -773,19 +774,21 @@ export function App() {
   )
 
   const submitDialog = useCallback(
-    async (item: ItemInput) => {
+    async (item: ItemInput, extra?: { folder?: string }) => {
       if (!dialog) return false
       if (dialog.mode === 'add') return run([{ op: 'addItem', to: dialog.list, index: dialog.index, item }])
       if (dialog.mode === 'edit') return run([{ op: 'updateItem', at: dialog.at, item }])
       if (dialog.mode === 'step') {
-        if (dialog.index === undefined) return run([{ op: 'addStep', at: dialog.at, step: item }])
-        const ok = await run([{ op: 'updateStep', at: dialog.at, index: dialog.index, step: item }])
+        // An older project's first change writes the tabs it showed (`seed`).
+        const seed = dialog.seed ? { seed: dialog.seed } : {}
+        if (dialog.index === undefined) return run([{ op: 'addStep', at: dialog.at, step: item, ...(extra?.folder ? { folder: extra.folder } : {}), ...seed }])
+        const ok = await run([{ op: 'updateStep', at: dialog.at, index: dialog.index, step: item, ...seed }])
         // A renamed step that was the open tab stays the open tab.
         const a = activeRef.current
         const project = a?.profile ? getItem(a.profile, dialog.at) : undefined
         const old = dialog.item?.label
-        if (ok && a && project?.type === 'folder' && old && item.label !== old && readLocal<Record<string, string>>('projectTab', {})[`${a.id}|${project.path}`] === old) {
-          showProjectTab(a.id, project.path, String(item.label))
+        if (ok && a && project?.type === 'folder' && old && item.label !== old && readLocal<Record<string, string>>('projectTab', {})[`${a.id}|${projectRef(project)}`] === old) {
+          showProjectTab(a.id, projectRef(project), String(item.label))
         }
         return ok
       }
@@ -972,30 +975,25 @@ export function App() {
         const verb = item.type === 'launch' ? 'Start ' : item.type === 'link' ? 'Open ' : ''
         items.push({ id: `entry:${entryId(item)}`, kind: 'entry', label: `${verb}${item.label}`, detail: where(addr), run: () => activate(addr, item) })
         if (item.type !== 'folder') return
-        for (const [i, step] of stepsOf(p, item).entries()) {
+        const mark = item.path ? gitMarks.get(item.path) : undefined
+        for (const [i, step] of stepsOf(p, item, !!mark).entries()) {
           const outside = step.type === 'launch' || step.type === 'link'
+          const detail = outside
+            ? step.type === 'launch'
+              ? 'Start in the project'
+              : 'Open link'
+            : step.type === 'git' && mark
+              ? [mark.branch ?? 'detached', mark.changed && `${mark.changed} changed`].filter(Boolean).join(' · ')
+              : where(addr)
           items.push({
             id: `step:${entryId(item)}|${step.label}`,
             kind: 'step',
             label: `${item.label} › ${step.label}`,
-            detail: outside ? (step.type === 'launch' ? 'Start in the project' : 'Open link') : where(addr),
+            detail,
             run: () => (outside ? projectActions.launchStep(addr, i, step.label, step.type as 'launch' | 'link') : openRecent({ key, step: step.label, label: item.label, entry: entryId(item), at: 0 })),
           })
         }
-        if (gitMarks.has(item.path)) {
-          const mark = gitMarks.get(item.path)!
-          items.push({
-            id: `step:${entryId(item)}|git:`,
-            kind: 'step',
-            label: `${item.label} › Git`,
-            detail: [mark.branch ?? 'detached', mark.changed && `${mark.changed} changed`].filter(Boolean).join(' · '),
-            run: () => {
-              showProjectTab(active.id, item.path, GIT_TAB)
-              activate(addr, item)
-            },
-          })
-        }
-        items.push({ id: `action:chat:${entryId(item)}`, kind: 'action', label: `New chat in ${item.label}`, detail: item.path, run: () => void newChatIn(addr) })
+        items.push({ id: `action:chat:${entryId(item)}`, kind: 'action', label: `New chat in ${item.label}`, detail: item.path ?? where(addr), run: () => void newChatIn(addr) })
       }
       for (const { addr, item } of walkItems(p)) add(addr, item)
     }

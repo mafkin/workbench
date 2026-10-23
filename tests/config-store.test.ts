@@ -84,9 +84,10 @@ describe('errors', () => {
   })
 
   it('reports the line of the item that fails validation', () => {
-    const { error } = parseProfile(PROFILE.replace('        path: ~/a\n', ''))
+    // An item may leave out its folder, but not have an empty one.
+    const { error } = parseProfile(PROFILE.replace('        path: ~/a\n', '        path: ""\n'))
     expect(error?.message).toMatch(/sections\[0\]\.items\[0\]/)
-    expect(error?.line).toBe(8)
+    expect(error?.line).toBe(10)
   })
 
   it('keeps the last good profile and refuses edits while the file is broken', async () => {

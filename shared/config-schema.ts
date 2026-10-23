@@ -11,6 +11,8 @@ const base = {
 }
 
 const folderFields = { ...base, type: z.literal('folder'), path: z.string().trim().min(1, 'Path is required') }
+/** An item's folder is optional: an item without one holds notes, links, launchers and chats. */
+const itemFields = { ...base, type: z.literal('folder'), path: z.string().trim().min(1).optional() }
 export const NoteItem = z.object({ ...base, type: z.literal('note'), path: z.string().trim().min(1, 'Path is required') })
 export const LaunchItem = z.object({
   ...base,
@@ -119,6 +121,10 @@ export function agentSummary(a: AgentProfile): string {
 // Only as workflow steps: an HTML report shown in its tab, and one file shown large.
 const ReportStep = z.object({ ...base, type: z.literal('report'), path: z.string().trim().min(1, 'Path is required') })
 const FileStep = z.object({ ...base, type: z.literal('file'), path: z.string().trim().min(1, 'Path is required') })
+// The item's own folder in the file browser, its Git tab and its Claude setup.
+const FilesStep = z.object({ ...base, type: z.literal('files') })
+const GitStep = z.object({ ...base, type: z.literal('git') })
+const SetupStep = z.object({ ...base, type: z.literal('setup') })
 
 /**
  * A step in a project's workflow ("assets", "modeling", "design"): a folder, a
@@ -126,8 +132,12 @@ const FileStep = z.object({ ...base, type: z.literal('file'), path: z.string().t
  * link that opens outside. The fields are those of a nav entry. Relative paths
  * are inside the project folder, which is also a launcher's working folder.
  */
-export const StepItem = z.discriminatedUnion('type', [z.object(folderFields), NoteItem, ReportStep, FileStep, ChatItem, LaunchItem, LinkItem])
-export const STEP_TYPES = ['folder', 'note', 'report', 'file', 'chat', 'launch', 'link'] as const
+export const StepItem = z.discriminatedUnion('type', [z.object(folderFields), NoteItem, ReportStep, FileStep, ChatItem, LaunchItem, LinkItem, FilesStep, GitStep, SetupStep])
+export const STEP_TYPES = ['files', 'folder', 'note', 'git', 'setup', 'report', 'file', 'chat', 'launch', 'link'] as const
+/** Steps shown on the item's own folder: they need the item to have one. */
+export const FOLDER_STEPS = ['files', 'git', 'setup'] as const
+/** The label a built-in step gets when it is added. */
+export const STEP_LABEL: Partial<Record<string, string>> = { files: 'All files', git: 'Git', setup: 'Claude setup' }
 
 export const STATUSES = ['active', 'paused', 'done', 'archived'] as const
 export type Status = (typeof STATUSES)[number]
@@ -136,9 +146,12 @@ export type Status = (typeof STATUSES)[number]
 export const CARD_FIELDS = ['description', 'status', 'category', 'pinned', 'agent'] as const
 
 /**
- * A project folder, with its card (description, status, category, pinned) and
- * the agent profile New chat starts there (`agent`, default plain claude).
- * Without `steps:` it uses the profile's `workflow:`; an empty `steps:` means none.
+ * An item (`type: item`, or `type: folder` as projects were written before):
+ * an optional folder, its card (description, status, category, pinned), the
+ * agent profile New chat starts there (`agent`, default plain claude) and its
+ * steps, the tabs of its page. Without `steps:` (an older project) it shows
+ * All files, Git (in a repository), Claude setup and the profile's `workflow:`;
+ * an empty `steps:` means a blank item. One without a folder has an `id`.
  */
 /** A server a project names, for a health check and to show "down" when it is not running. */
 export const ServerDecl = z
@@ -151,7 +164,7 @@ export const ServerDecl = z
 export type ServerDecl = z.output<typeof ServerDecl>
 
 export const FolderItem = z.object({
-  ...folderFields,
+  ...itemFields,
   /** Servers the Servers page checks for this project, besides those it finds running. */
   servers: z.array(ServerDecl).optional(),
   description: z.string().optional(),
@@ -180,7 +193,10 @@ export const SharedItem = z.object({
   path: z.string().trim().min(1).optional(),
 })
 
-export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, SharedItem])
+// `type: item` is read as the one internal kind, `folder`; the file keeps the word it has.
+const asFolder = (v: unknown) => (typeof v === 'object' && v !== null && (v as { type?: unknown }).type === 'item' ? { ...v, type: 'folder' } : v)
+
+export const LeafItem = z.preprocess(asFolder, z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, SharedItem]))
 
 /** One level of sub-groups under a heading; a group cannot contain another group. */
 export const GroupItem = z.object({
@@ -190,7 +206,8 @@ export const GroupItem = z.object({
   items: list(LeafItem),
 })
 
-export const NavItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, SharedItem, GroupItem])
+const NavUnion = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, SharedItem, GroupItem])
+export const NavItem = z.preprocess(asFolder, NavUnion)
 
 export const Section = z.object({
   id: z.string().optional(),
@@ -285,7 +302,8 @@ export type ItemType = NavItem['type']
 export type StepType = StepItem['type']
 /** Nav entry types plus the step-only ones. */
 export type AnyType = ItemType | StepType
-export type ItemInput = z.input<typeof NavItem> | z.input<typeof StepItem>
+/** A new item is written `type: item`. */
+export type ItemInput = z.input<typeof NavUnion> | z.input<typeof StepItem> | (Omit<z.input<typeof FolderItem>, 'type'> & { type: 'item' })
 
 export const ITEM_TYPES: ItemType[] = ['folder', 'note', 'daily', 'chat', 'link', 'launch', 'group']
 
@@ -295,6 +313,9 @@ export const TYPE_FIELDS: Record<AnyType, string[]> = {
   note: ['path'],
   report: ['path'],
   file: ['path'],
+  files: [],
+  git: [],
+  setup: [],
   daily: ['folder', 'template'],
   chat: ['agent', 'path', 'args'],
   link: ['url'],
@@ -340,16 +361,18 @@ export const Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('setCategory'), name: z.string().trim().min(1), color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb').nullable() }),
   /** Add MCP servers to `mcpOff:` (off) or take them out. */
   z.object({ op: z.literal('setMcpOff'), names: z.array(z.string().trim().min(1)).min(1), off: z.boolean() }),
-  // Workflow steps of the folder entry at `at`. The first change to a project
-  // using the profile's workflow copies it into the project's own steps.
-  z.object({ op: z.literal('addStep'), at: ItemAddr, step: itemInput, index: index.optional() }),
-  z.object({ op: z.literal('updateStep'), at: ItemAddr, index, step: itemInput }),
-  z.object({ op: z.literal('deleteStep'), at: ItemAddr, index }),
-  z.object({ op: z.literal('moveStep'), at: ItemAddr, from: index, to: index }),
-  // Back to the profile's workflow.
-  z.object({ op: z.literal('resetSteps'), at: ItemAddr }),
-  // Make this project's steps the profile's workflow, and use it here too.
-  z.object({ op: z.literal('setWorkflow'), at: ItemAddr }),
+  // Steps of the item at `at`. The first change to an item without `steps:`
+  // writes `seed` (the tabs it showed, which the service works out) as its own.
+  // A step on the item's own folder (files, git, setup) needs one: `folder`
+  // gives an item without one its folder.
+  z.object({ op: z.literal('addStep'), at: ItemAddr, step: itemInput, index: index.optional(), folder: z.string().trim().min(1).optional(), seed: z.array(itemInput).optional() }),
+  z.object({ op: z.literal('updateStep'), at: ItemAddr, index, step: itemInput, seed: z.array(itemInput).optional() }),
+  z.object({ op: z.literal('deleteStep'), at: ItemAddr, index, seed: z.array(itemInput).optional() }),
+  z.object({ op: z.literal('moveStep'), at: ItemAddr, from: index, to: index, seed: z.array(itemInput).optional() }),
+  // Add the profile's workflow steps the item does not have yet.
+  z.object({ op: z.literal('addWorkflow'), at: ItemAddr, seed: z.array(itemInput).optional() }),
+  // Make this item's steps the profile's workflow; the item keeps its own.
+  z.object({ op: z.literal('setWorkflow'), at: ItemAddr, seed: z.array(itemInput).optional() }),
   // A card field of the project at `at`; null (or an empty description) removes it.
   z.object({ op: z.literal('setCard'), at: ItemAddr, field: z.enum(CARD_FIELDS), value: z.union([z.string(), z.boolean()]).nullable() }),
   // An agent profile: create or update it (and rename it, with everything that
@@ -447,7 +470,7 @@ export function walkItems(profile: Profile): { addr: ItemAddr; item: NavItem }[]
   return out
 }
 
-/** Whether `item` is the original a shared entry points at. */
+/** Whether `item` is the original a shared entry points at (one without a folder by its label alone). */
 export const isOriginalOf = (ref: SharedItem, item: NavItem) =>
   item.type !== 'shared' && item.type !== 'group' && item.label === ref.label && (ref.path === undefined || ('path' in item && item.path === ref.path))
 
@@ -558,11 +581,34 @@ export function joinNotes(root: string, rel: string): string {
 
 // Workflow steps
 
-/** A project's steps: its own, or the profile's workflow. */
-export function stepsOf(profile: Profile, item: NavItem): StepItem[] {
+/**
+ * An item's steps: its own, or for an older project without `steps:`, the tabs
+ * it always had: All files, Git (when its folder is in a repository), Claude
+ * setup, then the profile's workflow.
+ */
+export function stepsOf(profile: Profile, item: NavItem, repo = false): StepItem[] {
   if (item.type !== 'folder') return []
-  return item.steps ?? profile.workflow
+  return item.steps ?? legacySteps(profile, repo)
 }
+
+export function legacySteps(profile: Profile, repo: boolean): StepItem[] {
+  const builtIn: StepItem[] = [{ label: 'All files', type: 'files' }, ...(repo ? [{ label: 'Git', type: 'git' as const }] : []), { label: 'Claude setup', type: 'setup' }]
+  // A workflow saved from an item may hold built-in steps too; these come first, as the folder allows.
+  return [...builtIn, ...profile.workflow.filter((s) => !(FOLDER_STEPS as readonly string[]).includes(s.type))]
+}
+
+type ItemLike = { label: string; path?: string; id?: string }
+
+export type FolderItem = z.output<typeof FolderItem>
+/** The items that have a folder, in every drawer, groups included. */
+export const itemsWithFolder = (profile: Profile) =>
+  walkItems(profile).flatMap(({ item }) => (item.type === 'folder' && item.path ? [item as FolderItem & { path: string }] : []))
+
+/** What keys an item's chats, tabs and Recent work: its folder, else its `id`, else its label. */
+export const projectRef = (item: ItemLike) => item.path ?? (item.id ? `id:${item.id}` : `label:${item.label}`)
+
+/** The folder an item's relative step paths, launchers and chats start from: its own, else the profile's home. */
+export const itemBase = (profile: Pick<Profile, 'home'>, item: { path?: string }) => item.path ?? profile.home ?? '~'
 
 /** Collapse `.` and `..` in a `~/…` or absolute path; a `..` that cannot be collapsed is kept. */
 export function normalizePath(p: string): string {
@@ -585,7 +631,7 @@ export function stepPath(project: string, p: string): string {
 /** A step with its paths resolved; a launcher runs in the project folder unless it says otherwise. */
 export function stepEntry(project: string, step: StepItem): StepItem {
   if (step.type === 'launch') return { ...step, cwd: stepPath(project, step.cwd ?? '.') }
-  if (step.type === 'link') return step
+  if (step.type === 'link' || step.type === 'files' || step.type === 'git' || step.type === 'setup') return step
   if (step.type === 'chat') return { ...step, path: stepPath(project, step.path ?? '.') }
   return { ...step, path: stepPath(project, step.path) }
 }
@@ -627,13 +673,14 @@ export function folderRoots(profile: Profile): { label: string; path: string }[]
   if (profile.notes) out.push({ label: 'Notes', path: profile.notes })
   const project = (item: NavItem) => {
     if (item.type !== 'folder') return
-    out.push({ label: item.label, path: item.path })
+    if (item.path) out.push({ label: item.label, path: item.path })
     // A step can sit outside its project, e.g. a shared assets folder; a report
     // or a file needs its own folder (a report loads the files next to it).
+    const base = itemBase(profile, item)
     for (const step of stepsOf(profile, item)) {
       const label = `${item.label} › ${step.label}`
-      if (step.type === 'folder') out.push({ label, path: stepPath(item.path, step.path) })
-      if (step.type === 'report' || step.type === 'file') out.push({ label, path: stepPath(item.path, parentPath(step.path)) })
+      if (step.type === 'folder') out.push({ label, path: stepPath(base, step.path) })
+      if (step.type === 'report' || step.type === 'file') out.push({ label, path: stepPath(base, parentPath(step.path)) })
     }
   }
   for (const section of allSections(profile)) {

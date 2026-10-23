@@ -15,7 +15,7 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from '@dnd-kit/utilities'
 import { Blocks, BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section } from '../../shared/config-schema.ts'
+import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, projectRef, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section } from '../../shared/config-schema.ts'
 import type { GitMark } from '../../shared/git.ts'
 import { useContextFolders } from '../lib/context.ts'
 import type { Connection } from '../lib/events.ts'
@@ -821,7 +821,7 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
 /** A spark on a project or chat entry with running chats (with a count past one); the accent colour when one needs you. */
 function ChatMark({ item }: { item: NavItem }) {
   const { chatMarks } = useContext(Ctx)
-  const key = item.type === 'folder' ? projectHost(item.path) : item.type === 'chat' ? entrySlot(item) : null
+  const key = item.type === 'folder' ? projectHost(projectRef(item)) : item.type === 'chat' ? entrySlot(item) : null
   const mark = key ? chatMarks.get(key) : undefined
   if (!mark || (!mark.running && !mark.attention)) return null
   const what = `${mark.running} running ${mark.running === 1 ? 'chat' : 'chats'}${mark.attention ? ', one needs you' : ''}`
@@ -836,7 +836,7 @@ function ChatMark({ item }: { item: NavItem }) {
 /** A small dot on a project with servers running (and a count past one); red when a declared one is down. */
 function ServerMark({ item }: { item: NavItem }) {
   const { serverMarks } = useContext(Ctx)
-  const mark = item.type === 'folder' ? serverMarks.get(item.path) : undefined
+  const mark = item.type === 'folder' && item.path ? serverMarks.get(item.path) : undefined
   if (!mark) return null
   const what = [mark.up && `${mark.up} ${mark.up === 1 ? 'server' : 'servers'} running`, mark.down && `${mark.down} down`].filter(Boolean).join(', ')
   return (
@@ -850,7 +850,7 @@ function ServerMark({ item }: { item: NavItem }) {
 /** Uncommitted changes as a dot, ↑ with commits to push, ↓ with commits to pull; red with conflicts. */
 function GitMarkView({ item }: { item: NavItem }) {
   const { gitMarks } = useContext(Ctx)
-  const mark = item.type === 'folder' ? gitMarks.get(item.path) : undefined
+  const mark = item.type === 'folder' && item.path ? gitMarks.get(item.path) : undefined
   if (!mark || (!mark.changed && !mark.ahead && !mark.behind && !mark.conflicts)) return null
   const what = [
     mark.conflicts && `${mark.conflicts} in conflict`,

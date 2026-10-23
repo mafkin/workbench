@@ -14,6 +14,7 @@ sections:
   - title: Projects
     items:
       - { label: Alpha, type: folder, path: ~/alpha }
+      - { label: Loose, type: item, id: abc12345, steps: [] }
 `
 
 let dir: string

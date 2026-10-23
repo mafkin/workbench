@@ -118,8 +118,9 @@ function projectsOf(profile: Profile): { label: string; path: string }[] {
   const out: { label: string; path: string }[] = []
   for (const section of allSections(profile)) {
     for (const item of section.items) {
-      if (item.type === 'folder') out.push({ label: item.label, path: item.path })
-      if (item.type === 'group') for (const child of item.items) if (child.type === 'folder') out.push({ label: child.label, path: child.path })
+      // Only items with a folder have a Claude setup of their own.
+      if (item.type === 'folder' && item.path) out.push({ label: item.label, path: item.path })
+      if (item.type === 'group') for (const child of item.items) if (child.type === 'folder' && child.path) out.push({ label: child.label, path: child.path })
     }
   }
   return out

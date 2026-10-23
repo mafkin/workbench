@@ -1680,11 +1680,44 @@ button {
   background: var(--accent);
 }
 
-.step-hint {
-  align-self: center;
-  margin-left: 6px;
-  color: var(--faint);
-  font-size: 12px;
+/* Without a tab row, the actions sit by the title. */
+.project-head .tab-action {
+  margin-bottom: 0;
+}
+
+.project-head .tab-action + .tab-action:not(.more) {
+  margin-left: -8px;
+}
+
+/* Where the tab row would be, for an item with one step. */
+.step-gap {
+  height: 14px;
+}
+
+/* A blank item, and a step that needs a folder the item lacks. */
+.item-empty {
+  margin-top: 18px;
+  padding: 26px 22px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.item-empty p {
+  margin: 0 0 14px;
+}
+
+.item-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.item-empty-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .note-page.compact {

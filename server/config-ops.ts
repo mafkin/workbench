@@ -20,6 +20,7 @@ import {
   type ListAddr,
   type Op,
   DRAWER_FIELDS,
+  FOLDER_STEPS,
 } from '../shared/config-schema.ts'
 
 export class OpError extends Error {}
@@ -104,7 +105,9 @@ function title(value: string): string {
 /** Plain object for a new item, in a readable key order, without empty fields. */
 function newItemData(input: ItemInput, schema: typeof NavItem | typeof StepItem = NavItem): Record<string, unknown> {
   const item = parseItem(input, schema)
-  const out: Record<string, unknown> = { label: item.label, type: item.type }
+  // A new item is written `type: item` and starts blank; one without a folder gets an id to be known by.
+  const isNew = schema === NavItem && input.type === 'item'
+  const out: Record<string, unknown> = { label: item.label, type: isNew ? 'item' : item.type }
   if (item.type === 'group') out.items = []
   for (const key of TYPE_FIELDS[item.type]) {
     if (key === 'items' || key === 'collapsed') continue
@@ -114,6 +117,9 @@ function newItemData(input: ItemInput, schema: typeof NavItem | typeof StepItem 
   }
   if (item.icon) out.icon = item.icon
   if (item.id) out.id = item.id
+  // Starting with a letter, an id never reads as a number (YAML would quote 12345678 or 1e234567).
+  else if (isNew && !out.path) out.id = `i${crypto.randomUUID().slice(0, 7)}`
+  if (isNew) out.steps = []
   return out
 }
 
@@ -127,7 +133,8 @@ function updateItemNode(doc: Document, node: YAMLMap, input: ItemInput, schema: 
     }
   }
   node.set('label', item.label)
-  node.set('type', item.type)
+  // An item keeps the word its line has (`item`, or `folder` from before).
+  node.set('type', item.type === 'folder' && (oldType === 'item' || input.type === 'item') ? 'item' : item.type)
   // Clear fields owned by other types; keep id and any keys the app does not manage.
   for (const [type, keys] of Object.entries(TYPE_FIELDS)) {
     if (type === item.type) continue
@@ -146,28 +153,43 @@ function updateItemNode(doc: Document, node: YAMLMap, input: ItemInput, schema: 
   else node.delete('icon')
 }
 
-/** The folder entry at `at`: projects, with cards and steps, are folder entries. */
+/** The item at `at` (`type: item`, or `folder` as projects were written before): items have cards and steps. */
 function folderAt(doc: Document, at: ItemAddr): YAMLMap {
   const node = nth(listAt(doc, at), at.index, 'Entry')
-  if (!isMap(node) || node.get('type') !== 'folder') throw new OpError('Only folder entries are projects')
+  if (!isMap(node) || (node.get('type') !== 'folder' && node.get('type') !== 'item')) throw new OpError('Only items have cards and steps')
   return node
 }
 
-/** The project's own steps. The first change to a project using the profile's workflow copies it in. */
-function ownSteps(doc: Document, at: ItemAddr): YAMLSeq {
+/**
+ * The item's own steps. The first change to an older project without `steps:`
+ * writes the tabs it showed: `seed` (the service works it out, Git included
+ * when its folder is a repository), else All files, Claude setup and the workflow.
+ */
+function ownSteps(doc: Document, at: ItemAddr, seed?: ItemInput[]): YAMLSeq {
   const node = folderAt(doc, at)
   if (node.has('steps')) {
     const steps = node.get('steps', true)
     if (isSeq(steps)) return steps
   }
-  const workflow = doc.get('workflow', true)
-  const seq = isSeq(workflow) ? (workflow.clone() as YAMLSeq) : (doc.createNode([]) as YAMLSeq)
+  let seq: YAMLSeq
+  // Steps are short: one-line `{ … }` maps, like the workflow's.
+  const oneLine = (data: Record<string, unknown>) => Object.assign(doc.createNode(data) as YAMLMap, { flow: true })
+  if (seed) {
+    seq = doc.createNode([]) as YAMLSeq
+    for (const s of seed) seq.items.push(oneLine(newItemData(s, StepItem)))
+  } else {
+    const workflow = doc.get('workflow', true)
+    seq = isSeq(workflow) ? (workflow.clone() as YAMLSeq) : (doc.createNode([]) as YAMLSeq)
+    const has = (type: string) => seq.items.some((i) => isMap(i) && i.get('type') === type)
+    if (!has('setup')) seq.items.unshift(oneLine({ label: 'Claude setup', type: 'setup' }))
+    if (!has('files')) seq.items.unshift(oneLine({ label: 'All files', type: 'files' }))
+  }
   node.set('steps', seq)
   return seq
 }
 
 function checkStep(input: ItemInput) {
-  if (!(STEP_TYPES as readonly string[]).includes(input.type)) throw new OpError('A step is a folder, note, report, file, launcher or link')
+  if (!(STEP_TYPES as readonly string[]).includes(input.type)) throw new OpError('A step is a file browser, folder, note, Git, Claude setup, report, file, chat, launcher or link')
 }
 
 /** Set a card field; a new one goes before `steps:`, so the card reads first. Null or an empty string removes it. */
@@ -572,7 +594,16 @@ function applyOp(doc: Document, op: Op) {
       return
     case 'addStep': {
       checkStep(op.step)
-      const seq = ownSteps(doc, op.at)
+      if ((FOLDER_STEPS as readonly string[]).includes(op.step.type)) {
+        const item = folderAt(doc, op.at)
+        if (!item.get('path')) {
+          if (!op.folder) throw new OpError('This item has no folder yet: choose one first')
+          // Give the item its folder, after its type, where a path is written.
+          const at = item.items.findIndex((pair) => (isScalar(pair.key) ? pair.key.value : pair.key) === 'type')
+          item.items.splice(at + 1, 0, doc.createPair('path', op.folder))
+        }
+      }
+      const seq = ownSteps(doc, op.at, op.seed)
       const node = doc.createNode(newItemData(op.step, StepItem)) as YAMLMap
       // Match the list: steps written as one-line { … } maps get a new one the same way.
       node.flow = seq.items.length > 0 && seq.items.every((i) => isMap(i) && i.flow)
@@ -581,33 +612,36 @@ function applyOp(doc: Document, op: Op) {
     }
     case 'updateStep': {
       checkStep(op.step)
-      const node = nth(ownSteps(doc, op.at), op.index, 'Step')
+      const node = nth(ownSteps(doc, op.at, op.seed), op.index, 'Step')
       if (!isMap(node)) throw new OpError(`Step ${op.index} is not a mapping`)
       updateItemNode(doc, node, op.step, StepItem)
       return
     }
     case 'deleteStep': {
-      const seq = ownSteps(doc, op.at)
+      const seq = ownSteps(doc, op.at, op.seed)
       nth(seq, op.index, 'Step')
       seq.items.splice(op.index, 1)
       return
     }
     case 'moveStep': {
-      const seq = ownSteps(doc, op.at)
+      const seq = ownSteps(doc, op.at, op.seed)
       nth(seq, op.from, 'Step')
       const [node] = seq.items.splice(op.from, 1)
       seq.items.splice(clamp(op.to, seq.items.length), 0, node)
       return
     }
-    case 'resetSteps':
-      folderAt(doc, op.at).delete('steps')
-      return
-    case 'setWorkflow': {
-      const node = folderAt(doc, op.at)
-      setTopLevel(doc, 'workflow', ownSteps(doc, op.at).clone())
-      node.delete('steps')
+    case 'addWorkflow': {
+      const seq = ownSteps(doc, op.at, op.seed)
+      const workflow = doc.get('workflow', true)
+      if (!isSeq(workflow)) return
+      const key = (i: unknown) => (isMap(i) ? `${String(i.get('type'))}|${String(i.get('label'))}` : '')
+      const has = new Set(seq.items.map(key))
+      for (const step of workflow.items) if (!has.has(key(step))) seq.items.push((step as YAMLMap).clone() as YAMLMap)
       return
     }
+    case 'setWorkflow':
+      setTopLevel(doc, 'workflow', ownSteps(doc, op.at, op.seed).clone())
+      return
     case 'setCategory': {
       const existing = doc.get('categories', true)
       if (op.color === null) {

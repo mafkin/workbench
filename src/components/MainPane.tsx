@@ -12,6 +12,7 @@ import {
   getItem,
   NOTE_EXT,
   projectHost,
+  projectRef,
   sectionsOf,
   stepsOf,
   type Chat,
@@ -325,7 +326,7 @@ function OtherChats({ profile }: { profile: Profile }) {
   const chats = useChats()
   const hosts = new Set<string>()
   const visit = (item: NavItem) => {
-    if (item.type === 'folder') hosts.add(projectHost(item.path))
+    if (item.type === 'folder') hosts.add(projectHost(projectRef(item)))
     if (item.type === 'chat') hosts.add(entrySlot(item))
     if (item.type === 'group') item.items.forEach(visit)
   }
@@ -396,7 +397,7 @@ function describeRecent(profile: NonNullable<ProfileState['profile']>, r: Recent
   const drawers = drawersOf(profile)
   const heading = group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
   const where = drawers.length > 1 ? `${drawers[addr.drawer ?? 0]?.name} › ${heading}` : heading
-  const step = r.step && stepsOf(profile, item).some((s) => s.label === r.step) ? r.step : undefined
+  const step = r.step && stepsOf(profile, item, true).some((s) => s.label === r.step) ? r.step : undefined
   return { icon: <EntryIcon type={item.type} icon={item.icon} size={15} />, label: step ? `${item.label} › ${step}` : item.label, where }
 }
 
@@ -485,7 +486,7 @@ function EntryView({
   if (item.type === 'folder') {
     return (
       <ProjectView
-        key={item.path}
+        key={projectRef(item)}
         addr={addr}
         item={item}
         kicker={kicker}

@@ -51,8 +51,8 @@ theme: fjord                    # slate (default) | fjord | moss | ember | dusk 
 background: theme               # theme (default) | none | a picture in ~/.config/workbench/backgrounds/
 home: ~/Documents/work
 notes: ~/Documents/work/notes   # new notes, daily notes, search and [[wiki links]]
-workflow:                       # the steps every project (folder entry) starts with
-  - { label: assets, type: folder, path: assets }                                  # paths are inside the project
+workflow:                       # profile steps: a template (Add profile steps), and the tabs of older projects without steps:
+  - { label: assets, type: folder, path: assets }                                  # paths are inside the item's folder
   - { label: modeling, type: launch, command: blender, args: [models/main.blend] }  # runs in the project folder
   - { label: design, type: note, path: docs/design.md }
   - { label: agent, type: chat }                                                   # claude in the project folder
@@ -81,6 +81,12 @@ sections:
     collapsed: false
     items:
       - { label: IFC Checker, type: folder, path: ~/ifc_checker_project }
+      - label: Ideas board      # a new entry: an item, blank until you add steps
+        type: item
+        id: i3f9c2a1            # an item without a folder gets an id (written by the app)
+        steps:
+          - { label: ideas, type: note, path: ~/notes/ideas.md }
+          - { label: board, type: link, url: "https://example.com/b" }
       - label: Tuohi
         type: folder
         path: ~/Projects/tuohi
@@ -92,7 +98,10 @@ sections:
         servers:                # optional: servers to check even when they're not running
           - { name: web, port: 5173 }
           - { name: api, url: "http://127.0.0.1:9000/health" }
-        steps:                  # this project's own steps instead of the workflow
+        steps:                  # its tabs, in order (without steps: an older project shows All files, Git, Claude setup and the workflow)
+          - { label: All files, type: files }        # the item's folder in the file browser
+          - { label: Git, type: git }                # its repository
+          - { label: Claude setup, type: setup }     # what claude loads there
           - { label: sprites, type: folder, path: assets/sprites }
           - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
           - { label: tests, type: report, path: reports/index.html }   # an HTML page shown in the tab
@@ -166,9 +175,14 @@ drawers:
 - **Background:** the theme's own, **None** (the flat look, panels edge to edge), or your own picture. Add one by path in the panel, or right-click a picture in the file browser and choose **Use as background**. Workbench keeps a copy in `~/.config/workbench/backgrounds/` (jpg, png, webp, avif or gif, up to 25 MB), so it still works if you move the original; the × on a picture in the panel deletes the copy.
 - Choices are written to the profile's YAML (`theme:`, `background:`) at once, with Undo in the toast.
 
-### Projects: cards and workflow steps
+### Items: cards and steps
 
-- A **folder** entry is a project. The top of its page is its card:
+- **Add entry…** makes an **item**: a name, and optionally a folder. It starts blank, with buttons for **File browser**, **Note**, **Git**, **Claude setup** and **More…** (every kind of step). You add what it needs, and each step is a tab.
+  - An item with one step shows it on the whole page, without a tab row; **+** by the title adds the next one. From two tabs on (steps or chats) the tab row is back.
+  - File browser, Git and Claude setup show the item's folder. An item without one asks for it the first time you add one of these, and keeps it.
+  - **Remove tab** (right-click a tab, or Delete on it) takes away only the tab. Its folder or file stays on disk, and the toast has Undo. With no steps left the item is blank again.
+  - Entries made before items (folders, notes, launchers, links, chats, daily) keep working as they are. A `type: folder` entry is an item too.
+- The top of an item's page is its card:
   - a **category** chip (pick one or make a new one),
   - a **status** (active, paused, done, archived),
   - a **pin**,
@@ -176,14 +190,16 @@ drawers:
 - **Under the description:** when the folder was created and last updated (the last commit in a git repository, else the newest file), and how many servers are running there.
 - **Categories** get colours from the category menu (**Colour of …**: a palette or any colour), saved in `categories:`.
 - **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, mark it or archive it.
-- Below the card is a row of tabs: **All files** (the project folder), then the project's workflow steps.
+- Below the card are its steps:
+  - **File browser** (`files`), **Git** (`git`) and **Claude setup** (`setup`) show the item's folder, its repository and what claude loads there.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
   - A **note** step shows the note in place, with Edit and autosave.
   - A **report** step shows an HTML page (a test or analysis report) with its own styles and scripts. It runs in a sandbox, cut off from Workbench.
   - A **file** step shows one image, PDF, video or text file large.
-  - A **launcher** step starts its program in the project folder, and a **link** step opens its address in your browser.
-- Steps are yours to name: **+** adds one (paths are inside the project). Right-click a tab to edit or remove it, and drag tabs to reorder them.
-- Every project starts with the profile's `workflow:` steps. Changing a project's steps gives it its own `steps:`. From the right-click menu, **Use these steps for every project** makes them the `workflow:`, and **Reset to profile steps** goes back to it.
+  - A **launcher** step starts its program in the item's folder (or home), and a **link** step opens its address in your browser.
+- Steps are yours to name: **+** adds one (relative paths are inside the item's folder, else home). Right-click a tab to edit or remove it, and drag tabs to reorder them.
+- The profile's `workflow:` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, and **Save as profile steps** makes this item's steps the template.
+- An older project without `steps:` shows All files, Git (in a repository), Claude setup and the workflow. Its first step change writes those tabs as its own `steps:`.
 - Note steps also count as notes, so they show up in search and wiki links.
 
 ### Chats
@@ -246,7 +262,7 @@ drawers:
   - or the **plugin** that brings it.
 - Two places show it, so you can keep the one you like:
   - **The page** opens from the blocks button at the top of the sidebar. **For** picks Everywhere or one of the profile's projects.
-  - **The tab:** every project has a **Claude setup** tab after All files, with what applies in its folder.
+  - **The tab:** an item's **Claude setup** step (an older project has one after All files) shows what applies in its folder.
 - **Overridden** items are dimmed and say what claude uses instead: a skill of the same name in a nearer scope, or a local MCP server over a project or user one. A skill also wins over a command of the same name.
 - **MCP servers** show their state:
   - **On**,
@@ -278,7 +294,7 @@ The **Servers** page (the stacked-boxes button in the nav header, or Ctrl+K) sho
 
 ### Git
 
-A project in a git repository (or in a folder of one) gets a **Git** tab after All files, with its count of changed files.
+An item's **Git** step shows its folder's repository, with its count of changed files. An older project in a git repository (or in a folder of one) has one after All files.
 
 - **Changes:** staged files and changes (new files included), each with Stage, Unstage and Discard. Space stages the selected file; **Stage all**, **Unstage all** and **Discard all** do the whole list.
 - **The diff** of the selected file is on the right. Each hunk has **Stage hunk**, **Unstage hunk** or **Discard hunk**, so you can commit part of a file.
@@ -316,7 +332,7 @@ A project in a git repository (or in a folder of one) gets a **Git** tab after A
 
 ### Files
 
-- A project's **All files** and folder-step tabs show a file browser: a tree with sizes and dates, and a preview of the selected file on the right.
+- An item's **File browser** (All files) and folder steps show a file browser: a tree with sizes and dates, and a preview of the selected file on the right.
 - Click the arrow to expand a folder in place; **double-click** (or **Enter**) to make it the top. The path bar jumps back up, and so does **Backspace** or **Alt+←**.
 - **Filter by name** narrows the tree to matching names in the folders you have open; **Search all folders** looks through the closed ones too. Click a column header to sort.
 - Dotfiles are hidden; **Ctrl+H** shows them. In a git repository, files `.gitignore` excludes (`node_modules`, `dist`, logs) are shown dimmed.
@@ -425,4 +441,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 8 | Polish: Ctrl+K, profile settings, systemd service, the known gaps, Servers (done) |
 | 9 | Git per project: changes, hunks, commit with Draft, branches, stash, pull and push, conflicts, history (done) |
 | 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
+| after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
 | later | A Tauri window, if wanted |

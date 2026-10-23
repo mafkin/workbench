@@ -273,6 +273,38 @@ The user asked: launchers in the sidebar started on a single click of their name
   - UI: the switch on rows and in the detail pane, the fold, the plugin buttons, and a toast with Undo.
 - **Left for later:** Approve/Reject for `.mcp.json` servers; whole plugins on/off (`enabledPlugins`); defaults for folders outside the app's chats (a claude started in a terminal in a new folder loads everything until a switch or an app chat runs there).
 
+### Items: blank entries built from removable steps (after MCP switches, done)
+
+- **Why:** "Creating an item should give a blank slate. An item can then have a file-browser, note, git-tree etc. Those steps should then be removable. Removing a step does not delete files permanently."
+- **Decisions (2026-10-23):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Which entries | Every new nav entry is an item: no kind to pick |
+  | A new item shows | Nothing but an Add menu (File browser, Note, Git, Claude setup, More…); All files, Git and Claude setup are ordinary steps |
+  | Existing entries | Kept as they are, nothing rewritten; old projects keep their tabs until their first step change |
+  | `workflow:` | A template: Add profile steps / Save as profile steps |
+  | Folder | Optional; a File browser, Git or Claude setup step asks for one |
+  | One step | Full page, no tab row; the row shows from two tabs |
+  | Card | On every item |
+  | Removing | Only the tab; files stay, Undo in the toast |
+
+- **Built:**
+  - Schema: `type: item` is read as the one internal kind `folder` (a preprocess), and a line keeps its word on edit. `path` is optional. Step kinds `files`, `git`, `setup` (`FOLDER_STEPS`, `STEP_LABEL`). `legacySteps` gives an old project's tabs. `projectRef` (path, else `id:<id>`, else `label:<label>`) keys chats, saved tabs and pages. `itemBase` (folder, else the profile's home) is where relative step paths, launchers and chats start. `itemsWithFolder` is used by git and servers.
+  - Ops:
+    - `addItem` with `type: item` writes `steps: []` and, without a folder, an 8-character `id` (a letter first, so YAML never reads it as a number).
+    - The first step op on an old project writes `seed`, the tabs it showed. The client sends it, or the ops route works it out with Git only in a repository (`stepsFor`).
+    - `addStep` of a folder step takes `folder` for an item without one.
+    - `addWorkflow` replaced `resetSteps`, and `setWorkflow` keeps the item's own steps.
+  - UI:
+    - ProjectView takes its tabs only from steps, with an empty state, single-step pages, Remove tab (also Delete) and the profile-steps menu.
+    - ItemDialog has no kind picker for entries (Add item: label, optional folder, icon). The step dialog has the ten kinds and asks for the item's folder when needed.
+    - `resolveEntry` keeps an entry selected when only its folder changed.
+- **Left for later:**
+  - Nav icons: a folderless item still shows the folder icon unless it names one.
+  - Old entries can't be turned into items in the app.
+  - A shared entry finds a folderless original by its label alone.
+
 ### Part 7: Context folders (done)
 
 - **In Mr. Mak:**

@@ -14,7 +14,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { allSections, displayPath, type NavItem, type Profile } from '../shared/config-schema.ts'
+import { displayPath, itemsWithFolder, type NavItem, type Profile } from '../shared/config-schema.ts'
 import type {
   Branch,
   Commit,
@@ -38,7 +38,7 @@ import { maskText } from './mask.ts'
 import { absPath, realish } from './paths.ts'
 import { findTrashed, untrash } from './trash.ts'
 
-type Folder = Extract<NavItem, { type: 'folder' }>
+type Folder = Extract<NavItem, { type: 'folder' }> & { path: string }
 
 export interface GitOptions {
   /** For `gio trash` (discarding an untracked file); tests pass a stand-in. */
@@ -88,17 +88,8 @@ const MARKERS = /^(<{7}|>{7})( |$)|^={7}$/m
 /** Variables that would point git at another repository than the one asked for. */
 const REDIRECTS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE']
 
-/** The folder entries of a profile, groups included. */
-export function projectsOf(profile: Profile): Folder[] {
-  const out: Folder[] = []
-  for (const section of allSections(profile)) {
-    for (const item of section.items) {
-      if (item.type === 'folder') out.push(item)
-      if (item.type === 'group') for (const child of item.items) if (child.type === 'folder') out.push(child)
-    }
-  }
-  return out
-}
+/** The items of a profile that have a folder, groups included. */
+export const projectsOf = (profile: Profile): Folder[] => itemsWithFolder(profile)
 
 /** A path inside the repository as a request gives it: relative, `/`-separated, no `..`. */
 export function repoPath(raw: string): string {

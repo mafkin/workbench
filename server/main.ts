@@ -35,8 +35,15 @@ import {
   stepEntry,
   stepSlot,
   stepsOf,
+  itemBase,
+  projectRef,
+  type NavItem,
   type Profile,
+  type StepItem,
 } from '../shared/config-schema.ts'
+
+/** Ops that change an item's steps: the first one on an older project seeds its steps. */
+const STEP_OPS = new Set(['addStep', 'updateStep', 'deleteStep', 'moveStep', 'addWorkflow', 'setWorkflow'])
 import { agentArgs, claudeAgents } from './agents.ts'
 import { Backgrounds } from './backgrounds.ts'
 import { Logos } from './logos.ts'
@@ -251,16 +258,30 @@ export async function buildServer(opts: ServerOptions) {
 
   app.post<{ Params: { id: string } }>('/api/profiles/:id/ops', async (req) => {
     const { rev, ops } = parse(OpsBody, req.body)
-    // A chat step's chat is found by its label: a rename moves the chat with it.
     const before = store.profile(req.params.id).profile
-    const renames = ops.flatMap((op) => {
-      if (op.op !== 'updateStep' || !before) return []
-      const project = getItem(before, op.at)
-      const old = project?.type === 'folder' ? stepsOf(before, project)[op.index] : undefined
-      return project?.type === 'folder' && old?.type === 'chat' && old.label !== op.step.label ? [{ from: stepSlot(project.path, old.label), to: stepSlot(project.path, String(op.step.label)) }] : []
-    })
+    // An older project without `steps:` gets the tabs it showed as its own on its first step change.
+    if (before) {
+      for (const op of ops) {
+        if (!('at' in op) || !STEP_OPS.has(op.op) || 'seed' in op) continue
+        const item = getItem(before, op.at)
+        if (item?.type === 'folder' && !item.steps) Object.assign(op, { seed: await stepsFor(req.params.id, before, item) })
+      }
+    }
+    // A chat step's chat is found by its label: a rename moves the chat with it.
+    const renames = before
+      ? await Promise.all(
+          ops.map(async (op) => {
+            if (op.op !== 'updateStep') return null
+            const project = getItem(before, op.at)
+            if (project?.type !== 'folder') return null
+            const old = (await stepsFor(req.params.id, before, project))[op.index]
+            const ref = projectRef(project)
+            return old?.type === 'chat' && old.label !== op.step.label ? { from: stepSlot(ref, old.label), to: stepSlot(ref, String(op.step.label)) } : null
+          }),
+        )
+      : []
     const result = await store.apply(req.params.id, rev, ops)
-    for (const r of renames) chats.moveSlot(req.params.id, r.from, r.to)
+    for (const r of renames) if (r) chats.moveSlot(req.params.id, r.from, r.to)
     return result
   })
 
@@ -312,9 +333,9 @@ export async function buildServer(opts: ServerOptions) {
       await openItem(item, home, opts.spawn)
       return { ok: true }
     }
-    const s = stepsOf(p.profile, item)[step]
+    const s = item.type === 'folder' ? (await stepsFor(id, p.profile, item))[step] : undefined
     if (!s || item.type !== 'folder') throw new StoreError('No such step', 404)
-    const entry = stepEntry(item.path, s)
+    const entry = stepEntry(itemBase(p.profile, item), s)
     if (entry.type !== 'launch' && entry.type !== 'link') throw new StoreError('This step opens in its tab', 422)
     await openItem(entry, home, opts.spawn)
     return { ok: true }
@@ -536,6 +557,13 @@ export async function buildServer(opts: ServerOptions) {
   const projectDrawer = (profile: Profile, projectPath: string) =>
     walkItems(profile).find((e) => e.item.type === 'folder' && e.item.path === projectPath)?.addr.drawer ?? 0
 
+  /** An item's steps; an older project's include Git only when its folder is in a repository, as its page shows them. */
+  async function stepsFor(profileId: string, profile: Profile, item: NavItem): Promise<StepItem[]> {
+    if (item.type !== 'folder' || item.steps) return stepsOf(profile, item)
+    const repo = item.path ? !!(await git.repo(profileId, item.path).catch(() => null)) : false
+    return stepsOf(profile, item, repo)
+  }
+
   app.post('/api/chats', async (req) => {
     const body = parse(ChatStart, req.body)
     const p = store.profile(body.profile)
@@ -551,15 +579,17 @@ export async function buildServer(opts: ServerOptions) {
       const cwd = await chatFolder(p.profile, item.path ?? '~', false)
       spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, drawer, item.agent, cwd, item.args)) }
     } else if (item.type === 'folder' && body.step !== undefined) {
-      const step = stepsOf(p.profile, item)[body.step]
+      const step = (await stepsFor(body.profile, p.profile, item))[body.step]
       if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
-      const entry = stepEntry(item.path, step) as typeof step
-      const cwd = await chatFolder(p.profile, entry.path ?? item.path, false)
-      spec = { profile: body.profile, host: projectHost(item.path), slot: stepSlot(item.path, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args)) }
+      const base = itemBase(p.profile, item)
+      const entry = stepEntry(base, step) as typeof step
+      const cwd = await chatFolder(p.profile, entry.path ?? base, false)
+      const ref = projectRef(item)
+      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args)) }
     } else if (item.type === 'folder') {
-      const cwd = body.path === undefined ? await chatFolder(p.profile, item.path, false) : await chatFolder(p.profile, body.path, true)
+      const cwd = body.path === undefined ? await chatFolder(p.profile, itemBase(p.profile, item), false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(item.path), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [])) }
+      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [])) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -794,7 +824,7 @@ export async function buildServer(opts: ServerOptions) {
       rev = (await store.apply(b.profile, b.rev, [{ op: 'setMcpOff', names: b.keys, off: !b.on }])).rev
       const keys = new Set<string>()
       for (const { item } of walkItems(profile)) {
-        if (item.type !== 'folder') continue
+        if (item.type !== 'folder' || !item.path) continue
         const dir = await chatFolder(profile, item.path, false)
         if (await fs.promises.stat(dir).then((st) => st.isDirectory(), () => false)) keys.add(await projectKey(dir))
       }

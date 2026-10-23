@@ -21,6 +21,7 @@ export const opensExternally = (item: NavItem) => item.type === 'link' || item.t
 export function describeTarget(item: NavItem): string {
   switch (item.type) {
     case 'folder':
+      return item.path ?? 'An item without a folder'
     case 'note':
       return item.path
     case 'daily':
@@ -42,8 +43,13 @@ export type DialogState =
   | { mode: 'add'; list: ListAddr; index?: number; context: string; presetType?: ItemType }
   | { mode: 'edit'; at: ItemAddr; item: NavItem; context: string }
   | { mode: 'note'; list: ListAddr; context: string }
-  /** Add a workflow step to the project at `at`, or edit step `index`; `base` is the project folder. */
-  | { mode: 'step'; at: ItemAddr; index?: number; item?: StepItem; context: string; base: string }
+  /**
+   * Add a step to the item at `at`, or edit step `index`; `base` is the folder its
+   * relative paths start from. `seed` is what an older project shows until it has
+   * steps of its own; `needsFolder` asks for the item's folder (it has none) when
+   * the step shows it. `presetType` picks the kind.
+   */
+  | { mode: 'step'; at: ItemAddr; index?: number; item?: StepItem; context: string; base: string; seed?: StepItem[]; needsFolder?: boolean; presetType?: StepItem['type'] }
 
 /**
  * What the main pane shows: a nav entry, a note opened by path (a link or a
@@ -96,9 +102,11 @@ export function resolveEntry(profile: Profile, key: string, id?: string): ItemAd
   const all = allEntries(profile, addr?.drawer ?? 0)
   const same = all.find((e) => entryId(e.item) === id)
   if (same) return same.addr
-  const [type, , path] = id.split('|')
+  const [type, label, path] = id.split('|')
   const renamed = path ? all.find((e) => e.item.type === type && 'path' in e.item && e.item.path === path) : undefined
-  return renamed?.addr ?? null
+  if (renamed) return renamed.addr
+  // Still in its place with its name: only its folder changed (an item given one).
+  return addr && item && item.type === type && item.label === label ? addr : null
 }
 
 /** The first entry of a type that matches, searching headings and groups, drawer `first` before the others. */
