@@ -365,6 +365,30 @@ The user asked: launchers in the sidebar started on a single click of their name
   - Open with runs a profile rule even when its program isn't found (the error says so); the built-in rules apply only when Blender or Godot is installed.
 - **Left for later:** thumbnails for Godot scenes, TGA/EXR/PSD/DDS decoding, Draco glTF, animation playback in the viewer, a gallery step kind, and keeping the view choice in the YAML.
 
+### After part 10: profile menu and drawers (done)
+
+- **Spec (2026-10-23):** "Profile selection in to a menu selection" and "New project or subject selection that has its own structure", called a **drawer**: its own structure, its own little logo no bigger than the narrowest sidebar, its items shown when chosen, and material shared between drawers. Planned first, then a clickable prototype (<https://claude.ai/artifact/A9ZDGSRPGPC14dr5tT3gm4>), approved before building.
+- **Decisions:**
+
+  | Question | Answer |
+  | --- | --- |
+  | Profile button | Icon only: a person icon tinted with the accent; menu with the profiles (Ctrl+N), Profile settings…, Add profile… |
+  | What a drawer is | Its own nav inside a profile (headings, entries, groups, projects); Context stays on top |
+  | Where the picker sits | Where the profile tabs were: logo, name, menu (drawers, New drawer…, Drawer settings…) |
+  | Logo | A square picture scaled to 64×64 (22 px in the picker, 24 px in the menu); else initials on a tint |
+  | Sharing | Show an entry in other drawers (the same entry, marked); a shared folder per drawer, picked per drawer, used by others under a fixed Shared heading and given to chats with `--add-dir` |
+  | Per drawer | The last drawer per profile (localStorage); Ctrl+K searches every drawer. Recent work stays per profile |
+  | Defaults approved with the prototype | Without `drawers:` the file keeps `sections:` as its one drawer, moved into a first drawer named after the profile on the first drawer change; a shared entry lands under a heading of the same title (added if missing); the Shared heading lists the drawer's own folder too; deleting an original removes it everywhere after asking |
+
+- **Built:** `Drawer`, `SharedItem`, `drawer` in addresses (`d:s.i` keys past the first drawer), `drawersOf`/`entryAt`/`sharedRefs`/`walkItems` in the schema; ops `addDrawer`, `setDrawer`, `deleteDrawer`, `setShared` and drawer-aware section ops with cascades; `server/logos.ts`, `/api/logos`, `/api/drawers/folder`; `drawerContext` merged into chat args; `DrawerDialog.tsx` (lazy), `DrawerLogo.tsx`, `src/lib/logos.ts`; NavPanel's picker and `SharedBlock`.
+- **Choices made while building:**
+  - A shared entry opens under its own address (the nav highlight and drawer stay), while the page and its ops use the original's address.
+  - Entries can't be moved across drawers (the op refuses); Show in drawers is the way.
+  - Picking a drawer goes Home when the page showing is an entry of the drawer left; notes, folders and other pages stay.
+  - The one-click shared folder is made by the service from the drawer's name only (`<notes or home>/drawers/<slug>`).
+  - Logos are content-named PNGs; nothing prunes unused ones.
+- **Left for later (the user's other two sharing ideas):** a shared shelf heading shown in every drawer of a profile, and dragging entries onto a drawer in the picker (Ctrl to link instead of move). Also: reordering drawers in the app, and pruning unused logos.
+
 ## Reference
 
 The reference is Mr. Mak Workspace (<https://github.com/witnesstodark/mr-mak-workspace>, MIT): a Tauri 2 shell with a React 19 UI and a Node service. The notes above summarize what's relevant, so re-reading it is only needed for specifics. Take ideas, not code wholesale; the user asked for that explicitly.

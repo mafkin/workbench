@@ -113,11 +113,31 @@ sections:
 
 Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://lucide.dev/icons). Keys the app doesn't know about are kept.
 
+A profile can hold several **drawers**, each a nav of its own. Then `drawers:` takes the place of `sections:` (a file has one or the other):
+
+```yaml
+drawers:
+  - name: Game dev
+    logo: 3fa2c19e04b1.png        # a 64×64 PNG in ~/.config/workbench/logos/ (set from the app)
+    folder: ~/notes/drawers/game-dev   # its shared folder
+    uses: [Research]              # drawers whose shared folders it uses; unknown names are ignored
+    sections:
+      - title: Projects
+        items:
+          - { label: Tower, type: folder, path: ~/dev/tower }
+  - name: Research
+    sections:
+      - title: Projects
+        items:
+          # Tower from Game dev, shown here too: found by drawer, label and path
+          - { label: Tower, type: shared, drawer: Game dev, path: ~/dev/tower }
+```
+
 ## Using it
 
-- **Ctrl+1 / Ctrl+2** (and on, in profile order) switch profiles. **Esc** leaves edit mode.
-- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Claude setup, Servers), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile). Letters match in order, word starts first; with an empty box, your recent picks come first.
-- **Profile settings** (the sliders button on the profile switcher, or Ctrl+K) edits the profile's name, accent, home and notes folder, keeping your YAML comments; Undo works. **Add a profile** makes a blank one or a copy of the current one's headings and workflow. **Remove** asks first and moves the file to the Trash; the last profile stays.
+- **Profiles:** the person icon at the top of the sidebar lists them, with Profile settings… and Add profile…. **Ctrl+1 / Ctrl+2** (and on, in profile order) switch profiles. **Esc** leaves edit mode.
+- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Claude setup, Servers), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile or a drawer, New drawer…, Drawer settings…). With several drawers it searches all of them; picking an entry of another drawer shows that drawer. Letters match in order, word starts first; with an empty box, your recent picks come first.
+- **Profile settings** (in the profile menu, or Ctrl+K) edits the profile's name, accent, home and notes folder, keeping your YAML comments; Undo works. **Add a profile** makes a blank one or a copy of the current one's headings and workflow. **Remove** asks first and moves the file to the Trash; the last profile stays.
 - The selected entry and **Recent work** follow an entry you move or rename, in the app or by hand.
 - **Edit mode** (pencil):
   - Drag headings and entries to reorder them, or move entries between headings and groups.
@@ -127,6 +147,16 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - **Launchers** and **links** start or open from the small button at the end of their row (▶ or ↗), without a shell; their names are just text. Folders and notes open in the main pane when you click them.
 - **Alt+←** or the back arrow in the top bar goes back to the previous page.
 - **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
+
+### Drawers
+
+- A **drawer** is a nav of its own inside a profile: its own headings, entries, groups and projects, and a small logo. The button under the header row shows the drawer and switches between them; **New drawer…** and **Drawer settings…** are in its menu. Context stays at the top of every drawer.
+- The first **New drawer…** turns your headings into the first drawer, named after the profile (rename it in Drawer settings). Until then the file keeps `sections:` as it was.
+- The drawer you were in is remembered per profile in this browser. Back, Recent work and Ctrl+K bring an entry's drawer along.
+- **Logo:** **Choose picture…** in Drawer settings, or right-click a picture in the file browser and choose **Use as drawer logo**. Its middle is scaled to 64 × 64 and kept in `~/.config/workbench/logos/`. Without one, the drawer's initials on a tinted square.
+- **Show in drawers:** right-click an entry and tick **Show in <drawer>**. The same entry shows there too, under a heading of the same name, marked ⇄ with its own drawer; it opens the same page, chats and all. Renaming the original updates it; deleting the original asks first and removes it everywhere (Undo brings it back). Right-click a shared entry for **Go to <drawer>** or **Remove from this drawer**.
+- **Shared folder:** a drawer can have a folder of its own (Drawer settings offers `<notes>/drawers/<name>` in one click) and use other drawers' folders. They're listed under a fixed **Shared** heading, open in the file browser, and claude chats started in the drawer can read them (`--add-dir`, with a line in the system prompt). A project's chats get the folders of the drawer it lives in.
+- Entries move between headings within their drawer only.
 
 ### Themes and backgrounds
 

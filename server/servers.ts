@@ -3,7 +3,7 @@
 // servers a project declares (`servers:`), which show "down" when nothing
 // answers. Each gets an HTTP check. Stopping one re-checks all of that first.
 import fsp from 'node:fs/promises'
-import { displayPath, type NavItem, type Profile, type ProjectServers, type ServerHealth, type ServerRow, type ServersScan } from '../shared/config-schema.ts'
+import { allSections, displayPath, type NavItem, type Profile, type ProjectServers, type ServerHealth, type ServerRow, type ServersScan } from '../shared/config-schema.ts'
 import { StoreError, type ConfigStore } from './config-store.ts'
 import { absPath, realish, within } from './paths.ts'
 import { Procfs } from './procfs.ts'
@@ -37,7 +37,7 @@ const portOf = (url: string) => {
 
 function projectsOf(profile: Profile): Extract<NavItem, { type: 'folder' }>[] {
   const out: Extract<NavItem, { type: 'folder' }>[] = []
-  for (const section of profile.sections) {
+  for (const section of allSections(profile)) {
     for (const item of section.items) {
       if (item.type === 'folder') out.push(item)
       if (item.type === 'group') for (const child of item.items) if (child.type === 'folder') out.push(child)

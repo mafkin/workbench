@@ -155,6 +155,9 @@ export const claudeDoc = (profile: string, folder: string | null, id: string) =>
 export const checkMcp = (profile: string, folder: string | null, id: string, confirm = false) =>
   api<McpCheck>('/api/claude/check', { body: { profile, id, confirm, ...inFolder(folder) } })
 
+/** Make <notes or home>/drawers/<name> for a drawer; returns it for `folder:`. */
+export const drawerFolder = (profile: string, name: string) => api<{ folder: string }>('/api/drawers/folder', { body: { profile, name } })
+
 // Background pictures: copies in the config folder, chosen per profile.
 export const listBackgrounds = () => api<string[]>('/api/backgrounds')
 export const addBackground = (profile: string, path: string) => api<{ name: string }>('/api/backgrounds', { body: { profile, path } })

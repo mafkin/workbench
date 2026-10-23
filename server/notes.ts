@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import {
+  allSections,
   displayPath,
   NOTE_EXT,
   stepPath,
@@ -73,7 +74,7 @@ function noteEntries(profile: Profile): string[] {
       }
     }
   }
-  for (const s of profile.sections) visit(s.items)
+  for (const s of allSections(profile)) visit(s.items)
   return out
 }
 

@@ -586,7 +586,12 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       items.push(
         { label: 'Open folder in Files', icon: <FolderOpen size={14} />, run: () => void openDefault(dir ? entry.path : parentOf(entry.path)) },
         { label: 'Copy path', icon: <Copy size={14} />, run: () => void copyPath(entry.path) },
-        ...(look && !dir && PICTURE_EXT.test(entry.name) ? [{ label: 'Use as background', icon: <ImageIcon size={14} />, run: () => look.pictureFrom(entry.path) }] : []),
+        ...(look && !dir && PICTURE_EXT.test(entry.name)
+          ? [
+              { label: 'Use as background', icon: <ImageIcon size={14} />, run: () => look.pictureFrom(entry.path) },
+              { label: 'Use as drawer logo', icon: <ImageIcon size={14} />, run: () => look.logoFrom(entry.path) },
+            ]
+          : []),
         ...(inbox && !dir && !norm(entry.path).startsWith(`${norm(inbox)}/`)
           ? [{ label: 'Send to inbox', icon: <Inbox size={14} />, run: () => context!.sendToInbox(entry.path) }]
           : []),

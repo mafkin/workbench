@@ -14,7 +14,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { displayPath, type NavItem, type Profile } from '../shared/config-schema.ts'
+import { allSections, displayPath, type NavItem, type Profile } from '../shared/config-schema.ts'
 import type {
   Branch,
   Commit,
@@ -91,7 +91,7 @@ const REDIRECTS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIR
 /** The folder entries of a profile, groups included. */
 export function projectsOf(profile: Profile): Folder[] {
   const out: Folder[] = []
-  for (const section of profile.sections) {
+  for (const section of allSections(profile)) {
     for (const item of section.items) {
       if (item.type === 'folder') out.push(item)
       if (item.type === 'group') for (const child of item.items) if (child.type === 'folder') out.push(child)

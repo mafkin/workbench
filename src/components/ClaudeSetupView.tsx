@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SCOPE_LABEL, type ClaudeSetup, type HookEntry, type McpCheck, type McpEntry, type McpState, type PluginEntry, type SetupDoc, type SetupScope } from '../../shared/claude-setup.ts'
-import type { Profile } from '../../shared/config-schema.ts'
+import { allSections, type Profile } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx } from '../lib/nav.ts'
@@ -112,7 +112,7 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 /** The profile's projects (folder entries), for the page's For picker. */
 function projectsOf(profile: Profile): { label: string; path: string }[] {
   const out: { label: string; path: string }[] = []
-  for (const section of profile.sections) {
+  for (const section of allSections(profile)) {
     for (const item of section.items) {
       if (item.type === 'folder') out.push({ label: item.label, path: item.path })
       if (item.type === 'group') for (const child of item.items) if (child.type === 'folder') out.push({ label: child.label, path: child.path })

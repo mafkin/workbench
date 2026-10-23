@@ -1,18 +1,25 @@
-import { Archive, ArchiveRestore, ExternalLink, FilePlus, FolderOpen, Pencil, Pin, Play, Sparkles, SquareTerminal, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeftRight, ExternalLink, FilePlus, FolderOpen, Pencil, Pin, Play, Sparkles, SquareTerminal, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   chatName,
   CONTEXT_FOLDERS,
   CONTEXT_LABEL,
+  drawerIndex,
+  drawersOf,
+  entryAt,
   entrySlot,
+  findShared,
   expandHome,
   getItem,
   itemKey,
   joinNotes,
   noteFileName,
   projectHost,
+  sectionsOf,
+  sharedRefs,
   stepsOf,
   themeOf,
+  walkItems,
   type AppState,
   type Chat,
   type ContextFolder,
@@ -43,6 +50,7 @@ import type { SwitchItem } from './lib/switcher.ts'
 import { followState, onChatsEvent, onContextEvent, type Connection } from './lib/events.ts'
 import { nameOf } from './lib/files.ts'
 import { readLocal, useLocal } from './lib/local.ts'
+import { makeLogo, putLogo } from './lib/logos.ts'
 import {
   CHAT_KEY,
   CONTEXT_KEY,
@@ -72,6 +80,7 @@ const AgentProfilesDialog = lazy(() => import('./components/AgentProfilesDialog.
 const ProfileDialog = lazy(() => import('./components/ProfileDialog.tsx').then((m) => ({ default: m.ProfileDialog })))
 const QuickSwitcher = lazy(() => import('./components/QuickSwitcher.tsx').then((m) => ({ default: m.QuickSwitcher })))
 const LookPanel = lazy(() => import('./components/LookPanel.tsx').then((m) => ({ default: m.LookPanel })))
+const DrawerDialog = lazy(() => import('./components/DrawerDialog.tsx').then((m) => ({ default: m.DrawerDialog })))
 
 /** The identity of the entry at an address key, if the key is one. */
 function idAt(profile: Profile | null | undefined, key: string | undefined): string | undefined {
@@ -122,6 +131,23 @@ export function App() {
   const homeRef = useRef(state?.home ?? '')
   homeRef.current = state?.home ?? ''
   const profile = active?.profile ?? null
+
+  // The drawer the nav shows, remembered by name per profile; the first when the name is gone.
+  const [drawerPick, setDrawerPick] = useLocal<Record<string, string | undefined>>('drawer', {})
+  const drawer = profile && active ? Math.max(0, drawerIndex(profile, drawerPick[active.id] ?? '')) : 0
+  const drawerRef = useRef(drawer)
+  drawerRef.current = drawer
+  const [drawerDialog, setDrawerDialog] = useState<{ index: number | null } | null>(null)
+  // Deleting an entry that other drawers show too asks first.
+  const [deleting, setDeleting] = useState<{ addr: ItemAddr; item: NavItem; where: string[] } | null>(null)
+  const showDrawer = useCallback(
+    (index: number) => {
+      const a = activeRef.current
+      const name = a?.profile ? drawersOf(a.profile)[index]?.name : undefined
+      if (a && name) setDrawerPick((s) => ({ ...s, [a.id]: name }))
+    },
+    [setDrawerPick],
+  )
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', profile?.accent ?? '#8a8f98')
@@ -264,7 +290,7 @@ export function App() {
       const p = activeRef.current?.profile
       if (!p) return
       const want = normalizePath(expandHome(path, homeRef.current))
-      const addr = findEntry(p, type, (item) => 'path' in item && !!item.path && normalizePath(expandHome(item.path, homeRef.current)) === want)
+      const addr = findEntry(p, type, (item) => 'path' in item && !!item.path && normalizePath(expandHome(item.path, homeRef.current)) === want, drawerRef.current)
       navigate(addr ? itemKey(addr) : (type === 'note' ? NOTE_KEY : FILES_KEY) + path)
     },
     [navigate],
@@ -365,10 +391,26 @@ export function App() {
 
   const activate = useCallback(
     (addr: ItemAddr, item: NavItem) => {
-      if (item.type === 'link' || item.type === 'launch') openExternally(addr, item)
-      else if (item.type !== 'group') navigate(itemKey(addr))
+      // A shared entry does what its original does; the page shows under the shared entry's own address.
+      const p = activeRef.current?.profile
+      const target = item.type === 'shared' ? (p ? findShared(p, item) : null) : { addr, item }
+      if (!target) return
+      if (target.item.type === 'link' || target.item.type === 'launch') openExternally(target.addr, target.item)
+      else if (target.item.type !== 'group') navigate(itemKey(addr))
     },
     [openExternally, navigate],
+  )
+
+  /** Show another drawer; the page stays unless it is an entry of the drawer left. */
+  const pickDrawer = useCallback(
+    (index: number) => {
+      const a = activeRef.current
+      if (!a) return
+      showDrawer(index)
+      const at = parseKey(selectedRef.current[a.id])
+      if (at && (at.drawer ?? 0) !== index) navigate(undefined)
+    },
+    [showDrawer, navigate],
   )
 
   const goHome = useCallback(() => navigate(undefined), [navigate])
@@ -378,7 +420,7 @@ export function App() {
     (r: Recent) => {
       const a = activeRef.current
       const addr = a?.profile && parseKey(r.key) ? resolveEntry(a.profile, r.key, r.entry) : null
-      const item = addr && a?.profile ? getItem(a.profile, addr) : undefined
+      const item = addr && a?.profile ? entryAt(a.profile, addr)?.item : undefined
       if (a && r.step && item?.type === 'folder') {
         // Saved for the project, and heard directly by a project page already showing.
         showProjectTab(a.id, item.path, r.step)
@@ -495,13 +537,13 @@ export function App() {
       const a = activeRef.current
       const p = a?.profile
       if (!a || !p) return
-      const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(item.path) === chat.host)
+      const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(item.path) === chat.host, drawerRef.current)
       const item = project && getItem(p, project)
       if (project && item?.type === 'folder') {
         showProjectTab(a.id, item.path, chat.slot ? slotStep(chat.slot) : CHAT_TAB + chat.id)
         return navigate(itemKey(project))
       }
-      const entry = findEntry(p, 'chat', (it) => it.type === 'chat' && entrySlot(it) === chat.host)
+      const entry = findEntry(p, 'chat', (it) => it.type === 'chat' && entrySlot(it) === chat.host, drawerRef.current)
       navigate(entry ? itemKey(entry) : CHAT_KEY + chat.id)
     },
     [navigate],
@@ -630,9 +672,22 @@ export function App() {
 
   const itemMenu = useCallback(
     (addr: ItemAddr, item: NavItem): (MenuEntry | 'sep')[] => {
-      const section = activeRef.current?.profile?.sections[addr.section]
+      const p = activeRef.current?.profile
+      const section = p ? sectionsOf(p, addr.drawer ?? 0)[addr.section] : undefined
       const where = addr.group === undefined ? section?.title : `${section?.title} / ${section?.items[addr.group]?.label}`
       const entries: (MenuEntry | 'sep')[] = []
+      if (item.type === 'shared') {
+        const found = p ? findShared(p, item) : null
+        if (found) {
+          entries.push(
+            { label: 'Open', icon: <FolderOpen size={14} />, run: () => activate(addr, item) },
+            { label: `Go to ${item.drawer}`, icon: <ArrowLeftRight size={14} />, run: () => navigate(itemKey(found.addr)) },
+            'sep',
+          )
+        }
+        entries.push({ label: 'Remove from this drawer', icon: <Trash2 size={14} />, danger: true, run: () => void run([{ op: 'deleteItem', at: addr }], `Removed "${item.label}" from this drawer`) })
+        return entries
+      }
       if (item.type === 'folder') {
         const card = (field: 'pinned' | 'status', value: string | boolean | null, label?: string) =>
           void run([{ op: 'setCard', at: addr, field, value }], label)
@@ -681,17 +736,40 @@ export function App() {
         entries.push({
           label: 'New note…',
           icon: <FilePlus size={14} />,
-          run: () => setDialog({ mode: 'note', list: { section: addr.section, group: addr.index }, context: `Under ${section?.title} / ${item.label}` }),
+          run: () => setDialog({ mode: 'note', list: { drawer: addr.drawer, section: addr.section, group: addr.index }, context: `Under ${section?.title} / ${item.label}` }),
+        })
+      }
+      // Show this entry in the profile's other drawers too.
+      const all = p ? drawersOf(p) : []
+      if (p && all.length > 1 && item.type !== 'group') {
+        const shownIn = new Set(sharedRefs(p, addr).map((r) => r.addr.drawer ?? 0))
+        if (entries.length) entries.push('sep')
+        all.forEach((d, i) => {
+          if (i === (addr.drawer ?? 0)) return
+          const on = shownIn.has(i)
+          entries.push({
+            label: `Show in ${d.name}`,
+            kind: 'checkbox',
+            checked: on,
+            run: () => void run([{ op: 'setShared', at: addr, drawer: i, on: !on }], on ? `"${item.label}" no longer in ${d.name}` : `"${item.label}" also in ${d.name}`),
+          })
         })
       }
       if (entries.length) entries.push('sep')
+      const remove = () => {
+        // What other drawers show of it goes too: ask first.
+        const refs = p ? (item.type === 'group' ? item.items.map((_, i) => ({ ...addr, group: addr.index, index: i })) : [addr]).flatMap((a) => sharedRefs(p, a)) : []
+        const where = [...new Set(refs.map((r) => all[r.addr.drawer ?? 0]?.name).filter((n): n is string => !!n))]
+        if (where.length) setDeleting({ addr, item, where })
+        else void run([{ op: 'deleteItem', at: addr }], `Deleted "${item.label}"`)
+      }
       entries.push(
         { label: 'Edit…', icon: <Pencil size={14} />, run: () => setDialog({ mode: 'edit', at: addr, item, context: `Under ${where}` }) },
-        { label: 'Delete', icon: <Trash2 size={14} />, danger: true, run: () => void run([{ op: 'deleteItem', at: addr }], `Deleted "${item.label}"`) },
+        { label: 'Delete', icon: <Trash2 size={14} />, danger: true, run: remove },
       )
       return entries
     },
-    [openExternally, run, newChatIn],
+    [openExternally, run, newChatIn, activate, navigate],
   )
 
   const submitDialog = useCallback(
@@ -778,16 +856,24 @@ export function App() {
       return CONTEXT_FOLDERS.includes(name) ? { kind: 'context', name } : null
     }
     const addr = key ? resolveEntry(active.profile, key, selectedIds[active.id]) : null
-    const item = addr ? getItem(active.profile, addr) : undefined
-    if (!addr || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
-    return { kind: 'entry', addr, item }
+    // A shared entry shows its original's page.
+    const found = addr ? entryAt(active.profile, addr) : null
+    const item = found?.item
+    if (!addr || !found || !item || item.type === 'group' || item.type === 'link' || item.type === 'launch') return null
+    const own = getItem(active.profile, addr)
+    return { kind: 'entry', addr, item, origin: found.addr, shared: own?.type === 'shared' ? own : undefined }
   }, [active, selected, selectedIds])
+
+  // An entry of another drawer (Ctrl+K, Back, Recent work) brings its drawer along.
+  useEffect(() => {
+    if (selection?.kind === 'entry' && (selection.addr.drawer ?? 0) !== drawer) showDrawer(selection.addr.drawer ?? 0)
+  }, [selection, drawer, showDrawer])
 
   // The selected entry moved or was renamed: keep its new address and identity.
   useEffect(() => {
     if (!active || selection?.kind !== 'entry') return
     const key = itemKey(selection.addr)
-    const id = entryId(selection.item)
+    const id = entryId(selection.shared ?? selection.item)
     if (selected[active.id] !== key) setSelected((s) => ({ ...s, [active.id]: key }))
     if (selectedIds[active.id] !== id) setSelectedIds((s) => ({ ...s, [active.id]: id }))
   }, [active, selection, selected, selectedIds, setSelected, setSelectedIds])
@@ -800,6 +886,20 @@ export function App() {
         api
           .addBackground(a.id, path)
           .then(({ name }) => run([{ op: 'setProfileField', key: 'background', value: name }], `Background: ${name}`))
+          .catch(fail)
+      },
+      logoFrom: (path) => {
+        const a = activeRef.current
+        const d = a?.profile ? drawersOf(a.profile)[drawerRef.current] : undefined
+        if (!a || !d) return
+        const index = drawerRef.current
+        api
+          .fileTicket(a.id, path)
+          .then(({ url }) => fetch(url))
+          .then((res) => res.blob())
+          .then(makeLogo)
+          .then(putLogo)
+          .then((name) => run([{ op: 'setDrawer', drawer: index, field: 'logo', value: name }], `New logo for ${d.name}`))
           .catch(fail)
       },
     }),
@@ -857,14 +957,17 @@ export function App() {
     const p = active?.profile
     if (!active || !p || !state) return []
     const items: SwitchItem[] = []
+    const all = drawersOf(p)
     const where = (addr: ItemAddr) => {
-      const section = p.sections[addr.section]
+      const section = sectionsOf(p, addr.drawer ?? 0)[addr.section]
       const group = addr.group !== undefined ? section?.items[addr.group] : undefined
-      return group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
+      const heading = group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
+      // With several drawers, every drawer's entries are offered, named by drawer.
+      return all.length > 1 ? `${all[addr.drawer ?? 0]?.name} › ${heading}` : heading
     }
-    for (const [si, section] of p.sections.entries()) {
+    {
       const add = (addr: ItemAddr, item: NavItem) => {
-        if (item.type === 'group') return
+        if (item.type === 'group' || item.type === 'shared') return
         const key = itemKey(addr)
         const verb = item.type === 'launch' ? 'Start ' : item.type === 'link' ? 'Open ' : ''
         items.push({ id: `entry:${entryId(item)}`, kind: 'entry', label: `${verb}${item.label}`, detail: where(addr), run: () => activate(addr, item) })
@@ -894,10 +997,7 @@ export function App() {
         }
         items.push({ id: `action:chat:${entryId(item)}`, kind: 'action', label: `New chat in ${item.label}`, detail: item.path, run: () => void newChatIn(addr) })
       }
-      for (const [i, item] of section.items.entries()) {
-        add({ section: si, index: i }, item)
-        if (item.type === 'group') for (const [ci, child] of item.items.entries()) add({ section: si, group: i, index: ci }, child)
-      }
+      for (const { addr, item } of walkItems(p)) add(addr, item)
     }
     for (const n of notesList) items.push({ id: `note:${n.path}`, kind: 'note', label: n.name, detail: n.rel ?? n.path, run: () => openNote(n.path) })
     if (contextStatus?.ready) {
@@ -909,11 +1009,23 @@ export function App() {
       { id: 'page:setup', kind: 'page', label: 'Claude setup', detail: 'Skills, MCP servers, agents, hooks, plugins', run: () => navigate(SETUP_KEY) },
       { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your projects', run: () => navigate(SERVERS_KEY) },
     )
-    // New note goes under the heading with the notes (the daily entry's), else the last one.
-    const daily = findEntry(p, 'daily') ?? findEntry(p, 'note')
-    const noteSection = daily ? daily.section : p.sections.length - 1
+    // New note goes under the shown drawer's heading with the notes (the daily entry's), else its last one.
+    const here = sectionsOf(p, drawer)
+    const inHere = (type: NavItem['type']) => walkItems(p).find((e) => (e.addr.drawer ?? 0) === drawer && e.item.type === type)?.addr
+    const daily = inHere('daily') ?? inHere('note')
+    const noteSection = daily ? daily.section : here.length - 1
     if (noteSection >= 0) {
-      items.push({ id: 'action:note', kind: 'action', label: 'New note…', detail: `Under ${p.sections[noteSection].title}`, run: () => setDialog({ mode: 'note', list: { section: noteSection }, context: `Under ${p.sections[noteSection].title}` }) })
+      const list = drawer ? { drawer, section: noteSection } : { section: noteSection }
+      items.push({ id: 'action:note', kind: 'action', label: 'New note…', detail: `Under ${here[noteSection].title}`, run: () => setDialog({ mode: 'note', list, context: `Under ${here[noteSection].title}` }) })
+    }
+    all.forEach((d, i) => {
+      if (i !== drawer) items.push({ id: `action:drawer:${d.name}`, kind: 'action', label: `Switch to drawer ${d.name}`, detail: `${d.sections.length} headings`, run: () => pickDrawer(i) })
+    })
+    if (!active.error) {
+      items.push(
+        { id: 'action:new-drawer', kind: 'action', label: 'New drawer…', detail: p.name, run: () => setDrawerDialog({ index: null }) },
+        { id: 'action:drawer-settings', kind: 'action', label: 'Drawer settings…', detail: all[drawer]?.name ?? '', run: () => setDrawerDialog({ index: drawer }) },
+      )
     }
     items.push(
       { id: 'action:look', kind: 'action', label: 'Theme and background…', detail: p.name, run: () => setLookOpen(true) },
@@ -970,6 +1082,12 @@ export function App() {
               onAddProfile={() => setProfileOpen('add')}
                 setupActive={selection?.kind === 'setup'}
                 contextSelected={selection?.kind === 'context' ? selection.name : null}
+                drawer={drawer}
+                onDrawer={pickDrawer}
+                onNewDrawer={() => setDrawerDialog({ index: null })}
+                onDrawerSettings={() => setDrawerDialog({ index: drawer })}
+                filesSelected={selection?.kind === 'files' ? selection.path : null}
+                openFiles={(path) => navigate(FILES_KEY + path)}
               />
               <MainPane
                 active={active}
@@ -984,6 +1102,7 @@ export function App() {
                 home={state.home}
                 actions={projectActions}
                 recent={recent[active.id] ?? []}
+                drawer={drawer}
                 openRecent={openRecent}
               onServersScan={(scan) => active && setServerScan({ profile: active.id, scan })}
                 onHome={goHome}
@@ -1005,10 +1124,36 @@ export function App() {
                 {profileOpen && (
                   <ProfileDialog active={active} profiles={state.profiles} addFirst={profileOpen === 'add'} run={run} onSwitch={switchProfile} onChanged={refresh} onClose={() => setProfileOpen(false)} />
                 )}
+                {drawerDialog && profile && (
+                  <DrawerDialog
+                    profile={profile}
+                    profileId={active.id}
+                    index={drawerDialog.index}
+                    run={run}
+                    onShow={(name) => {
+                      setDrawerPick((s) => ({ ...s, [active.id]: name }))
+                    }}
+                    onDeleted={() => navigate(undefined)}
+                    onClose={() => setDrawerDialog(null)}
+                  />
+                )}
                 {agentsFor !== null && profile && (
                   <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />
                 )}
               </Suspense>
+              {deleting && (
+                <ConfirmDialog
+                  title={`Delete ${deleting.item.label}?`}
+                  action="Delete"
+                  onCancel={() => setDeleting(null)}
+                  onConfirm={() => {
+                    setDeleting(null)
+                    void run([{ op: 'deleteItem', at: deleting.addr }], `Deleted "${deleting.item.label}"`)
+                  }}
+                >
+                  It is also shown in {deleting.where.join(' and ')}; it goes from there too. Undo brings it back everywhere.
+                </ConfirmDialog>
+              )}
               {closing && (
                 <ConfirmDialog
                   title={`Close ${chatName(closing)}?`}

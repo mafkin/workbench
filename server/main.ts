@@ -2,6 +2,7 @@
 // Listens on loopback only; see guard.ts for who may call it.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,7 +22,11 @@ import {
   expandHome,
   FileOp,
   findAgent,
+  Drawer,
+  drawerSlug,
+  entryAt,
   getItem,
+  walkItems,
   isReservedAgent,
   ItemAddr,
   Op,
@@ -34,12 +39,13 @@ import {
 } from '../shared/config-schema.ts'
 import { agentArgs, claudeAgents } from './agents.ts'
 import { Backgrounds } from './backgrounds.ts'
+import { Logos } from './logos.ts'
 import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
 import { frontmatter, readSetup } from './claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { applyOps, describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
-import { Context } from './context.ts'
+import { Context, drawerContext, mergeContext } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { Git, type Repo } from './git.ts'
 import { openProgram } from './open-with.ts'
@@ -94,6 +100,7 @@ const FileOpBody = z.object({ profile: z.string(), op: FileOp })
 const StopServer = z.object({ profile: z.string(), pid: z.int().positive(), port: z.int().min(1).max(65535) })
 const FindQuery = z.object({ profile: z.string(), path: z.string(), q: z.string().default(''), hidden: z.string().optional() })
 const UploadQuery = z.object({ profile: z.string(), dir: z.string(), name: z.string() })
+const DrawerFolder = z.object({ profile: z.string(), name: Drawer.shape.name })
 const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.boolean().optional() })
 const ChatStart = z.object({
   profile: z.string(),
@@ -178,6 +185,7 @@ export async function buildServer(opts: ServerOptions) {
   const files = new Files(store, home, { spawn: opts.spawn })
   const thumbs = new Thumbs(opts.thumbsDir ?? path.join(defaultCacheDir(), 'thumbs'))
   const backgrounds = new Backgrounds(path.join(opts.configDir, 'backgrounds'), store, home)
+  const logos = new Logos(path.join(opts.configDir, 'logos'))
   const context = new Context(store, home)
   const servers = new Servers(store, home)
   const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
@@ -291,7 +299,8 @@ export async function buildServer(opts: ServerOptions) {
     const { profile: id, rev, at, step } = parse(OpenBody, req.body)
     const p = store.profile(id)
     if (p.rev !== rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
-    const item = getItem(p.profile, at)
+    // A shared entry opens its original.
+    const item = entryAt(p.profile, at)?.item
     if (!item) throw new StoreError('No such entry', 404)
     if (step === undefined) {
       await openItem(item, home, opts.spawn)
@@ -467,6 +476,28 @@ export async function buildServer(opts: ServerOptions) {
     return { ok: true }
   })
 
+  // Drawer logos: 64×64 PNGs the browser made, named by their content.
+  app.put('/api/logos', async (req) => {
+    if (!Buffer.isBuffer(req.body)) throw new StoreError('A logo must be a PNG', 415)
+    return logos.put(req.body)
+  })
+
+  app.get<{ Params: { name: string } }>('/api/logos/:name', async (req, reply) => {
+    const body = await logos.read(req.params.name)
+    return reply.header('content-type', 'image/png').header('x-content-type-options', 'nosniff').header('cache-control', 'max-age=31536000, immutable').send(body)
+  })
+
+  // A drawer's shared folder in one click: <notes or home>/drawers/<name>, made
+  // here; the UI then sets `folder:` (with Undo). Only the name comes from the request.
+  app.post('/api/drawers/folder', async (req) => {
+    const b = parse(DrawerFolder, req.body)
+    const profile = store.profile(b.profile).profile
+    if (!profile) throw new StoreError('The profile is not loaded', 404)
+    const folder = `${(profile.notes ?? profile.home ?? '~').replace(/\/+$/, '')}/drawers/${drawerSlug(b.name)}`
+    await fsp.mkdir(absPath(folder, home), { recursive: true })
+    return { folder }
+  })
+
   // Chats: started from an entry or step in the config, by address; a request
   // never carries a command or arguments.
   async function chatFolder(profile: Profile, raw: string, confine: boolean): Promise<string> {
@@ -482,38 +513,45 @@ export async function buildServer(opts: ServerOptions) {
   app.get('/api/chats/token', async () => ({ token: ptyToken }))
 
   /** What a chat's `agent:` starts: the shell, plain claude, or claude with an agent profile's flags. */
-  /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up. */
-  async function agentFor(id: string, profile: Profile, name: string | undefined, cwd: string, args: string[]) {
+  /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up, and its drawer's shared folders. */
+  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[]) {
     const program = name && isReservedAgent(name) ? chatProgram(name) : 'claude'
     const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
     if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
     if (program === 'shell') return { agent: program, args, agentProfile: null, bypass: false, context: false }
     const ctx = await context.chatContext(id)
-    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, ctx)
+    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(ctx, await drawerContext(profile, drawer, home)))
     return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
   }
+
+  /** The drawer holding a project (its folder entry), for its chats' shared folders. */
+  const projectDrawer = (profile: Profile, projectPath: string) =>
+    walkItems(profile).find((e) => e.item.type === 'folder' && e.item.path === projectPath)?.addr.drawer ?? 0
 
   app.post('/api/chats', async (req) => {
     const body = parse(ChatStart, req.body)
     const p = store.profile(body.profile)
     if (p.rev !== body.rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
-    const item = getItem(p.profile, body.at)
-    if (!item) throw new StoreError('No such entry', 404)
+    // A shared entry starts its original's chat; the chat gets the shared folders of the drawer holding the original.
+    const found = entryAt(p.profile, body.at)
+    if (!found) throw new StoreError('No such entry', 404)
+    const { item } = found
+    const drawer = found.addr.drawer ?? 0
     let spec: ChatSpec
     if (item.type === 'chat') {
       const slot = entrySlot(item)
       const cwd = await chatFolder(p.profile, item.path ?? '~', false)
-      spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, item.agent, cwd, item.args)) }
+      spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, drawer, item.agent, cwd, item.args)) }
     } else if (item.type === 'folder' && body.step !== undefined) {
       const step = stepsOf(p.profile, item)[body.step]
       if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
       const entry = stepEntry(item.path, step) as typeof step
       const cwd = await chatFolder(p.profile, entry.path ?? item.path, false)
-      spec = { profile: body.profile, host: projectHost(item.path), slot: stepSlot(item.path, step.label), cwd, ...(await agentFor(body.profile, p.profile, step.agent, cwd, step.args)) }
+      spec = { profile: body.profile, host: projectHost(item.path), slot: stepSlot(item.path, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args)) }
     } else if (item.type === 'folder') {
       const cwd = body.path === undefined ? await chatFolder(p.profile, item.path, false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(item.path), slot: null, cwd, ...(await agentFor(body.profile, p.profile, body.agent ?? item.agent, cwd, [])) }
+      spec = { profile: body.profile, host: projectHost(item.path), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [])) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -689,7 +727,7 @@ export async function buildServer(opts: ServerOptions) {
       `This repository has merge conflicts from ${what}. Resolve the conflicts in ${files.join(', ')}` +
       ` (paths from the repository's top folder${s.sub ? `; this chat runs in ${s.sub}` : ''}): keep what both sides meant,` +
       ` remove the conflict markers, and say what you chose. Don't stage, commit or abort; I'll mark the files resolved myself.`
-    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, r.project.agent, r.dir, [])) }
+    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [])) }
     return chats.start({ ...spec, prompt, label: 'Conflicts' })
   })
 

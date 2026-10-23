@@ -168,7 +168,19 @@ export const FolderItem = z.object({
 /** Today's note in the profile's notes folder: `<notes>/<folder>/YYYY-MM-DD.md`. */
 export const DailyItem = z.object({ ...base, type: z.literal('daily'), folder: z.string().optional(), template: z.string().optional() })
 
-export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem])
+/**
+ * An entry of another drawer shown in this one too: the same entry, found by
+ * its drawer, label and (when it has one) path. Renaming or deleting the
+ * original updates or removes it.
+ */
+export const SharedItem = z.object({
+  ...base,
+  type: z.literal('shared'),
+  drawer: z.string().trim().min(1, 'A shared entry names the drawer it comes from'),
+  path: z.string().trim().min(1).optional(),
+})
+
+export const LeafItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, SharedItem])
 
 /** One level of sub-groups under a heading; a group cannot contain another group. */
 export const GroupItem = z.object({
@@ -178,13 +190,27 @@ export const GroupItem = z.object({
   items: list(LeafItem),
 })
 
-export const NavItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, GroupItem])
+export const NavItem = z.discriminatedUnion('type', [FolderItem, NoteItem, DailyItem, ChatItem, LinkItem, LaunchItem, SharedItem, GroupItem])
 
 export const Section = z.object({
   id: z.string().optional(),
   title: z.string().trim().min(1, 'Heading title is required'),
   collapsed: z.boolean().optional(),
   items: list(NavItem),
+})
+
+/**
+ * A drawer: a nav of its own inside a profile (headings, entries, projects),
+ * with a small logo, a shared folder other drawers can use, and the drawers
+ * whose shared folders it uses (unknown names are ignored).
+ */
+export const Drawer = z.object({
+  name: z.string().trim().min(1, 'A drawer needs a name').max(40, 'A drawer name is at most 40 characters'),
+  /** A 64×64 PNG in the config's logos folder. */
+  logo: z.string().trim().min(1).optional(),
+  folder: z.string().trim().regex(/^(~|\/)/, 'A drawer folder must start with ~ or /').optional(),
+  uses: z.array(z.string().trim().min(1)).optional(),
+  sections: list(Section),
 })
 
 /**
@@ -219,7 +245,18 @@ export const Profile = z.object({
   agents: Agents.optional(),
   /** Programs for "Open with", before the built-in ones (Blender, Godot). */
   openWith: z.array(OpenRule).optional(),
+  /** Without drawers, `sections:` is the profile's one drawer; the first drawer change moves it into `drawers:`. */
+  drawers: z.array(Drawer).optional(),
   sections: list(Section),
+}).superRefine((p, ctx) => {
+  if (!p.drawers) return
+  if (p.sections.length) ctx.addIssue({ code: 'custom', path: ['sections'], message: 'Use either sections: or drawers:, not both; move the headings into a drawer' })
+  const seen = new Set<string>()
+  p.drawers.forEach((d, i) => {
+    const key = d.name.toLowerCase()
+    if (seen.has(key)) ctx.addIssue({ code: 'custom', path: ['drawers', i, 'name'], message: `Two drawers are called ${d.name}` })
+    seen.add(key)
+  })
 })
 
 /** A profile's id is its file name: `profiles/<id>.yaml`. */
@@ -238,6 +275,8 @@ export type StepItem = z.output<typeof StepItem>
 export type GroupItem = z.output<typeof GroupItem>
 export type NavItem = z.output<typeof NavItem>
 export type Section = z.output<typeof Section>
+export type SharedItem = z.output<typeof SharedItem>
+export type Drawer = z.output<typeof Drawer>
 export type Profile = z.output<typeof Profile>
 export type Settings = z.output<typeof Settings>
 export type ItemType = NavItem['type']
@@ -259,6 +298,7 @@ export const TYPE_FIELDS: Record<AnyType, string[]> = {
   link: ['url'],
   launch: ['command', 'args', 'cwd'],
   group: ['collapsed', 'items'],
+  shared: ['drawer', 'path'],
 }
 
 /** Profile-level keys the app can set, in the order a new key is placed. */
@@ -271,8 +311,8 @@ export const themeOf = (name: string | undefined): ThemeId => (THEMES as readonl
 
 const index = z.int().nonnegative()
 
-/** Address of a list of items: a heading's list, or a group's list inside a heading. */
-export const ListAddr = z.object({ section: index, group: index.optional() })
+/** Address of a list of items: a heading's list, or a group's list inside a heading, in a drawer (0 when left out). */
+export const ListAddr = z.object({ drawer: index.optional(), section: index, group: index.optional() })
 export const ItemAddr = ListAddr.extend({ index })
 export type ListAddr = z.output<typeof ListAddr>
 export type ItemAddr = z.output<typeof ItemAddr>
@@ -280,11 +320,14 @@ export type ItemAddr = z.output<typeof ItemAddr>
 // Item contents are validated when applied, which gives field-level messages.
 const itemInput = z.custom<ItemInput>((v) => typeof v === 'object' && v !== null && !Array.isArray(v), 'Item must be an object')
 
+/** Drawer fields the app sets; `uses` takes a list, the others a string (empty removes it). */
+export const DRAWER_FIELDS = ['name', 'logo', 'folder', 'uses'] as const
+
 export const Op = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('addSection'), title: z.string(), index: index.optional() }),
-  z.object({ op: z.literal('renameSection'), section: index, title: z.string() }),
-  z.object({ op: z.literal('deleteSection'), section: index }),
-  z.object({ op: z.literal('moveSection'), from: index, to: index }),
+  z.object({ op: z.literal('addSection'), drawer: index.optional(), title: z.string(), index: index.optional() }),
+  z.object({ op: z.literal('renameSection'), drawer: index.optional(), section: index, title: z.string() }),
+  z.object({ op: z.literal('deleteSection'), drawer: index.optional(), section: index }),
+  z.object({ op: z.literal('moveSection'), drawer: index.optional(), from: index, to: index }),
   z.object({ op: z.literal('addItem'), to: ListAddr, index: index.optional(), item: itemInput }),
   z.object({ op: z.literal('updateItem'), at: ItemAddr, item: itemInput }),
   z.object({ op: z.literal('deleteItem'), at: ItemAddr }),
@@ -313,6 +356,15 @@ export const Op = z.discriminatedUnion('op', [
     agent: z.custom<z.input<typeof AgentProfile>>((v) => typeof v === 'object' && !Array.isArray(v), 'Agent profile must be an object').nullable(),
     rename: z.string().optional(),
   }),
+  // Drawers. The first of these on a profile without `drawers:` moves its
+  // `sections:` into a first drawer named after the profile.
+  z.object({ op: z.literal('addDrawer'), name: z.string() }),
+  // A rename updates shared entries and `uses:` that name it.
+  z.object({ op: z.literal('setDrawer'), drawer: index, field: z.enum(DRAWER_FIELDS), value: z.union([z.string(), z.array(z.string())]) }),
+  // Also removes what other drawers share from it and names of it in `uses:`; the last drawer stays.
+  z.object({ op: z.literal('deleteDrawer'), drawer: index }),
+  // Show the entry at `at` in drawer `drawer` too (under a heading of the same title), or stop.
+  z.object({ op: z.literal('setShared'), at: ItemAddr, drawer: index, on: z.boolean() }),
 ])
 export type Op = z.output<typeof Op>
 
@@ -343,13 +395,87 @@ export function expandHome(value: string, home: string): string {
   return value.replace(/(^|=)~(?=\/|$)/g, (_m, pre: string) => pre + home)
 }
 
-/** Stable key for an item address, used for selection and drag ids. */
+/** Stable key for an item address, used for selection and drag ids: `s.i`, `s.g.i`, with `d:` in front past the first drawer. */
 export function itemKey(a: ItemAddr): string {
-  return a.group === undefined ? `${a.section}.${a.index}` : `${a.section}.${a.group}.${a.index}`
+  const key = a.group === undefined ? `${a.section}.${a.index}` : `${a.section}.${a.group}.${a.index}`
+  return a.drawer ? `${a.drawer}:${key}` : key
+}
+
+// Drawers
+
+/** The profile's drawers; without `drawers:`, one named after the profile holding its `sections:`. */
+export function drawersOf(profile: Profile): Drawer[] {
+  if (profile.drawers?.length) return profile.drawers
+  return [{ name: profile.name, sections: profile.sections }]
+}
+
+/** A drawer's name as a folder name: "Game dev" → game-dev. */
+export const drawerSlug = (name: string) =>
+  name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'drawer'
+
+/** Whether the profile has written `drawers:` (else its one drawer is `sections:`). */
+export const hasDrawers = (profile: Profile) => !!profile.drawers?.length
+
+export const sectionsOf = (profile: Profile, drawer = 0): Section[] => drawersOf(profile)[drawer]?.sections ?? []
+
+/** Every heading of every drawer. */
+export const allSections = (profile: Profile): Section[] => drawersOf(profile).flatMap((d) => d.sections)
+
+/** A drawer's index by name, ignoring case; -1 when there is none. */
+export const drawerIndex = (profile: Profile, name: string) => drawersOf(profile).findIndex((d) => d.name.toLowerCase() === name.toLowerCase())
+
+/** Every entry with its address, group children after their group, drawer by drawer. */
+export function walkItems(profile: Profile): { addr: ItemAddr; item: NavItem }[] {
+  const out: { addr: ItemAddr; item: NavItem }[] = []
+  drawersOf(profile).forEach((d, drawer) =>
+    d.sections.forEach((s, section) =>
+      s.items.forEach((item, index) => {
+        const at = drawer ? { drawer, section, index } : { section, index }
+        out.push({ addr: at, item })
+        if (item.type === 'group') item.items.forEach((child, i) => out.push({ addr: { ...at, group: index, index: i }, item: child }))
+      }),
+    ),
+  )
+  return out
+}
+
+/** Whether `item` is the original a shared entry points at. */
+export const isOriginalOf = (ref: SharedItem, item: NavItem) =>
+  item.type !== 'shared' && item.type !== 'group' && item.label === ref.label && (ref.path === undefined || ('path' in item && item.path === ref.path))
+
+/** The entry a shared entry points at, or null when it is gone. */
+export function findShared(profile: Profile, ref: SharedItem): { addr: ItemAddr; item: NavItem } | null {
+  const d = drawerIndex(profile, ref.drawer)
+  if (d < 0) return null
+  return walkItems(profile).find((e) => (e.addr.drawer ?? 0) === d && isOriginalOf(ref, e.item)) ?? null
+}
+
+/** The entry at an address, following a shared entry to its original; null when either is missing. */
+export function entryAt(profile: Profile, a: ItemAddr): { addr: ItemAddr; item: NavItem } | null {
+  const item = getItem(profile, a)
+  if (!item) return null
+  return item.type === 'shared' ? findShared(profile, item) : { addr: a, item }
+}
+
+export const sameAddr = (a: ItemAddr, b: ItemAddr) => (a.drawer ?? 0) === (b.drawer ?? 0) && a.section === b.section && a.group === b.group && a.index === b.index
+
+/** The shared entries in other drawers that point at the entry at `a`. */
+export function sharedRefs(profile: Profile, a: ItemAddr): { addr: ItemAddr; item: SharedItem }[] {
+  const out: { addr: ItemAddr; item: SharedItem }[] = []
+  for (const e of walkItems(profile)) {
+    if (e.item.type !== 'shared') continue
+    const original = findShared(profile, e.item)
+    if (original && sameAddr(original.addr, a)) out.push({ addr: e.addr, item: e.item })
+  }
+  return out
 }
 
 export function getItem(profile: Profile, a: ItemAddr): NavItem | undefined {
-  const section = profile.sections[a.section]
+  const section = sectionsOf(profile, a.drawer ?? 0)[a.section]
   if (!section) return undefined
   if (a.group === undefined) return section.items[a.index]
   const group = section.items[a.group]
@@ -480,7 +606,7 @@ export function categoriesOf(profile: Profile): string[] {
     if (item.type === 'folder' && item.category) out.add(item.category)
     if (item.type === 'group') item.items.forEach(visit)
   }
-  for (const s of profile.sections) s.items.forEach(visit)
+  for (const s of allSections(profile)) s.items.forEach(visit)
   return [...out].sort((a, b) => a.localeCompare(b))
 }
 
@@ -488,7 +614,7 @@ export function categoriesOf(profile: Profile): string[] {
 
 /**
  * Folders the file browser may open, as written in the config: home, the notes
- * folder and every folder entry. The service resolves and enforces them; the UI
+ * folder, every folder entry and every drawer's shared folder. The service resolves and enforces them; the UI
  * shows them as chips.
  */
 export function folderRoots(profile: Profile): { label: string; path: string }[] {
@@ -506,12 +632,13 @@ export function folderRoots(profile: Profile): { label: string; path: string }[]
       if (step.type === 'report' || step.type === 'file') out.push({ label, path: stepPath(item.path, parentPath(step.path)) })
     }
   }
-  for (const section of profile.sections) {
+  for (const section of allSections(profile)) {
     for (const item of section.items) {
       project(item)
       if (item.type === 'group') item.items.forEach(project)
     }
   }
+  for (const d of profile.drawers ?? []) if (d.folder) out.push({ label: `${d.name} (shared folder)`, path: d.folder })
   return out
 }
 

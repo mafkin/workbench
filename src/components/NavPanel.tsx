@@ -13,15 +13,16 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Blocks, BookOpen, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
+import { Blocks, BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { chatProgram, CONTEXT_LABEL, entrySlot, itemKey, projectHost, type ContextFolder, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
+import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section } from '../../shared/config-schema.ts'
 import type { GitMark } from '../../shared/git.ts'
 import { useContextFolders } from '../lib/context.ts'
 import type { Connection } from '../lib/events.ts'
 import { useLocal } from '../lib/local.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { cx, describeTarget, opensExternally, sameList, type DialogState, type DragData, type DropData, type MenuEntry, type MenuState } from '../lib/nav.ts'
+import { DrawerLogo } from './DrawerLogo.tsx'
 import { EntryIcon } from './EntryIcon.tsx'
 
 export interface NavActions {
@@ -64,16 +65,36 @@ interface Props extends NavActions {
   serversActive: boolean
   /** The context folder whose page shows, if one does. */
   contextSelected: ContextFolder | null
+  /** The drawer the nav shows. */
+  drawer: number
+  onDrawer: (index: number) => void
+  onNewDrawer: () => void
+  onDrawerSettings: () => void
+  /** The folder whose page shows (`files:`), for the Shared heading. */
+  filesSelected: string | null
+  openFiles: (path: string) => void
 }
 
-const Ctx = createContext<NavActions & { profile: Profile; profileId: string; drop: DropHint; renaming: RenameState; showArchive: boolean }>(null!)
+const Ctx = createContext<
+  NavActions & {
+    profile: Profile
+    profileId: string
+    drop: DropHint
+    renaming: RenameState
+    showArchive: boolean
+    /** The drawer shown, its headings, and its name in collapse keys past the first. */
+    drawer: number
+    sections: Section[]
+    drawerKey: string[]
+  }
+>(null!)
 
 const archived = (item: NavItem) => item.type === 'folder' && item.status === 'archived'
 const pinned = (item: NavItem) => item.type === 'folder' && !!item.pinned
 
-function countArchived(profile: Profile): number {
+function countArchived(sections: Section[]): number {
   let n = 0
-  for (const s of profile.sections) {
+  for (const s of sections) {
     for (const item of s.items) {
       if (archived(item)) n++
       if (item.type === 'group') n += item.items.filter(archived).length
@@ -95,6 +116,8 @@ interface RenameState {
 const sectionId = (i: number) => `sec:${i}`
 const itemId = (a: ItemAddr) => `item:${itemKey(a)}`
 const listId = (l: ListAddr) => (l.group === undefined ? `list:${l.section}` : `list:${l.section}.${l.group}`)
+/** A list or item address in drawer `d`; the first drawer's addresses leave it out, as before drawers. */
+const inDrawer = <T extends object>(d: number, a: T): T & { drawer?: number } => (d ? { ...a, drawer: d } : a)
 const collapseKey = (profileId: string, ...parts: string[]) => [profileId, ...parts].join('|')
 
 // The innermost target wins: an entry in a group, a group's list, a top-level
@@ -129,21 +152,26 @@ const collision: CollisionDetection = (args) => {
 }
 
 /** Where an entry dropped on `over` should go. */
-function dropTarget(over: DropData, profile: Profile): { to: ListAddr; index: number } | null {
-  if (over.kind === 'item') return { to: { section: over.addr.section, group: over.addr.group }, index: over.addr.index }
+function dropTarget(over: DropData, sections: Section[], drawer: number): { to: ListAddr; index: number } | null {
+  if (over.kind === 'item') return { to: inDrawer(drawer, { section: over.addr.section, group: over.addr.group }), index: over.addr.index }
   if (over.kind === 'list') return { to: over.list, index: over.length }
-  if (over.kind === 'section') return { to: { section: over.section }, index: profile.sections[over.section]?.items.length ?? 0 }
+  if (over.kind === 'section') return { to: inDrawer(drawer, { section: over.section }), index: sections[over.section]?.items.length ?? 0 }
   return null
 }
 
 export function NavPanel(props: Props) {
   const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook, onSetup, setupActive } = props
   const profile = active.profile
+  const drawers = profile ? drawersOf(profile) : []
+  const drawer = Math.min(props.drawer, Math.max(0, drawers.length - 1))
+  const current: Drawer | undefined = drawers[drawer]
+  const sections = current?.sections ?? []
+  const drawerKey = drawer && current ? [current.name] : []
   const [drop, setDrop] = useState<DropHint>({ drag: null, overId: null })
   const [renaming, setRenaming] = useState<number | null>(null)
   const [addingHeading, setAddingHeading] = useState(false)
   const [showArchive, setShowArchive] = useLocal('showArchive', false)
-  const archivedCount = profile ? countArchived(profile) : 0
+  const archivedCount = countArchived(sections)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -163,11 +191,11 @@ export function NavPanel(props: Props) {
     if (!a || !o || !profile) return
     if (a.kind === 'section') {
       if (o.kind === 'section' && o.section !== a.section) {
-        void props.run([{ op: 'moveSection', from: a.section, to: o.section }])
+        void props.run([{ op: 'moveSection', drawer, from: a.section, to: o.section }])
       }
       return
     }
-    const target = dropTarget(o, profile)
+    const target = dropTarget(o, sections, drawer)
     if (!target) return
     if (a.item.type === 'group' && target.to.group !== undefined) {
       props.notify('A group cannot go inside another group', 'error')
@@ -204,6 +232,26 @@ export function NavPanel(props: Props) {
     })
   }
 
+  function drawerMenu(e: React.MouseEvent) {
+    const r = e.currentTarget.getBoundingClientRect()
+    props.openMenu({
+      x: r.left,
+      y: r.bottom + 4,
+      entries: [
+        ...drawers.map((d, i) => ({
+          label: d.name,
+          icon: <DrawerLogo name={d.name} logo={d.logo} size={24} />,
+          kind: 'radio' as const,
+          checked: i === drawer,
+          run: () => i !== drawer && props.onDrawer(i),
+        })),
+        'sep' as const,
+        { label: 'New drawer…', icon: <Plus size={14} />, disabled: !!active.error, run: props.onNewDrawer },
+        { label: 'Drawer settings…', icon: <Settings2 size={14} />, disabled: !!active.error, run: props.onDrawerSettings },
+      ],
+    })
+  }
+
   return (
     <nav className={cx('nav', editing && 'editing')} aria-label="Navigation">
       <div className="nav-top">
@@ -236,6 +284,13 @@ export function NavPanel(props: Props) {
             <Pencil size={13} />
           </button>
         </div>
+        {current && (
+          <button className="drawer-pick" onClick={drawerMenu} aria-label={`Drawer: ${current.name}`} aria-haspopup="menu" title="Drawers">
+            <DrawerLogo name={current.name} logo={current.logo} size={22} />
+            <span className="name">{current.name}</span>
+            <ChevronDown size={13} className="chev" />
+          </button>
+        )}
       </div>
 
       {active.error && (
@@ -249,6 +304,7 @@ export function NavPanel(props: Props) {
 
       <div className="nav-scroll">
         {profile && <ContextBlock selected={props.contextSelected} isCollapsed={props.isCollapsed} toggleCollapsed={props.toggleCollapsed} />}
+        {profile && <SharedBlock profile={profile} drawer={drawer} selected={props.filesSelected} open={props.openFiles} isCollapsed={props.isCollapsed} toggleCollapsed={props.toggleCollapsed} />}
         {profile && (
           <Ctx.Provider
             value={{
@@ -258,6 +314,9 @@ export function NavPanel(props: Props) {
               drop,
               renaming: { section: renaming, start: setRenaming },
               showArchive,
+              drawer,
+              sections,
+              drawerKey,
             }}
           >
             <DndContext
@@ -268,8 +327,8 @@ export function NavPanel(props: Props) {
               onDragEnd={onDragEnd}
               onDragCancel={() => setDrop({ drag: null, overId: null })}
             >
-              <SortableContext items={profile.sections.map((_, i) => sectionId(i))} strategy={verticalListSortingStrategy}>
-                {profile.sections.map((s, i) => (
+              <SortableContext items={sections.map((_, i) => sectionId(i))} strategy={verticalListSortingStrategy}>
+                {sections.map((s, i) => (
                   <SectionBlock key={sectionId(i)} index={i} title={s.title} items={s.items} collapsedDefault={!!s.collapsed} />
                 ))}
               </SortableContext>
@@ -305,7 +364,7 @@ export function NavPanel(props: Props) {
                 placeholder="Heading title"
                 onDone={(title) => {
                   setAddingHeading(false)
-                  if (title) void props.run([{ op: 'addSection', title }])
+                  if (title) void props.run([{ op: 'addSection', drawer, title }])
                 }}
               />
             </div>
@@ -378,21 +437,22 @@ function useDropHint(id: string, kind: 'before' | 'into') {
 
 function SectionBlock({ index, title, items, collapsedDefault }: { index: number; title: string; items: NavItem[]; collapsedDefault: boolean }) {
   const ctx = useContext(Ctx)
-  const { editing, profileId, renaming } = ctx
+  const { editing, profileId, renaming, drawer } = ctx
   const id = sectionId(index)
+  const list = inDrawer(drawer, { section: index })
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id,
     data: { kind: 'section', section: index, title } satisfies DropData,
     disabled: !editing,
   })
   const hint = useDropHint(id, 'into')
-  const key = collapseKey(profileId, title)
+  const key = collapseKey(profileId, ...ctx.drawerKey, title)
   const open = !ctx.isCollapsed(key, collapsedDefault)
   const toggle = () => ctx.toggleCollapsed(key, collapsedDefault)
   const context = `Under ${title}`
 
-  const addEntry = () => ctx.openDialog({ mode: 'add', list: { section: index }, context })
-  const remove = () => ctx.run([{ op: 'deleteSection', section: index }], `Deleted heading "${title}"`)
+  const addEntry = () => ctx.openDialog({ mode: 'add', list, context })
+  const remove = () => ctx.run([{ op: 'deleteSection', drawer, section: index }], `Deleted heading "${title}"`)
 
   const menu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -401,14 +461,14 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
       y: e.clientY,
       entries: [
         { label: 'Add entry…', icon: <Plus size={14} />, run: addEntry },
-        { label: 'New note…', icon: <FilePlus size={14} />, run: () => ctx.openDialog({ mode: 'note', list: { section: index }, context }) },
-        { label: 'Add group…', icon: <Plus size={14} />, run: () => ctx.openDialog({ mode: 'add', list: { section: index }, context, presetType: 'group' }) },
+        { label: 'New note…', icon: <FilePlus size={14} />, run: () => ctx.openDialog({ mode: 'note', list, context }) },
+        { label: 'Add group…', icon: <Plus size={14} />, run: () => ctx.openDialog({ mode: 'add', list, context, presetType: 'group' }) },
         { label: 'Rename heading', icon: <Pencil size={14} />, run: () => renaming.start(index) },
         {
           label: 'Add heading below',
           icon: <Plus size={14} />,
           run: async () => {
-            if (await ctx.run([{ op: 'addSection', title: 'New heading', index: index + 1 }])) renaming.start(index + 1)
+            if (await ctx.run([{ op: 'addSection', drawer, title: 'New heading', index: index + 1 }])) renaming.start(index + 1)
           },
         },
         'sep',
@@ -435,7 +495,7 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
             initial={title}
             onDone={(value) => {
               renaming.start(null)
-              if (value && value !== title) void ctx.run([{ op: 'renameSection', section: index, title: value }])
+              if (value && value !== title) void ctx.run([{ op: 'renameSection', drawer, section: index, title: value }])
             }}
           />
         ) : (
@@ -456,7 +516,7 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
           </button>
         </span>
       </div>
-      {open && <ItemList list={{ section: index }} items={items} />}
+      {open && <ItemList list={list} items={items} />}
     </div>
   )
 }
@@ -531,6 +591,73 @@ function ContextBlock({
   )
 }
 
+/**
+ * The drawer's shared folders: its own and those of the drawers it uses. A
+ * fixed heading under Context, not part of the YAML; hidden when there are none.
+ */
+function SharedBlock({
+  profile,
+  drawer,
+  selected,
+  open: openFolder,
+  isCollapsed,
+  toggleCollapsed,
+}: {
+  profile: Profile
+  drawer: number
+  selected: string | null
+  open: (path: string) => void
+  isCollapsed: Props['isCollapsed']
+  toggleCollapsed: Props['toggleCollapsed']
+}) {
+  const all = drawersOf(profile)
+  const own = all[drawer]
+  if (!own) return null
+  const rows: { name: string; folder: string; mine: boolean }[] = []
+  if (own.folder) rows.push({ name: own.name, folder: own.folder, mine: true })
+  for (const use of own.uses ?? []) {
+    const other = all[drawerIndex(profile, use)]
+    if (other?.folder && other !== own && !rows.some((r) => r.folder === other.folder)) rows.push({ name: other.name, folder: other.folder, mine: false })
+  }
+  if (!rows.length) return null
+  const open = !isCollapsed('shared', false)
+  const toggle = () => toggleCollapsed('shared', false)
+  return (
+    <div className="section shared-section" role="group" aria-label="Shared">
+      <div className="section-head">
+        <ChevronDown size={13} className={cx('chevron', !open && 'closed')} onClick={toggle} />
+        <span className="title" onClick={toggle}>
+          Shared
+        </span>
+        {!open && <span className="count">{rows.length}</span>}
+      </div>
+      {open && (
+        <div className="items">
+          {rows.map((r) => {
+            const on = selected === r.folder
+            return (
+              <div
+                key={r.folder}
+                role="link"
+                tabIndex={0}
+                className={cx('item', on && 'selected')}
+                aria-current={on ? 'page' : undefined}
+                title={r.folder}
+                onClick={() => openFolder(r.folder)}
+                onKeyDown={(e) => e.key === 'Enter' && openFolder(r.folder)}
+              >
+                <FolderInput size={15} className="icon" />
+                <span className="label">{r.name}</span>
+                {r.mine && <span className="kind">this drawer</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ItemList({ list, items }: { list: ListAddr; items: NavItem[] }) {
   const { editing, showArchive } = useContext(Ctx)
   const id = listId(list)
@@ -570,7 +697,7 @@ function useItemSortable(addr: ItemAddr, item: NavItem) {
 
 function RowActions({ addr, item }: { addr: ItemAddr; item: NavItem }) {
   const ctx = useContext(Ctx)
-  const section = ctx.profile.sections[addr.section]
+  const section = ctx.sections[addr.section]
   const context =
     addr.group === undefined ? `Under ${section?.title}` : `Under ${section?.title} / ${section?.items[addr.group]?.label}`
   return (
@@ -582,30 +709,34 @@ function RowActions({ addr, item }: { addr: ItemAddr; item: NavItem }) {
           aria-label={`Add entry to ${item.label}`}
           onClick={(e) => {
             e.stopPropagation()
-            ctx.openDialog({ mode: 'add', list: { section: addr.section, group: addr.index }, context: `Under ${section?.title} / ${item.label}` })
+            ctx.openDialog({ mode: 'add', list: inDrawer(ctx.drawer, { section: addr.section, group: addr.index }), context: `Under ${section?.title} / ${item.label}` })
           }}
         >
           <Plus size={13} />
         </button>
       )}
-      <button
-        className="icon-btn"
-        title="Edit"
-        aria-label={`Edit ${item.label}`}
-        onClick={(e) => {
-          e.stopPropagation()
-          ctx.openDialog({ mode: 'edit', at: addr, item, context })
-        }}
-      >
-        <Pencil size={12} />
-      </button>
+      {item.type !== 'shared' && (
+        <button
+          className="icon-btn"
+          title="Edit"
+          aria-label={`Edit ${item.label}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            ctx.openDialog({ mode: 'edit', at: addr, item, context })
+          }}
+        >
+          <Pencil size={12} />
+        </button>
+      )}
       <button
         className="icon-btn danger"
-        title="Delete"
-        aria-label={`Delete ${item.label}`}
+        title={item.type === 'shared' ? 'Remove from this drawer' : 'Delete'}
+        aria-label={`${item.type === 'shared' ? 'Remove' : 'Delete'} ${item.label}`}
         onClick={(e) => {
           e.stopPropagation()
-          void ctx.run([{ op: 'deleteItem', at: addr }], `Deleted "${item.label}"`)
+          // An original with shared entries elsewhere asks first, through its menu's Delete.
+          const del = ctx.itemMenu(addr, item).find((m) => m !== 'sep' && m.danger)
+          if (del && del !== 'sep') del.run()
         }}
       >
         <Trash2 size={12} />
@@ -617,22 +748,31 @@ function RowActions({ addr, item }: { addr: ItemAddr; item: NavItem }) {
 function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
   const ctx = useContext(Ctx)
   const { setNodeRef, attributes, listeners, isDragging, hint, style } = useItemSortable(addr, item)
+  // A shared entry looks and opens like its original, marked with the drawer it comes from.
+  const original = item.type === 'shared' ? (findShared(ctx.profile, item)?.item ?? null) : item
+  const shown = original ?? item
   // Launchers and links open outside the app only from their button; the name is just text.
-  const outside = opensExternally(item)
+  const outside = opensExternally(shown)
   const selected = ctx.selectedKey === itemKey(addr) && !outside
-  const section = ctx.profile.sections[addr.section]
+  const section = ctx.sections[addr.section]
   const context = addr.group === undefined ? `Under ${section?.title}` : `Under ${section?.title} / ${section?.items[addr.group]?.label}`
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={cx('item', selected && 'selected', isDragging && 'dragging', archived(item) && 'archived', outside && !ctx.editing && 'outside', hint)}
-      title={item.type === 'folder' && item.description ? `${item.description}\n${describeTarget(item)}` : describeTarget(item)}
+      className={cx('item', selected && 'selected', isDragging && 'dragging', archived(shown) && 'archived', outside && !ctx.editing && 'outside', !original && 'missing', hint)}
+      title={
+        !original
+          ? `Shared from ${item.type === 'shared' ? item.drawer : ''}, where it is gone`
+          : shown.type === 'folder' && shown.description
+            ? `${shown.description}\n${describeTarget(shown)}`
+            : describeTarget(shown)
+      }
       aria-current={selected ? 'page' : undefined}
       onClick={() => {
-        if (ctx.editing) ctx.openDialog({ mode: 'edit', at: addr, item, context })
-        else if (!outside) ctx.activate(addr, item)
+        if (ctx.editing) item.type !== 'shared' && ctx.openDialog({ mode: 'edit', at: addr, item, context })
+        else if (!outside && original) ctx.activate(addr, item)
       }}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -644,8 +784,13 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
           <GripVertical size={13} />
         </span>
       )}
-      <EntryIcon type={item.type} icon={item.icon} agent={item.type === 'chat' ? chatProgram(item.agent) : undefined} />
+      <EntryIcon type={shown.type} icon={shown.icon} agent={shown.type === 'chat' ? chatProgram(shown.agent) : undefined} />
       <span className="label">{item.label}</span>
+      {item.type === 'shared' && (
+        <span className="shared-tag" title={`Also in ${item.drawer}`}>
+          ⇄ {item.drawer}
+        </span>
+      )}
       {!ctx.editing && outside && (
         <button
           className="open-btn"
@@ -659,13 +804,13 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
           {item.type === 'launch' ? <Play size={11} /> : <ExternalLink size={11} />}
         </button>
       )}
-      {!ctx.editing && <ChatMark item={item} />}
-      {!ctx.editing && <ServerMark item={item} />}
-      {!ctx.editing && <GitMarkView item={item} />}
-      {!ctx.editing && item.type === 'folder' && (
+      {!ctx.editing && <ChatMark item={shown} />}
+      {!ctx.editing && <ServerMark item={shown} />}
+      {!ctx.editing && <GitMarkView item={shown} />}
+      {!ctx.editing && shown.type === 'folder' && (
         <span className="project-marks">
-          {item.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
-          <span className={cx('status-dot', item.status ?? 'active')} title={item.status ?? 'active'} />
+          {shown.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
+          <span className={cx('status-dot', shown.status ?? 'active')} title={shown.status ?? 'active'} />
         </span>
       )}
       <RowActions addr={addr} item={item} />
@@ -727,8 +872,8 @@ function GitMarkView({ item }: { item: NavItem }) {
 function GroupBlock({ addr, item }: { addr: ItemAddr; item: Extract<NavItem, { type: 'group' }> }) {
   const ctx = useContext(Ctx)
   const { setNodeRef, attributes, listeners, isDragging, hint, style } = useItemSortable(addr, item)
-  const section = ctx.profile.sections[addr.section]
-  const key = collapseKey(ctx.profileId, section?.title ?? '', item.label)
+  const section = ctx.sections[addr.section]
+  const key = collapseKey(ctx.profileId, ...ctx.drawerKey, section?.title ?? '', item.label)
   const open = !ctx.isCollapsed(key, !!item.collapsed)
 
   return (
@@ -755,7 +900,7 @@ function GroupBlock({ addr, item }: { addr: ItemAddr; item: Extract<NavItem, { t
       </div>
       {open && (
         <div className="group-children">
-          <ItemList list={{ section: addr.section, group: addr.index }} items={item.items} />
+          <ItemList list={inDrawer(ctx.drawer, { section: addr.section, group: addr.index })} items={item.items} />
         </div>
       )}
     </div>

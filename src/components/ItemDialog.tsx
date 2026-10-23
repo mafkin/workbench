@@ -25,6 +25,7 @@ const HINTS: Record<AnyType, string> = {
   link: 'Opens in your default browser.',
   launch: 'Starts a program directly, without a shell.',
   group: 'Holds entries one level deep under this heading.',
+  shared: 'An entry of another drawer, shown here too. Edit it in its own drawer.',
 }
 
 const PATH_TYPES: AnyType[] = ['folder', 'note', 'report', 'file']
@@ -114,6 +115,8 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
         }
       case 'group':
         return { ...base, type, items: [] }
+      case 'shared':
+        throw new Error('A shared entry is edited in its own drawer')
     }
   }
 

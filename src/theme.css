@@ -4881,3 +4881,163 @@ button {
   display: flex;
   justify-content: space-between;
 }
+
+/* Drawers: the picker under the header row, logos, shared entries, the Shared heading and the settings dialog. */
+
+.drawer-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  text-align: left;
+}
+
+.drawer-pick:hover {
+  border-color: var(--border-strong);
+}
+
+.drawer-pick .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-strong);
+  font-weight: 500;
+}
+
+.drawer-pick .chev {
+  flex: none;
+  color: var(--faint);
+}
+
+.drawer-logo {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--tint) 38%, var(--panel));
+  color: var(--text-strong);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.drawer-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.item .shared-tag {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.item.missing .label {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.shared-section .item .kind {
+  font-size: 11px;
+}
+
+.drawer-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(88vh - 16px);
+  overflow-y: auto;
+}
+
+.drawer-dialog .body > .hint,
+.drawer-dialog .err {
+  margin: 0;
+  font-size: 12px;
+}
+
+.drawer-dialog .body > .hint {
+  color: var(--muted);
+}
+
+.drawer-dialog .err {
+  color: var(--danger);
+}
+
+.drawer-dialog .logo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.drawer-dialog .logo-row .drawer-logo {
+  border-radius: 10px;
+}
+
+.drawer-dialog .logo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.drawer-dialog .link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+}
+
+.drawer-dialog .link-btn:hover {
+  text-decoration: underline;
+}
+
+.drawer-dialog fieldset.uses {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.drawer-dialog fieldset.uses legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.drawer-dialog .uses .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.drawer-dialog .uses .check input {
+  width: auto;
+}
+
+.drawer-dialog .uses .uses-path {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.btn.ghost.danger:hover {
+  border-color: transparent;
+  color: var(--danger);
+}

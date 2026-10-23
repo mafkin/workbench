@@ -155,6 +155,7 @@ export async function resetFixture() {
   await fsp.rm(HOME, { recursive: true, force: true })
   await fsp.rm(TRASH, { recursive: true, force: true })
   await fsp.rm(path.join(DIR, 'backgrounds'), { recursive: true, force: true })
+  await fsp.rm(path.join(DIR, 'logos'), { recursive: true, force: true })
   await fsp.rm(MANAGED, { recursive: true, force: true })
   await fsp.rm(THUMBS, { recursive: true, force: true })
   await fsp.mkdir(ALPHA, { recursive: true })

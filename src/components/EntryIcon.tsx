@@ -1,4 +1,4 @@
-import { CalendarDays, File, FileChartColumn, FileText, Folder, FolderTree, Link2, Play, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { ArrowLeftRight, CalendarDays, File, FileChartColumn, FileText, Folder, FolderTree, Link2, Play, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { DynamicIcon, iconNames, type IconName } from 'lucide-react/dynamic.mjs'
 import type { Agent, AnyType } from '../../shared/config-schema.ts'
 
@@ -13,6 +13,7 @@ export const TYPE_ICON: Record<AnyType, LucideIcon> = {
   link: Link2,
   launch: Play,
   group: FolderTree,
+  shared: ArrowLeftRight,
 }
 
 export const TYPE_LABEL: Record<AnyType, string> = {
@@ -25,6 +26,7 @@ export const TYPE_LABEL: Record<AnyType, string> = {
   link: 'Link',
   launch: 'Launcher',
   group: 'Group',
+  shared: 'Shared',
 }
 
 const known = new Set<string>(iconNames)
