@@ -10,7 +10,8 @@ export const revOf = (text: string) => createHash('sha256').update(text).digest(
 export async function writeAtomic(file: string, text: string | Uint8Array, mode?: number) {
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`)
   try {
-    await fsp.writeFile(tmp, text)
+    // Made with the mode, so a private file is never readable by others, not even briefly.
+    await fsp.writeFile(tmp, text, mode !== undefined ? { mode } : undefined)
     if (mode !== undefined) await fsp.chmod(tmp, mode)
     await fsp.rename(tmp, file)
   } catch (err) {

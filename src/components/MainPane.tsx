@@ -223,7 +223,7 @@ export function MainPane(props: Props) {
           </Suspense>
         ) : selected?.kind === 'setup' ? (
           <Suspense fallback={null}>
-            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} />
+            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} rev={active.rev} toast={props.toast} />
           </Suspense>
         ) : (
           <Home active={active} drawer={props.drawer} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />

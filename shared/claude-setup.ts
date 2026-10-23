@@ -1,7 +1,7 @@
 // What claude loads on this machine, as the Claude setup page shows it: skills,
 // commands, agents, MCP servers, hooks and plugins, each with the scope it
-// comes from. Read-only; the service masks every secret value before it sends
-// any of this to the browser.
+// comes from. Only MCP servers change (switched on or off, like /mcp); the
+// service masks every secret value before it sends any of this to the browser.
 
 /** Where something comes from. Plugin items also name their plugin. */
 export type SetupScope = 'managed' | 'user' | 'project' | 'local' | 'plugin'
@@ -49,6 +49,8 @@ export type McpState = 'on' | 'off' | 'pending' | 'blocked' | 'overridden' | 'br
 export interface McpEntry {
   id: string
   name: string
+  /** The name /mcp turns it off by: `plugin:<plugin>:<name>` for a plugin's server, else the name. */
+  key: string
   scope: SetupScope
   plugin?: string
   transport: McpTransport
@@ -67,6 +69,8 @@ export interface McpEntry {
   uncheckable?: string
   /** A project server not approved yet: checking runs a command from the folder, so ask first. */
   confirm?: boolean
+  /** Why it cannot be switched on or off, when it cannot. */
+  fixed?: string
 }
 
 export interface HookEntry {

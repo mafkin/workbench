@@ -41,7 +41,8 @@ import { agentArgs, claudeAgents } from './agents.ts'
 import { Backgrounds } from './backgrounds.ts'
 import { Logos } from './logos.ts'
 import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
-import { frontmatter, readSetup } from './claude-setup.ts'
+import { claudeJson, frontmatter, projectKey, readSetup } from './claude-setup.ts'
+import type { ClaudeSetup, McpEntry } from '../shared/claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { applyOps, describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
@@ -54,6 +55,7 @@ import { makeGuard } from './guard.ts'
 import { LaunchError, openItem, runDetached, runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
+import { McpDefaults, setFoldersOff } from './mcp-switch.ts'
 import { projectDates } from './project-dates.ts'
 import { Servers } from './servers.ts'
 import { Notes, type NoteEvent } from './notes.ts'
@@ -150,6 +152,8 @@ const GitLog = GitQuery.extend({ skip: z.coerce.number().int().nonnegative().def
 const GitShow = GitQuery.extend({ hash: z.string().regex(/^[0-9a-f]{4,64}$/, 'Not a commit'), file: z.string().optional() })
 const DocQuery = SetupQuery.extend({ id: z.string() })
 const CheckBody = SetupQuery.extend({ id: z.string(), confirm: z.boolean().optional() })
+// MCP servers on or off: by their /mcp names, in a folder, or (no path) as the profile's defaults.
+const McpSwitch = SetupQuery.extend({ keys: z.array(z.string().min(1)).min(1).max(500), on: z.boolean(), rev: z.string().optional() })
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body)
@@ -188,7 +192,9 @@ export async function buildServer(opts: ServerOptions) {
   const logos = new Logos(path.join(opts.configDir, 'logos'))
   const context = new Context(store, home)
   const servers = new Servers(store, home)
-  const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
+  const stateDir = opts.stateDir ?? path.join(opts.configDir, 'state')
+  const chats = new Chats({ stateDir, home, commands: opts.chatCommands, ...opts.chatTiming })
+  const mcpDefaults = new McpDefaults({ stateDir, claudeJson: claudeJson(home) })
   await chats.init()
   const git = new Git(store, home, {
     spawn: opts.spawn,
@@ -519,6 +525,8 @@ export async function buildServer(opts: ServerOptions) {
     const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
     if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
     if (program === 'shell') return { agent: program, args, agentProfile: null, bypass: false, context: false }
+    // The profile's MCP defaults, the first time a chat starts in this folder.
+    await mcpDefaults.apply(profile.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
     const ctx = await context.chatContext(id)
     const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(ctx, await drawerContext(profile, drawer, home)))
     return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
@@ -746,12 +754,56 @@ export async function buildServer(opts: ServerOptions) {
     const p = store.profile(id)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
     const folder = raw ? await chatFolder(p.profile, raw, true) : null
-    return { folder, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
+    return { folder, profile: p.profile, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
+  }
+
+  /** The setup as the page shows it: everywhere, the profile's defaults are what the switches show. */
+  function withDefaults(setup: ClaudeSetup, profile: Profile, folder: string | null): ClaudeSetup {
+    const off = new Set(profile.mcpOff ?? [])
+    if (!off.size) return setup
+    const mcp = setup.mcp.map((m): McpEntry => {
+      if (m.state !== 'on' || !off.has(m.key)) return m
+      if (folder) return { ...m, note: 'On here, though off by default in this profile' }
+      return { ...m, state: 'off', note: 'Off by default: turned off in each project before its first chat' }
+    })
+    return { ...setup, mcp }
   }
 
   app.get('/api/claude/setup', async (req) => {
     const q = parse(SetupQuery, req.query)
-    return (await setupFor(q.profile, q.path)).read.setup
+    const { folder, read, profile } = await setupFor(q.profile, q.path)
+    return withDefaults(read.setup, profile, folder)
+  })
+
+  // Switch MCP servers off or on the way /mcp does, in one folder; or, with no
+  // folder, as the profile's defaults, which also switches every project now.
+  // Only names the setup lists (and that can be switched) are accepted.
+  app.post('/api/claude/mcp', async (req) => {
+    const b = parse(McpSwitch, req.body)
+    const { folder, read, profile } = await setupFor(b.profile, b.path)
+    for (const key of b.keys) {
+      const listed = read.setup.mcp.filter((m) => m.key === key)
+      if (!listed.length) throw new StoreError(`No MCP server ${key} here`, 422)
+      if (listed.every((m) => m.fixed)) throw new StoreError(`${key}: ${listed[0].fixed}`, 422)
+    }
+    let rev: string | undefined
+    if (folder) {
+      await setFoldersOff(claudeJson(home), [await projectKey(folder)], b.keys, !b.on)
+    } else {
+      if (!b.rev) throw new StoreError('The profile’s rev is needed to change its defaults', 422)
+      rev = (await store.apply(b.profile, b.rev, [{ op: 'setMcpOff', names: b.keys, off: !b.on }])).rev
+      const keys = new Set<string>()
+      for (const { item } of walkItems(profile)) {
+        if (item.type !== 'folder') continue
+        const dir = await chatFolder(profile, item.path, false)
+        if (await fs.promises.stat(dir).then((st) => st.isDirectory(), () => false)) keys.add(await projectKey(dir))
+      }
+      await setFoldersOff(claudeJson(home), [...keys], b.keys, !b.on)
+      if (b.on) await mcpDefaults.forget(b.keys)
+      else await mcpDefaults.noteApplied([...keys], b.keys)
+    }
+    const fresh = await setupFor(b.profile, b.path)
+    return { setup: withDefaults(fresh.read.setup, fresh.profile, fresh.folder), ...(rev ? { rev } : {}) }
   })
 
   app.get('/api/claude/doc', async (req) => {

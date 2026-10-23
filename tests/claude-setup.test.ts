@@ -162,6 +162,14 @@ describe('reading the Claude setup for a folder', () => {
     expect(setup.mcp.find((m) => m.scope === 'user' && m.name === 'shared')!.note).toMatch(/local/)
   })
 
+  it('a folder inside a repository uses the state claude keeps for the repository’s top folder', async () => {
+    const { setup } = await read(path.join(alpha, 'sub'))
+    const state = Object.fromEntries(setup.mcp.map((m) => [`${m.scope}:${m.name}`, m.state]))
+    expect(state['local:shared']).toBe('on')
+    expect(setup.mcp.find((m) => m.name === 'notes')!.key).toBe('notes')
+    expect(setup.mcp.find((m) => m.name === 'warehouse')!.key).toBe('plugin:data:warehouse')
+  })
+
   it('masks every secret, and reads nothing else from ~/.claude.json', async () => {
     const { setup } = await read()
     const json = JSON.stringify(setup)

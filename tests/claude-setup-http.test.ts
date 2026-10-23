@@ -6,6 +6,8 @@ import type { ClaudeSetup, McpCheck } from '../shared/claude-setup.ts'
 import { buildServer } from '../server/main.ts'
 
 const FAKE_MCP = path.resolve('tests/fixtures/fake-mcp.mjs')
+const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
+const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
 
 const WORK = `name: Work
 sections:
@@ -42,7 +44,7 @@ beforeEach(async () => {
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   // Home is outside the profile's folders here: only Alpha may be read.
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), `${WORK}home: ~/alpha\n`)
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), managedDir: path.join(dir, 'managed'), mcpTimeoutMs: 5000 })
+  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), managedDir: path.join(dir, 'managed'), mcpTimeoutMs: 5000, chatCommands: { claude: FAKE_CLAUDE, shell: FAKE_SHELL } })
 })
 
 afterEach(async () => {
@@ -101,5 +103,67 @@ describe('the Claude setup routes', () => {
     const { body: setup } = await call<ClaudeSetup>('GET', `/api/claude/setup?profile=work&path=${encodeURIComponent('~/alpha')}`)
     const local = setup.mcp.find((m) => m.scope === 'project')!
     expect((await call('POST', '/api/claude/check', { profile: 'work', path: '~/alpha', id: local.id, confirm: true })).status).toBe(422)
+  })
+})
+
+describe('switching MCP servers', () => {
+  const alphaQ = { profile: 'work', path: '~/alpha' }
+  const claudeJsonOf = async () => JSON.parse(await fsp.readFile(path.join(home, '.claude.json'), 'utf8'))
+  const rev = () => server.store.profile('work').rev
+  const states = (s: ClaudeSetup) => Object.fromEntries(s.mcp.map((m) => [m.key, m.state]))
+
+  it('in a folder: writes the folder’s disabledMcpServers, like /mcp, and returns the new setup', async () => {
+    const off = await call<{ setup: ClaudeSetup }>('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: false })
+    expect(off.status).toBe(200)
+    expect(states(off.body.setup)).toMatchObject({ tools: 'off' })
+    const json = await claudeJsonOf()
+    expect(json.projects[path.join(home, 'alpha')].disabledMcpServers).toEqual(['tools'])
+    expect(json.mcpServers.tools.env.FAKE_MCP_TOKEN).toBe('tok-SECRET-1')
+    const on = await call<{ setup: ClaudeSetup }>('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: true })
+    expect(states(on.body.setup)).toMatchObject({ tools: 'on' })
+    // Not in the profile's defaults: the YAML is untouched.
+    expect(server.store.profile('work').profile!.mcpOff).toBeUndefined()
+  })
+
+  it('takes only servers the setup lists, in folders of the profile', async () => {
+    expect((await call('POST', '/api/claude/mcp', { ...alphaQ, keys: ['nope'], on: false })).status).toBe(422)
+    expect((await call('POST', '/api/claude/mcp', { profile: 'work', path: '~/elsewhere', keys: ['tools'], on: false })).status).toBe(403)
+    expect((await call('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: false }, { host: '127.0.0.1:7420' })).status).toBe(403)
+  })
+
+  it('refuses a server that cannot be switched', async () => {
+    await write(path.join(home, '.claude.json'), { mcpServers: { tools: { command: process.execPath, args: [FAKE_MCP] }, odd: { type: 'http' } } })
+    const res = await call('POST', '/api/claude/mcp', { ...alphaQ, keys: ['odd'], on: false })
+    expect(res.status).toBe(422)
+    expect(res.body.error).toMatch(/usable/)
+  })
+
+  it('everywhere: the profile’s default, written to the YAML and to every project now', async () => {
+    expect((await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false })).status).toBe(422)
+    const off = await call<{ setup: ClaudeSetup; rev: string }>('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, rev: rev() })
+    expect(off.status).toBe(200)
+    expect(off.body.rev).toBe(rev())
+    expect(server.store.profile('work').profile!.mcpOff).toEqual(['tools'])
+    expect(states(off.body.setup)).toMatchObject({ tools: 'off' })
+    expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual(['tools'])
+    // Switched back on in Alpha: on there, with a note.
+    const alpha = await call<{ setup: ClaudeSetup }>('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: true })
+    expect(alpha.body.setup.mcp.find((m) => m.key === 'tools')).toMatchObject({ state: 'on', note: expect.stringMatching(/off by default/) })
+    // On everywhere: out of the YAML and on in every project.
+    await call('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: false })
+    await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: true, rev: rev() })
+    expect(server.store.profile('work').profile!.mcpOff).toBeUndefined()
+    expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual([])
+  })
+
+  it('a chat turns the defaults off in its folder the first time, and not again', { timeout: 15_000 }, async () => {
+    // A default added by hand: no project has had it yet.
+    await server.store.apply('work', rev(), [{ op: 'setMcpOff', names: ['tools'], off: true }])
+    const first = await call('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
+    expect(first.status).toBe(200)
+    expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual(['tools'])
+    await call('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: true })
+    await call('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
+    expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual([])
   })
 })

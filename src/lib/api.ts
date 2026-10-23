@@ -146,7 +146,7 @@ export const contextStatus = (profile: string) => api<ContextStatus>(`/api/conte
 export const setupContext = (profile: string) => api<ContextStatus>('/api/context/setup', { body: { profile } })
 export const sendToInbox = (profile: string, path: string) => api<{ path: string }>('/api/context/inbox', { body: { profile, path } })
 
-// Claude setup: read-only and masked. `folder` adds that folder's project and local items.
+// Claude setup, masked. `folder` adds that folder's project and local items.
 const inFolder = (folder: string | null): Record<string, string> => (folder ? { path: folder } : {})
 export const claudeSetup = (profile: string, folder: string | null) => api<ClaudeSetup>(`/api/claude/setup?${query({ profile, ...inFolder(folder) })}`)
 export const claudeDoc = (profile: string, folder: string | null, id: string) =>
@@ -154,6 +154,9 @@ export const claudeDoc = (profile: string, folder: string | null, id: string) =>
 /** Start a server (or connect), list its tools and stop it. `confirm` for a project server claude has not approved. */
 export const checkMcp = (profile: string, folder: string | null, id: string, confirm = false) =>
   api<McpCheck>('/api/claude/check', { body: { profile, id, confirm, ...inFolder(folder) } })
+/** MCP servers (by their /mcp names) on or off in a folder, like /mcp; without a folder, the profile's defaults (needs its rev). */
+export const switchMcp = (profile: string, folder: string | null, keys: string[], on: boolean, rev?: string) =>
+  api<{ setup: ClaudeSetup; rev?: string }>('/api/claude/mcp', { body: { profile, keys, on, ...(folder ? { path: folder } : { rev }) } })
 
 /** Make <notes or home>/drawers/<name> for a drawer; returns it for `folder:`. */
 export const drawerFolder = (profile: string, name: string) => api<{ folder: string }>('/api/drawers/folder', { body: { profile, name } })

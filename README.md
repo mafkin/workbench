@@ -60,6 +60,7 @@ workflow:                       # the steps every project (folder entry) starts 
 openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
   - { ext: [kra], command: krita }                                       # args default to ["{file}"]
   - { ext: [tscn, gd], command: godot, args: [--editor, --path, "{godot}"] }  # {file}, {dir}, {godot}: the project folder
+mcpOff: [plugin:productivity:slack, plugin:product-management:gmail]   # MCP servers off by default (names as /mcp writes them)
 categories:                     # optional colours for project categories
   game: "#8fa58a"
 agents:                         # agent profiles: how claude starts when you pick one
@@ -237,7 +238,7 @@ drawers:
 
 ### Claude setup
 
-- **Claude setup** shows what claude loads, read-only: **skills**, **MCP servers**, **agents**, **commands**, **hooks** and **plugins**. Each item has a badge for where it comes from:
+- **Claude setup** shows what claude loads: **skills**, **MCP servers**, **agents**, **commands**, **hooks** and **plugins**. Only MCP servers can be changed here (switched on or off); the rest is read-only. Each item has a badge for where it comes from:
   - **Yours** (`~/.claude`, `~/.claude.json`),
   - **Project** (the folder's `.claude/`, `.mcp.json`),
   - **Local** (only you, in that folder),
@@ -253,6 +254,12 @@ drawers:
   - **Not approved** (a project server claude will ask about),
   - **Blocked** (managed policy),
   - **Broken**.
+- **Switches** turn MCP servers on and off, the way `/mcp` does: the folder's `disabledMcpServers` list in `~/.claude.json`, so the app and `/mcp` always agree.
+  - In a project (its tab, or the page's For), a switch acts in that folder. A folder inside a repository shares the repository's list, as in claude.
+  - On the page's **Everywhere**, a switch is the profile's default (`mcpOff:`): off turns it off now in every project of the profile, and the first chat the app starts in any other folder turns it off there too. Switch it back on in one project and it stays on there. On, everywhere, takes it out of `mcpOff:` and turns it on in every project.
+  - A plugin's details have **Turn all off** / **Turn all on** for its servers.
+  - Servers that are off fold behind **N off · Show**. The filter still finds them.
+  - New chats use the change. Running chats keep their servers until they restart (or use `/mcp` in them). Undo is in the toast.
 - **Check** on a server tests it: Workbench starts it (or connects), asks for its tools, and stops it again. The tools and their descriptions are listed, or the error with the end of the server's log. **Check all** checks every server that is on.
   - A server that wants a sign-in says so; signing in is done in claude (`/mcp`).
   - A project server that claude hasn't approved asks before it runs.
@@ -373,7 +380,7 @@ Each claude chat starts with a `SessionStart` hook (passed with `--settings`, me
 
 **Context** is set up only when you ask, and only inside the profile's notes folder; it never overwrites a file. **Send to inbox** copies only files from the profile's folders (checked after resolving symlinks), under a free name.
 
-**Claude setup** reads claude's files and never writes them. Secret values are masked in the service, so they never reach the browser, and only the MCP servers' keys and the open folder's entry are read from `~/.claude.json`. A check names a server by its id; the command or URL comes from claude's files, read again at that moment, never from the request. It runs only servers claude would start. One that claude hasn't approved yet runs only after you confirm. Folders are limited to the profile's own.
+**Claude setup** reads claude's files and writes only one thing: the `disabledMcpServers` list of a folder's entry in `~/.claude.json`, for the MCP switches. That list is the same one `/mcp` writes. The file is read again just before each write and written atomically, with its mode kept. A switch takes only servers the setup lists for that folder. Secret values are masked in the service, so they never reach the browser, and only the MCP servers' keys and the open folder's entry are read from `~/.claude.json`. A check names a server by its id; the command or URL comes from claude's files, read again at that moment, never from the request. It runs only servers claude would start. One that claude hasn't approved yet runs only after you confirm. Folders are limited to the profile's own.
 
 ## Development
 

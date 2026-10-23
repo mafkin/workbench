@@ -242,11 +242,36 @@ The user asked: launchers in the sidebar started on a single click of their name
   - where `disabledMcpServers` is kept (read from `~/.claude.json` `projects[<folder>]`),
   - `.claude.json` inside `$CLAUDE_CONFIG_DIR` when that is set.
 - **Left for later:**
-  - Enabling or disabling things from the app.
+  - Enabling or disabling things from the app (MCP servers came later; see the next section).
   - Watching claude's files (there is a Refresh button instead).
   - Skills in nested folders below the project (claude loads them when it works there).
   - Skills, agents or MCP servers passed only on the command line (`--agents`, `--mcp-config`); agent profiles name the latter.
   - OAuth sign-in for remote servers (done in claude with `/mcp`).
+
+### MCP switches (after drawers, done)
+
+- **Why:** chats for Blender work or the game loaded Slack, Gmail and the other plugin servers. `/mcp`'s off list is per folder, so turning them off once didn't reach other projects.
+- **Decisions (2026-10-23):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Where a switch acts | Per folder, writing the same `disabledMcpServers` list as `/mcp`, so the app and `/mcp` agree |
+  | Defaults | Off by default per profile (`mcpOff:`). The first chat the app starts in a folder turns them off there, once, so one switched back on stays on |
+  | Hide | No separate Hide: servers that are off fold behind "N off · Show" |
+  | Extras | A plugin's servers all at once (its detail pane). Not chosen: Approve/Reject for project servers, whole plugins on/off |
+
+- **What claude does** (read from its binary, 2.x):
+  - `/mcp` toggles write `projects[<key>].disabledMcpServers` in `~/.claude.json`. Plugin servers are named `plugin:<plugin>:<name>`, others by name.
+  - `<key>` is the git root of the cwd (real path), else the cwd. `readSetup` used the folder itself before; it now uses `projectKey`.
+  - There is no `claude mcp enable/disable`.
+  - Spike on the desktop: a claude running in the folder saved its state after an outside write, and the outside change survived (claude checks the file's stats and re-reads it).
+- **Built:**
+  - `server/mcp-switch.ts`: `setFoldersOff`, which re-reads, changes only those lists, and writes atomically with the mode kept and claude's 2-space JSON. `McpDefaults` keeps the ledger (`mcp-defaults.json` in the state dir) of defaults already applied per folder.
+  - `POST /api/claude/mcp`: keys must be listed and switchable. With a folder, it switches that folder. Without one, it runs the `setMcpOff` op (rev-checked) and switches every project.
+  - `agentFor` applies the defaults before a claude chat starts.
+  - `McpEntry.key` and `fixed` (blocked, broken and overridden servers can't be switched).
+  - UI: the switch on rows and in the detail pane, the fold, the plugin buttons, and a toast with Undo.
+- **Left for later:** Approve/Reject for `.mcp.json` servers; whole plugins on/off (`enabledPlugins`); defaults for folders outside the app's chats (a claude started in a terminal in a new folder loads everything until a switch or an app chat runs there).
 
 ### Part 7: Context folders (done)
 

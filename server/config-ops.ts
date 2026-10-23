@@ -618,6 +618,21 @@ function applyOp(doc: Document, op: Op) {
       else setTopLevel(doc, 'categories', doc.createNode({ [op.name]: op.color }))
       return
     }
+    case 'setMcpOff': {
+      const existing = doc.get('mcpOff', true)
+      if (!isSeq(existing)) {
+        if (op.off) setTopLevel(doc, 'mcpOff', doc.createNode(op.names))
+        return
+      }
+      const has = existing.items.map((n) => (isScalar(n) ? n.value : n))
+      if (op.off) {
+        for (const name of op.names) if (!has.includes(name)) existing.add(doc.createNode(name))
+      } else {
+        for (let i = existing.items.length - 1; i >= 0; i--) if (op.names.includes(has[i] as string)) existing.items.splice(i, 1)
+      }
+      if (existing.items.length === 0) doc.delete('mcpOff')
+      return
+    }
     case 'setAgent':
       setAgent(doc, op.name, op.agent, op.rename)
       return

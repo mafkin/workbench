@@ -1,5 +1,7 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, CLAUDE_SECRETS, resetFixture, writeClaudeSetup } from './fixture.ts'
+import { ALPHA, CLAUDE_SECRETS, HOME, resetFixture, WORK_FILE, writeClaudeSetup } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -127,3 +129,62 @@ test('a plugin’s details jump to what it brings; For picks a project', async (
   await page.reload()
   await expect(page.getByRole('combobox', { name: 'For' })).toHaveValue('~/alpha')
 })
+
+const offInAlpha = () => {
+  const json = JSON.parse(fs.readFileSync(path.join(HOME, '.claude.json'), 'utf8'))
+  return json.projects?.[ALPHA]?.disabledMcpServers ?? []
+}
+
+test('a switch turns an MCP server off in the project, like /mcp; off servers fold away; Undo', async ({ page }) => {
+  await entry(page, 'Alpha').click()
+  await page.getByRole('tablist', { name: 'Workflow' }).getByRole('tab', { name: 'Claude setup' }).click()
+  await kind(page, 'MCP servers').click()
+  await expect(page.locator('.setup-switch-hint')).toContainText('like /mcp')
+  await option(page, 'tools').getByRole('switch').click()
+  await expect(page.locator('.toast')).toContainText('tools off here')
+  await expect(option(page, 'tools')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '1 off · Show' })).toBeVisible()
+  expect(offInAlpha()).toEqual(['tools'])
+  await page.screenshot({ path: 'test-results/setup-mcp-switch.png' })
+
+  await page.getByRole('button', { name: '1 off · Show' }).click()
+  await expect(option(page, 'tools').getByRole('switch')).toHaveAttribute('aria-checked', 'false')
+  await expect(option(page, 'tools')).toContainText('off')
+  // A filter finds off servers too.
+  await page.getByRole('button', { name: '1 off · Hide' }).click()
+  await page.getByLabel('Filter').fill('too')
+  await expect(option(page, 'tools')).toBeVisible()
+  await page.getByLabel('Filter').fill('')
+
+  await page.locator('.toast').getByRole('button', { name: 'Undo' }).click()
+  await expect(option(page, 'tools').getByRole('switch')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByRole('button', { name: /off · Show/ })).toHaveCount(0)
+  expect(offInAlpha()).toEqual([])
+})
+
+test('everywhere, a plugin’s servers go off as the profile’s defaults, in every project', async ({ page }) => {
+  await openSetup(page)
+  await kind(page, 'Plugins').click()
+  await option(page, 'toolkit').click()
+  await expect(details(page)).toContainText('1 of 1 on')
+  await details(page).getByRole('button', { name: 'Turn all off' }).click()
+  await expect(details(page)).toContainText('0 of 1 on')
+  await expect.poll(() => fs.readFileSync(WORK_FILE, 'utf8')).toContain('plugin:toolkit:search')
+  expect(offInAlpha()).toEqual(['plugin:toolkit:search'])
+  await page.screenshot({ path: 'test-results/setup-plugin-off.png' })
+
+  await kind(page, 'MCP servers').click()
+  await expect(page.locator('.setup-switch-hint')).toContainText('this profile’s defaults')
+  await page.getByRole('button', { name: '1 off · Show' }).click()
+  await expect(option(page, 'search').getByRole('switch')).toHaveAttribute('aria-checked', 'false')
+  await option(page, 'search').click()
+  await expect(details(page).locator('.setup-note')).toContainText('Off by default')
+  await expect(details(page)).toContainText('plugin:toolkit:search')
+
+  // On again everywhere: out of the file and on in Alpha.
+  await option(page, 'search').getByRole('switch').click()
+  await expect(option(page, 'search').getByRole('switch')).toHaveAttribute('aria-checked', 'true')
+  await expect.poll(() => fs.readFileSync(WORK_FILE, 'utf8')).not.toContain('mcpOff')
+  expect(offInAlpha()).toEqual([])
+})
+

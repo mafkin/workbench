@@ -640,7 +640,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
 
       {setupOn ? (
         <Suspense fallback={null}>
-          <ClaudeSetupView profileId={profileId} profile={profile} folder={item.path} />
+          <ClaudeSetupView profileId={profileId} profile={profile} folder={item.path} toast={toast} />
         </Suspense>
       ) : gitOn ? (
         <Suspense fallback={null}>

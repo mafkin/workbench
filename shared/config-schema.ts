@@ -245,6 +245,8 @@ export const Profile = z.object({
   agents: Agents.optional(),
   /** Programs for "Open with", before the built-in ones (Blender, Godot). */
   openWith: z.array(OpenRule).optional(),
+  /** MCP servers off by default (as /mcp names them: `plugin:<plugin>:<name>`, else the name), turned off in a folder before its first chat. */
+  mcpOff: z.array(z.string().trim().min(1)).optional(),
   /** Without drawers, `sections:` is the profile's one drawer; the first drawer change moves it into `drawers:`. */
   drawers: z.array(Drawer).optional(),
   sections: list(Section),
@@ -336,6 +338,8 @@ export const Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('setProfileField'), key: z.enum(PROFILE_FIELDS), value: z.string() }),
   /** A category's colour in `categories:`; null goes back to the palette's pick. */
   z.object({ op: z.literal('setCategory'), name: z.string().trim().min(1), color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb').nullable() }),
+  /** Add MCP servers to `mcpOff:` (off) or take them out. */
+  z.object({ op: z.literal('setMcpOff'), names: z.array(z.string().trim().min(1)).min(1), off: z.boolean() }),
   // Workflow steps of the folder entry at `at`. The first change to a project
   // using the profile's workflow copies it into the project's own steps.
   z.object({ op: z.literal('addStep'), at: ItemAddr, step: itemInput, index: index.optional() }),

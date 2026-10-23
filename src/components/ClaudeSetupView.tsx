@@ -1,8 +1,9 @@
 // What claude loads, everywhere or in one folder: skills, MCP servers, agents,
-// commands, hooks and plugins, each with the scope it comes from. Read-only;
-// the service masks secrets before they get here. MCP servers can be checked
-// on demand. The Claude setup page (sidebar) and a project's Claude setup tab
-// both show this; it is a lazy chunk of its own.
+// commands, hooks and plugins, each with the scope it comes from. Read-only,
+// except that MCP servers switch on and off (in a folder like /mcp; everywhere,
+// as the profile's defaults); the service masks secrets before they get here.
+// MCP servers can be checked on demand. The Claude setup page (sidebar) and a
+// project's Claude setup tab both show this; it is a lazy chunk of its own.
 import type { LucideIcon } from 'lucide-react'
 import { Blocks, Bot, CircleCheck, CircleX, LoaderCircle, Plug, Puzzle, RefreshCw, Search, Sparkles, SquareSlash, TriangleAlert, Webhook, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -14,6 +15,7 @@ import * as api from '../lib/api.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx } from '../lib/nav.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import type { ToastInput } from './Toast.tsx'
 
 type SectionId = 'skills' | 'mcp' | 'agents' | 'commands' | 'hooks' | 'plugins'
 
@@ -28,6 +30,8 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; empty: string 
 
 const STATE_LABEL: Record<McpState, string> = { on: 'On', off: 'Off', pending: 'Not approved', blocked: 'Blocked', overridden: 'Overridden', broken: 'Broken' }
 const SCOPE_RANK: Record<SetupScope, number> = { project: 0, local: 1, user: 2, managed: 3, plugin: 4 }
+/** What a switch shows: on unless turned off (a server waiting for approval is not off). */
+const switchedOn = (m: McpEntry) => m.state === 'on' || m.state === 'pending'
 
 type Item = { kind: 'doc'; v: SetupDoc } | { kind: 'mcp'; v: McpEntry } | { kind: 'hook'; v: HookEntry } | { kind: 'plugin'; v: PluginEntry }
 
@@ -126,9 +130,12 @@ interface Props {
   profile: Profile
   /** A project's tab: fixed to its folder. Without it, the page with a For picker. */
   folder?: string
+  /** The profile's rev, for switching its defaults (the page's Everywhere). */
+  rev?: string
+  toast?: (t: ToastInput) => void
 }
 
-export default function ClaudeSetupView({ profileId, profile, folder: fixed }: Props) {
+export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev, toast }: Props) {
   const projects = useMemo(() => projectsOf(profile), [profile])
   const [forFolder, setForFolder] = useLocal<Record<string, string>>('setupFor', {})
   const picked = forFolder[profileId] ?? ''
@@ -142,7 +149,12 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed }: P
   const [selected, setSelected] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<McpEntry | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
+  const [showOff, setShowOff] = useState(false)
+  const [switching, setSwitching] = useState(false)
   const listRef = useRef<HTMLUListElement>(null)
+  // An Undo runs later, after the switch itself changed the rev.
+  const revRef = useRef(rev)
+  revRef.current = rev
   useChecks()
 
   useEffect(() => {
@@ -158,10 +170,15 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed }: P
   }, [profileId, folder, tick])
 
   const all = useMemo(() => (setup ? rowsOf(setup, section) : []), [setup, section])
-  const rows = useMemo(() => {
+  const matching = useMemo(() => {
     const q = filter.trim().toLowerCase()
     return all.filter((r) => (!pluginFilter || r.plugin === pluginFilter) && (!q || `${r.title} ${r.sub} ${r.plugin ?? ''}`.toLowerCase().includes(q)))
   }, [all, filter, pluginFilter])
+  // MCP servers that are off fold away, unless shown or looked for.
+  const isOff = (r: Row) => r.item.kind === 'mcp' && r.item.v.state === 'off'
+  const folding = section === 'mcp' && !filter.trim() && !pluginFilter
+  const offCount = folding ? matching.filter(isOff).length : 0
+  const rows = folding && !showOff ? matching.filter((r) => !isOff(r)) : matching
   const current = rows.find((r) => r.id === selected) ?? rows[0] ?? null
   const checkKey = (id: string) => `${profileId}|${folder ?? ''}|${id}`
   const meta = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]
@@ -183,6 +200,27 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed }: P
     }
   }
   const check = (m: McpEntry) => (m.confirm ? setConfirming(m) : void runCheck(m))
+
+  async function switchMcp(servers: McpEntry[], on: boolean, undoable = true) {
+    const keys = [...new Set(servers.map((m) => m.key))]
+    if (!keys.length) return
+    setSwitching(true)
+    try {
+      const r = await api.switchMcp(profileId, folder, keys, on, revRef.current)
+      if (r.rev) revRef.current = r.rev
+      setSetup(r.setup)
+      const what = servers.length === 1 ? servers[0].name : `${keys.length} servers`
+      const where = folder ? 'here' : 'by default in this profile'
+      toast?.({
+        message: `${what} ${on ? 'on' : 'off'} ${where}. New chats use this.`,
+        ...(undoable ? { action: { label: 'Undo', run: () => void switchMcp(servers, !on, false) } } : {}),
+      })
+    } catch (err) {
+      toast?.({ message: message(err), kind: 'error' })
+    } finally {
+      setSwitching(false)
+    }
+  }
 
   async function checkAll() {
     if (!setup) return
@@ -281,6 +319,14 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed }: P
               </button>
             )}
           </div>
+          {section === 'mcp' && setup && setup.mcp.length > 0 && (
+            <p className="setup-switch-hint">
+              {folder
+                ? 'Switches work like /mcp in this folder.'
+                : 'Switches set this profile’s defaults: off now in each of its projects, and in other folders before their first chat.'}{' '}
+              Running chats keep their servers until they restart.
+            </p>
+          )}
           {!setup && !error ? (
             <p className="setup-empty">Reading claude’s files…</p>
           ) : rows.length === 0 ? (
@@ -306,6 +352,7 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed }: P
                       {r.flag && <span className={cx('setup-flag', r.tone)}>{r.flag}</span>}
                       <span className="spacer" />
                       {r.scope && <ScopeBadge scope={r.scope} plugin={r.plugin} />}
+                      {r.item.kind === 'mcp' && <McpSwitch entry={r.item.v} busy={switching} onSwitch={(m, on) => void switchMcp([m], on)} />}
                     </span>
                     {r.sub && <span className={cx('setup-row-sub', (r.item.kind === 'mcp' || r.item.kind === 'hook') && 'mono')}>{r.sub}</span>}
                   </li>
@@ -313,16 +360,27 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed }: P
               })}
             </ul>
           )}
+          {offCount > 0 && (
+            <button className="setup-fold" onClick={() => setShowOff((v) => !v)} aria-expanded={showOff}>
+              {offCount} off · {showOff ? 'Hide' : 'Show'}
+            </button>
+          )}
         </div>
         <div className="setup-detail" aria-label="Details">
           {current?.item.kind === 'doc' ? (
             <DocDetail key={current.id} doc={current.item.v} profileId={profileId} folder={folder} />
           ) : current?.item.kind === 'mcp' ? (
-            <McpDetail entry={current.item.v} result={checks.get(checkKey(current.id))} onCheck={check} />
+            <McpDetail entry={current.item.v} result={checks.get(checkKey(current.id))} onCheck={check} busy={switching} onSwitch={(m, on) => void switchMcp([m], on)} />
           ) : current?.item.kind === 'hook' ? (
             <HookDetail hook={current.item.v} />
           ) : current?.item.kind === 'plugin' ? (
-            <PluginDetail plugin={current.item.v} onShow={showSection} />
+            <PluginDetail
+              plugin={current.item.v}
+              onShow={showSection}
+              servers={setup?.mcp.filter((m) => m.plugin === current.title) ?? []}
+              busy={switching}
+              onSwitch={(ms, on) => void switchMcp(ms, on)}
+            />
           ) : null}
         </div>
       </div>
@@ -352,7 +410,7 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed }: P
       <h1 className="page-title">
         <Blocks size={22} className="icon" /> Claude setup
       </h1>
-      <p className="page-sub">What claude loads on this machine. Read-only: change these in claude or in its files. Secret values are hidden.</p>
+      <p className="page-sub">What claude loads on this machine. MCP servers switch on and off here; change the rest in claude or in its files. Secret values are hidden.</p>
       {body}
     </div>
   )
@@ -363,6 +421,26 @@ function ScopeBadge({ scope, plugin }: { scope: SetupScope; plugin?: string }) {
     <span className={cx('scope-badge', `scope-${scope}`)} title={scope === 'plugin' ? `From the plugin ${plugin}` : `Scope: ${SCOPE_LABEL[scope]}`}>
       {scope === 'plugin' ? plugin : SCOPE_LABEL[scope]}
     </span>
+  )
+}
+
+/** On or off for new chats; a server claude won't start anyway (blocked, broken, overridden) can't be switched. */
+function McpSwitch({ entry: m, busy, onSwitch }: { entry: McpEntry; busy: boolean; onSwitch: (m: McpEntry, on: boolean) => void }) {
+  const on = switchedOn(m)
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      aria-label={`${m.name} on`}
+      className={cx('switch', on && 'on')}
+      disabled={busy || !!m.fixed}
+      title={m.fixed ?? (on ? 'Turn off' : 'Turn on')}
+      onClick={(e) => {
+        e.stopPropagation()
+        onSwitch(m, !on)
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+    />
   )
 }
 
@@ -447,7 +525,15 @@ function Field({ label, value, mono = true }: { label: string; value: string; mo
   )
 }
 
-function McpDetail({ entry: m, result, onCheck }: { entry: McpEntry; result: CheckState | undefined; onCheck: (m: McpEntry) => void }) {
+interface McpDetailProps {
+  entry: McpEntry
+  result: CheckState | undefined
+  onCheck: (m: McpEntry) => void
+  busy: boolean
+  onSwitch: (m: McpEntry, on: boolean) => void
+}
+
+function McpDetail({ entry: m, result, onCheck, busy, onSwitch }: McpDetailProps) {
   return (
     <>
       <div className="setup-detail-head">
@@ -455,6 +541,8 @@ function McpDetail({ entry: m, result, onCheck }: { entry: McpEntry; result: Che
         <h2 className="mono">{m.name}</h2>
         <ScopeBadge scope={m.scope} plugin={m.plugin} />
         <span className={cx('state-pill', `state-${m.state}`)}>{STATE_LABEL[m.state]}</span>
+        <span className="spacer" />
+        <McpSwitch entry={m} busy={busy} onSwitch={onSwitch} />
       </div>
       {m.note && <p className="setup-note">{m.note}</p>}
       <dl className="setup-meta">
@@ -477,6 +565,7 @@ function McpDetail({ entry: m, result, onCheck }: { entry: McpEntry; result: Che
           </>
         )}
         <Field label="File" value={m.path} />
+        {m.key !== m.name && <Field label="In /mcp" value={m.key} />}
       </dl>
 
       <div className="setup-check">
@@ -557,7 +646,19 @@ function HookDetail({ hook: h }: { hook: HookEntry }) {
   )
 }
 
-function PluginDetail({ plugin: p, onShow }: { plugin: PluginEntry; onShow: (id: SectionId, plugin: string) => void }) {
+interface PluginDetailProps {
+  plugin: PluginEntry
+  onShow: (id: SectionId, plugin: string) => void
+  /** Its MCP servers, to switch them all at once. */
+  servers: McpEntry[]
+  busy: boolean
+  onSwitch: (servers: McpEntry[], on: boolean) => void
+}
+
+function PluginDetail({ plugin: p, onShow, servers, busy, onSwitch }: PluginDetailProps) {
+  const switchable = servers.filter((m) => !m.fixed)
+  const onNow = switchable.filter(switchedOn)
+  const offNow = switchable.filter((m) => !switchedOn(m))
   const provides = (Object.entries(p.provides) as [SectionId, number][]).filter(([, n]) => n > 0)
   const words: Record<string, [string, string]> = {
     skills: ['skill', 'skills'],
@@ -594,6 +695,22 @@ function PluginDetail({ plugin: p, onShow }: { plugin: PluginEntry; onShow: (id:
                 {n} {words[id][n === 1 ? 0 : 1]}
               </button>
             ))}
+          </div>
+        </>
+      )}
+      {p.enabled && switchable.length > 0 && (
+        <>
+          <h3 className="section-label">Its MCP servers</h3>
+          <div className="setup-check-bar">
+            <span className="hint">
+              {onNow.length} of {switchable.length} on
+            </span>
+            <button className="btn" onClick={() => onSwitch(onNow, false)} disabled={busy || !onNow.length}>
+              Turn all off
+            </button>
+            <button className="btn" onClick={() => onSwitch(offNow, true)} disabled={busy || !offNow.length}>
+              Turn all on
+            </button>
           </div>
         </>
       )}
