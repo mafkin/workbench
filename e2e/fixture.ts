@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import type { Page } from '@playwright/test'
 
 export const PORT = 7431
 export const DIR = path.resolve(import.meta.dirname, '.tmp-config')
@@ -228,4 +229,17 @@ export async function closeChats() {
       await fetch(`http://127.0.0.1:${PORT}/api/chats/${chat.id}`, { method: 'DELETE', headers })
     }
   }
+}
+
+/** The profile button in the nav header and its menu. */
+export const profileButton = (page: Page) => page.getByRole('button', { name: 'Profile', exact: true })
+
+export async function profileMenu(page: Page, item: string) {
+  await profileButton(page).click()
+  await page.getByRole('menu').getByRole('menuitem', { name: item }).click()
+}
+
+export async function pickProfile(page: Page, name: string) {
+  await profileButton(page).click()
+  await page.getByRole('menu').getByRole('menuitemradio', { name }).click()
 }

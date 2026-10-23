@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Blocks, BookOpen, Server, Settings2, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
+import { Blocks, BookOpen, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, CONTEXT_LABEL, entrySlot, itemKey, projectHost, type ContextFolder, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState } from '../../shared/config-schema.ts'
 import type { GitMark } from '../../shared/git.ts'
@@ -57,6 +57,8 @@ interface Props extends NavActions {
   onSetup: () => void
   setupActive: boolean
   onProfileSettings: () => void
+  /** Profile settings with the add-profile form focused. */
+  onAddProfile: () => void
   /** Open the Servers page; `serversActive` while it shows. */
   onServers: () => void
   serversActive: boolean
@@ -178,6 +180,29 @@ export function NavPanel(props: Props) {
   }
 
   const accentOf = (p: ProfileState) => p.profile?.accent ?? '#8a8f98'
+  const nameOf = (p: ProfileState) => p.profile?.name ?? p.id
+  const activeName = nameOf(active)
+
+  function profileMenu(e: React.MouseEvent) {
+    const r = e.currentTarget.getBoundingClientRect()
+    props.openMenu({
+      x: r.left,
+      y: r.bottom + 4,
+      entries: [
+        ...profiles.map((p, i) => ({
+          label: nameOf(p),
+          icon: <span className="menu-swatch" style={{ background: accentOf(p) }} />,
+          detail: i < 9 ? `Ctrl+${i + 1}` : undefined,
+          kind: 'radio' as const,
+          checked: p.id === active.id,
+          run: () => p.id !== active.id && onSwitch(p.id),
+        })),
+        'sep' as const,
+        { label: 'Profile settings…', icon: <Settings2 size={14} />, run: props.onProfileSettings },
+        { label: 'Add profile…', icon: <Plus size={14} />, run: props.onAddProfile },
+      ],
+    })
+  }
 
   return (
     <nav className={cx('nav', editing && 'editing')} aria-label="Navigation">
@@ -188,6 +213,9 @@ export function NavPanel(props: Props) {
             WORKBENCH
           </button>
           <span className="spacer" />
+          <button className="icon-btn profile-btn" onClick={profileMenu} title={`Profile: ${activeName} (Ctrl+${profiles.findIndex((p) => p.id === active.id) + 1})`} aria-label="Profile" aria-haspopup="menu">
+            <UserRound size={13} />
+          </button>
           <button className="icon-btn" onClick={onLook} title="Theme and background" aria-label="Theme and background">
             <Palette size={13} />
           </button>
@@ -206,24 +234,6 @@ export function NavPanel(props: Props) {
             aria-label="Edit navigation"
           >
             <Pencil size={13} />
-          </button>
-        </div>
-        <div className="profile-switch" role="tablist" aria-label="Profile">
-          {profiles.map((p, i) => (
-            <button
-              key={p.id}
-              role="tab"
-              aria-selected={p.id === active.id}
-              className={cx(p.id === active.id && 'active')}
-              style={{ '--profile-accent': accentOf(p) } as React.CSSProperties}
-              onClick={() => onSwitch(p.id)}
-              title={`${p.profile?.name ?? p.id} (Ctrl+${i + 1})`}
-            >
-              {p.profile?.name ?? p.id}
-            </button>
-          ))}
-          <button className="icon-btn profile-gear" onClick={props.onProfileSettings} title="Profile settings" aria-label="Profile settings">
-            <Settings2 size={13} />
           </button>
         </div>
       </div>

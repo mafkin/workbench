@@ -136,7 +136,7 @@ export function App() {
   const pictureName = background === 'theme' || background === 'none' ? null : background
   const [picture, setPicture] = useState<{ name: string; url: string | null } | null>(null)
   const [lookOpen, setLookOpen] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState<boolean | 'add'>(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
 
   useEffect(() => {
@@ -967,6 +967,7 @@ export function App() {
               serverMarks={serverMarks}
               gitMarks={gitMarks}
               onProfileSettings={() => setProfileOpen(true)}
+              onAddProfile={() => setProfileOpen('add')}
                 setupActive={selection?.kind === 'setup'}
                 contextSelected={selection?.kind === 'context' ? selection.name : null}
               />
@@ -1002,7 +1003,7 @@ export function App() {
                 )}
                 {switcherOpen && <QuickSwitcher items={switchItems()} onClose={() => setSwitcherOpen(false)} />}
                 {profileOpen && (
-                  <ProfileDialog active={active} profiles={state.profiles} run={run} onSwitch={switchProfile} onChanged={refresh} onClose={() => setProfileOpen(false)} />
+                  <ProfileDialog active={active} profiles={state.profiles} addFirst={profileOpen === 'add'} run={run} onSwitch={switchProfile} onChanged={refresh} onClose={() => setProfileOpen(false)} />
                 )}
                 {agentsFor !== null && profile && (
                   <AgentProfilesDialog profile={profile} profileId={active.id} folder={agentsFor} run={run} onClose={() => setAgentsFor(null)} />

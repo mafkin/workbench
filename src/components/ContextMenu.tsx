@@ -42,7 +42,8 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
         ) : (
           <button
             key={i}
-            role="menuitem"
+            role={e.kind ? `menuitem${e.kind}` : 'menuitem'}
+            aria-checked={e.kind ? !!e.checked : undefined}
             className={cx(e.danger && 'danger')}
             disabled={e.disabled}
             onClick={() => {
@@ -53,6 +54,8 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
             {e.icon}
             <span className="menu-label">{e.label}</span>
             {e.detail && <span className="menu-detail">{e.detail}</span>}
+            {/* A CSS tick: importing an icon here pulls a shared chunk into the main bundle. */}
+            {e.kind && <span className={cx('menu-check', e.checked && 'on')} />}
           </button>
         ),
       )}

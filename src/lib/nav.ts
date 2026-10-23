@@ -129,6 +129,9 @@ export interface MenuEntry {
   detail?: string
   danger?: boolean
   disabled?: boolean
+  /** A choice (`radio`, one of several) or a toggle (`checkbox`); `checked` shows a tick. */
+  kind?: 'radio' | 'checkbox'
+  checked?: boolean
   run: () => void
 }
 

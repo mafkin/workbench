@@ -2,7 +2,7 @@
 // (written to its YAML with Undo), plus adding and removing profiles. A new
 // profile is a file of its own; a removed one's file goes to the Trash.
 import { Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ACCENTS, PROFILE_ID, PROFILE_ID_RULE, type Op, type ProfileState } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { cx } from '../lib/nav.ts'
@@ -11,6 +11,8 @@ import { ConfirmDialog } from './ConfirmDialog.tsx'
 interface Props {
   active: ProfileState
   profiles: ProfileState[]
+  /** Opened from "Add profile…": focus the new profile's name. */
+  addFirst?: boolean
   run: (ops: Op[], undoLabel?: string) => Promise<boolean>
   onSwitch: (id: string) => void
   /** Fetch the profiles again; switching waits for it, so the new list is not overtaken. */
@@ -29,7 +31,7 @@ const idFrom = (name: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 32)
 
-export function ProfileDialog({ active, profiles, run, onSwitch, onChanged, onClose }: Props) {
+export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onChanged, onClose }: Props) {
   const p = active.profile
   const [name, setName] = useState(p?.name ?? '')
   const [accent, setAccent] = useState(p?.accent ?? ACCENTS[0])
@@ -41,6 +43,11 @@ export function ProfileDialog({ active, profiles, run, onSwitch, onChanged, onCl
   const [idEdited, setIdEdited] = useState(false)
   const [copy, setCopy] = useState(false)
   const [removing, setRemoving] = useState<ProfileState | null>(null)
+  const newNameRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (addFirst) newNameRef.current?.focus()
+  }, [addFirst])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !removing && onClose()
@@ -157,6 +164,7 @@ export function ProfileDialog({ active, profiles, run, onSwitch, onChanged, onCl
           </ul>
           <form className="add-profile" aria-label="Add profile" onSubmit={add}>
             <input
+              ref={newNameRef}
               name="newName"
               value={newName}
               placeholder="New profile name"
