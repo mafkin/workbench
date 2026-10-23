@@ -71,7 +71,7 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
   - A **Git** tab after All files in projects inside a repository (shown when `/api/git/marks` lists the project): staged and changed files, the selected file's diff with Stage / Unstage / Discard per hunk, the commit box (Draft from `claude -p`, Amend until pushed), branch menu (switch with stash-or-carry, new, rename, delete with unmerged commits named), Fetch / Pull (fast-forward, or Merge) / Push or Publish, conflicts banner (Open, Ask claude, Mark resolved, Abort merge), stashes, history with commit details.
   - Discard keeps the file's content with `git hash-object -w` (untracked files go to the Trash) so the toast's Undo works.
   - Nav mark (dot = uncommitted, ↑ push, ↓ pull, red = conflicts), a line on the card, "<project> › Git" in Ctrl+K. Background fetch every 10 min for the active profile.
-- **Part 10 (assets and media) is done** on the same branch (restarted from `main` after PR #2 merged; not merged yet):
+- **Part 10 (assets and media) is done** on the same branch (restarted from `main` after PR #2 merged) and merged into `main` (PR #3, with the profile menu, drawers, MCP switches and items):
   - **List / Gallery** in every file browser (`filesView` in localStorage per profile+folder; a subfolder inherits the nearest parent's choice). Tiles, folders as tiles (Godot project icon), type chips, size slider, grid arrow keys, rows in view only.
   - **Thumbnails** in `~/.cache/workbench/thumbs` (`Thumbs`): made in the browser (images, video frame, audio waveform, 3D render) and PUT to the cache, or by the service for `.blend` (the TEST block). Pruned past 300 MB.
   - **Previews:** three.js viewer (lazy `ModelPreview`), `.blend` preview, audio waveform player, image size and format, compare two images.
@@ -89,6 +89,7 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
 - **Items (after MCP switches) are done** on the same branch (decisions in the roadmap):
   - Add entry makes a blank item (`type: item`, `steps: []`, an `id` when it has no folder); its page offers File browser / Note / Git / Claude setup / More…. All files, Git and Claude setup are steps (`files`, `git`, `setup`). One step fills the page (no tab row); Remove tab (or Delete) removes only the tab, with Undo.
   - Old projects without `steps:` show `legacySteps` (All files, Git in a repository, Claude setup, workflow); their first step change writes them (`seed`). `workflow:` is a template: Add profile steps / Save as profile steps. Old notes, launchers, links, chats and daily entries are unchanged.
+- **Everything above is merged into `main`** (PR #3, 2026-10-23). The checkout stays on `claude/inspiring-einstein-vwftq8`, which the systemd service runs.
 - **Next:** nothing is queued. Tauri was left for later; ask the user what they want next.
 - **Known gaps:**
   - A profile's id (its file name) can't be renamed in the app.
