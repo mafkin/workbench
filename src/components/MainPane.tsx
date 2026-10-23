@@ -1,4 +1,4 @@
-import { expandHome, normalizePath } from '../../shared/config-schema.ts'
+import { expandHome, normalizePath, profileFile } from '../../shared/config-schema.ts'
 import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search, X } from 'lucide-react'
 import { lazy, Suspense, useRef, useState } from 'react'
 import {
@@ -238,7 +238,7 @@ export function MainPane(props: Props) {
 function BrokenProfile({ active }: { active: ProfileState }) {
   return (
     <div className="empty-state">
-      <h2 style={{ color: 'var(--text)' }}>{active.id}.yaml cannot be read</h2>
+      <h2 style={{ color: 'var(--text)' }}>{profileFile(active)} cannot be read</h2>
       <p>
         {active.error?.line ? `Line ${active.error.line}: ` : ''}
         {active.error?.message}

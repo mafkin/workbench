@@ -403,6 +403,11 @@ export interface ConfigError {
   col?: number
 }
 
+/** The file a profile is read from, for messages: its wiki's index.md, or the YAML file while it is still one. */
+export function profileFile(p: { id: string; legacy?: boolean; wiki?: string }): string {
+  return p.legacy || !p.wiki ? `${p.id}.yaml` : `${p.wiki.replace(/\/+$/, '')}/index.md`
+}
+
 export interface ProfileState {
   id: string
   /** The profile's main file: `index.md` of its wiki, or the YAML file of a profile not moved to pages yet. */

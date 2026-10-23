@@ -16,7 +16,9 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from '@dnd-kit/utilities'
 import { Blocks, BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, projectRef, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section } from '../../shared/config-schema.ts'
+import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, projectRef, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section,
+  profileFile,
+} from '../../shared/config-schema.ts'
 import type { GitMark } from '../../shared/git.ts'
 import { useContextFolders } from '../lib/context.ts'
 import type { Connection } from '../lib/events.ts'
@@ -280,7 +282,7 @@ export function NavPanel(props: Props) {
             className={cx('icon-btn', editing && 'on')}
             onClick={() => setEditing(!editing)}
             disabled={!!active.error}
-            title={active.error ? `Fix ${active.id}.yaml first: editing is paused while it has an error` : editing ? 'Done editing (Esc)' : 'Edit navigation'}
+            title={active.error ? `Fix ${profileFile(active)} first: editing is paused while it has an error` : editing ? 'Done editing (Esc)' : 'Edit navigation'}
             aria-pressed={editing}
             aria-label="Edit navigation"
           >
@@ -405,7 +407,7 @@ export function NavPanel(props: Props) {
               ? 'Connecting'
               : editing
                 ? 'Drag to reorder · right-click for more · Esc when done'
-                : `${active.id}.yaml`}
+                : profileFile(active)}
         </span>
       </div>
 
@@ -835,9 +837,10 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
         </button>
       )}
       {!ctx.editing && <ChatMark item={shown} />}
-      {!ctx.editing && <ServerMark item={shown} />}
-      {!ctx.editing && <GitMarkView item={shown} />}
-      {!ctx.editing && shown.type === 'folder' && (
+      {/* A plain folder link is just the file browser: no card, so no status, server or git marks. */}
+      {!ctx.editing && shown.type === 'folder' && !!shown.page && <ServerMark item={shown} />}
+      {!ctx.editing && shown.type === 'folder' && !!shown.page && <GitMarkView item={shown} />}
+      {!ctx.editing && shown.type === 'folder' && !!shown.page && (
         <span className="project-marks">
           {shown.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
           <span className={cx('status-dot', shown.status ?? 'active')} title={shown.status ?? 'active'} />
