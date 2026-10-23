@@ -46,6 +46,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 9 | Git per project | Done; merged to `main`; see below |
 | 10 | Assets and media | Done (branch restarted from `main`); merged to `main` with the profile menu, drawers, MCP switches and items (PR #3); see below |
 | 11 | The wiki: pages as configuration | Done; see below |
+| 12 | Workspaces: drawer rail, pinned skills, chats dock | In progress (milestone 1 done); see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -490,6 +491,27 @@ The user asked how to simplify the workflow and configuration and make Workbench
   - **Overview** (`Notes.overview`, `GET /api/notes/overview`): tag counts, most used first, and the pages to write: `[[targets]]` no note resolves (project links through `resolveProject` excluded), spelled as the newest linker spells them, with how many notes link to them (capped at 200). The search view shows both before a query (`Tags`, `Pages to write`); a missing page is created from `templates/page.md` through `NotesApi.create` (shared with the wiki-link toast) and opened.
   - **`templates/project.md`:** `projectPage` in `Wiki.#applyOp` starts every new item page from it when it exists (`fillTemplate` with `{{title}}` and `{{date}}`; the card's frontmatter is merged into the template's; the chosen steps go under its `## Workflow`, added at the end when missing). Without a template a page is `# Title` plus the Workflow list, as before.
   - **Not done:** tags in a note's body are plain text (the strip and the search find them, clicking one in the text does nothing); tags are flat (no `tag:` page; the search is the page); yaml rewrites a template's flow list with spaces (`[ project ]`) when it adds the card's keys; the Claude setup page stays until the user decides (see milestone 3).
+
+### Part 12: workspaces (in progress)
+
+The user showed a reference: a *Chats* window with topic tabs beside a *Workspace* window whose left nav lists a game's chapters (01 Intro screen, 02 Character…), each a rich page with concept art, and a right rail with Files, Skills, MCP and Settings. The ask: a simple wiki that gives chats accurate context, skills tied to tasks, a place for references and assets; Git and Claude setup per drawer; skills pinned to parts of the wiki and to chats.
+
+- **Decisions (2026-10-23):**
+
+  | Question | Answer |
+  | --- | --- |
+  | What is a workspace | A drawer with chapter pages: the drawer is the workspace (its `folder:`, its repository, its skills); its nav lists the chapter pages in order; items with folders stay for repos inside it |
+  | Where Git, Claude setup and Files live | A right rail per drawer: Files, Git, Skills, MCP, Settings on the right edge, acting on the drawer's folder, on every page of the drawer. They leave the project tab rows; the sidebar's Claude setup page and button go; the profile's MCP defaults move to the drawer |
+  | Pinning skills | `skills:` in frontmatter, inherited: index.md → drawer page → chapter or project page. A chat started from a page gets the page's skills plus its parents'. The rail's Skills view shows what applies here. Agent profiles keep their own list |
+  | Chats | A chats dock beside the page: a collapsible panel with tabs for every chat in the profile (pinned first, History, New chat from any page). A chat remembers the page it started from and gets that page's text and skills as context. Project chat tabs go |
+
+- **Milestones:** (1) the drawer rail; (2) pinned skills; (3) the chats dock; (4) polish and docs. The plan (layout, behaviour, files, verification) is in the session's plan file and summarized here as each lands.
+- **Milestone 1, built (the drawer rail):**
+  - `src/components/Rail.tsx`: a column of icon buttons on the right edge for the drawer the nav shows: Files, Git (both once the drawer has a `folder:`), Skills, MCP, Settings. A button opens its tool as the selection `rail:<tool>` (`RAIL_KEY`, `RailTool` in `src/lib/nav.ts`) and stays lit; Ctrl+K lists the tools (`<Drawer> › Git` with several drawers). `RailView` in `MainPane.tsx`: Files = the file browser on the drawer's folder; Git = `GitView` on it (`Git.repo` accepts a drawer's folder as a project of its own, `drawerAsProject`); Skills and MCP = `ClaudeSetupView` with the new `kinds` prop (one kind hides the kind tabs; `drawer` picks whose defaults the switches are); Settings = `DrawerDialog` rendered `inline` (no scrim, no Cancel).
+  - The sidebar's Claude setup page and header button are gone, with the For picker; the project tab keeps every kind. `setup:` selections from before resolve to nothing.
+  - **MCP defaults per drawer:** `Drawer.mcpOff` from the drawer page's frontmatter; `setMcpOff` takes a `drawer` and writes that page (index.md for a profile without drawers, whose one drawer carries `profile.mcpOff`); the first drawer op moves index.md's key into the first drawer's page; a key left on index.md by hand is read as the first drawer's and reported. `agentFor` applies the chat's drawer's list; `POST /api/claude/mcp` without a path takes `drawer` (and the rev) and switches every project of the drawer plus its own folder; `GET /api/claude/setup` takes `drawer` too (`withDefaults`, `drawerFor`).
+  - **Chapters:** pages added in a drawer that has a page (Add entry, a folder link that needs a card) go under `drawers/<Name>/` (`pageDir` in the wiki store); a profile without drawers keeps `projects/`.
+  - Tests: `wiki.test.ts` (drawer `mcpOff`, moved key, stray key, `drawers/<Name>/` pages), `drawers-http.test.ts` (git on a drawer folder), `claude-setup-http.test.ts` (defaults per drawer); e2e `setup.spec.ts` moved to the rail and the project tab, new `rail.spec.ts` (Settings gives the folder; Files, Git, Ctrl+K, the selection survives a reload).
 
 ## Reference
 

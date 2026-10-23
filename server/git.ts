@@ -14,7 +14,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { displayPath, itemsWithFolder, type NavItem, type Profile } from '../shared/config-schema.ts'
+import { displayPath, drawersOf, itemsWithFolder, type NavItem, type Profile } from '../shared/config-schema.ts'
 import type {
   Branch,
   Commit,
@@ -91,6 +91,12 @@ const REDIRECTS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIR
 
 /** The items of a profile that have a folder, groups included. */
 export const projectsOf = (profile: Profile): Folder[] => itemsWithFolder(profile)
+
+/** A drawer's `folder:` as a project of its own, for the rail's Git (part 12); undefined when no drawer has this folder. */
+const drawerAsProject = (profile: Profile, folder: string): Folder | undefined => {
+  const d = drawersOf(profile).find((d) => d.folder === folder)
+  return d && d.folder ? ({ type: 'folder', label: d.name, path: d.folder, steps: [] } as Folder) : undefined
+}
 
 /** A path inside the repository as a request gives it: relative, `/`-separated, no `..`. */
 export function repoPath(raw: string): string {
@@ -356,7 +362,8 @@ export class Git {
   async repo(profileId: string, projectPath: string): Promise<Repo | null> {
     const p = this.#store.profile(profileId)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
-    const project = projectsOf(p.profile).find((f) => f.path === projectPath)
+    // A project's folder, or a drawer's own folder (the rail's Git, part 12).
+    const project: Folder | undefined = projectsOf(p.profile).find((f) => f.path === projectPath) ?? drawerAsProject(p.profile, projectPath)
     if (!project) throw new StoreError('Not a project of this profile', 404)
     const dir = await realish(absPath(project.path, this.#home))
     const found = await this.#rootOf(dir)

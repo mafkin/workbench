@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SCOPE_LABEL, type ClaudeSetup, type HookEntry, type McpCheck, type McpEntry, type McpState, type PluginEntry, type SetupDoc, type SetupScope } from '../../shared/claude-setup.ts'
-import { allSections, type Profile } from '../../shared/config-schema.ts'
+import { drawersOf, type Profile } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx } from '../lib/nav.ts'
@@ -113,35 +113,26 @@ const useChecks = () =>
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-/** The profile's projects (folder entries), for the page's For picker. */
-function projectsOf(profile: Profile): { label: string; path: string }[] {
-  const out: { label: string; path: string }[] = []
-  for (const section of allSections(profile)) {
-    for (const item of section.items) {
-      // Only items with a folder have a Claude setup of their own.
-      if (item.type === 'folder' && item.path) out.push({ label: item.label, path: item.path })
-      if (item.type === 'group') for (const child of item.items) if (child.type === 'folder' && child.path) out.push({ label: child.label, path: child.path })
-    }
-  }
-  return out
-}
-
 interface Props {
   profileId: string
   profile: Profile
-  /** A project's tab: fixed to its folder. Without it, the page with a For picker. */
+  /** The folder whose setup shows: a project's tab, or the drawer's own folder; none = what claude loads everywhere. */
   folder?: string
-  /** The profile's rev, for switching its defaults (the page's Everywhere). */
+  /** The drawer whose MCP defaults the switches show and set (the rail); the project's own drawer when left out. */
+  drawer?: number
+  /** Only these kinds (the rail's Skills or MCP view); one kind hides the kind tabs. */
+  kinds?: SectionId[]
+  /** The profile's rev, for switching a drawer's defaults. */
   rev?: string
   toast?: (t: ToastInput) => void
 }
 
-export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev, toast }: Props) {
-  const projects = useMemo(() => projectsOf(profile), [profile])
-  const [forFolder, setForFolder] = useLocal<Record<string, string>>('setupFor', {})
-  const picked = forFolder[profileId] ?? ''
-  const folder = fixed ?? (projects.some((p) => p.path === picked) ? picked : null)
-  const [section, setSection] = useLocal<SectionId>('setupSection', 'skills')
+export default function ClaudeSetupView({ profileId, profile, folder: fixed, drawer, kinds, rev, toast }: Props) {
+  const folder = fixed ?? null
+  const shown = useMemo(() => SECTIONS.filter((s) => !kinds || kinds.includes(s.id)), [kinds])
+  const [savedSection, setSection] = useLocal<SectionId>('setupSection', 'skills')
+  const section = shown.some((s) => s.id === savedSection) ? savedSection : shown[0].id
+  const drawerName = drawersOf(profile)[drawer ?? 0]?.name ?? profile.name
   const [setup, setSetup] = useState<ClaudeSetup | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -161,14 +152,14 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev
   useEffect(() => {
     let live = true
     setError(null)
-    api.claudeSetup(profileId, folder).then(
+    api.claudeSetup(profileId, folder, drawer).then(
       (s) => live && setSetup(s),
       (err) => live && (setError(message(err)), setSetup(null)),
     )
     return () => {
       live = false
     }
-  }, [profileId, folder, tick])
+  }, [profileId, folder, drawer, tick])
 
   const all = useMemo(() => (setup ? rowsOf(setup, section) : []), [setup, section])
   const matching = useMemo(() => {
@@ -185,6 +176,7 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev
   const meta = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]
 
   const showSection = (id: SectionId, plugin: string | null = null) => {
+    if (!shown.some((s) => s.id === id)) return
     setSection(id)
     setPluginFilter(plugin)
     setFilter('')
@@ -207,11 +199,11 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev
     if (!keys.length) return
     setSwitching(true)
     try {
-      const r = await api.switchMcp(profileId, folder, keys, on, revRef.current)
+      const r = await api.switchMcp(profileId, folder, keys, on, revRef.current, drawer)
       if (r.rev) revRef.current = r.rev
       setSetup(r.setup)
       const what = servers.length === 1 ? servers[0].name : `${keys.length} servers`
-      const where = folder ? 'here' : 'by default in this profile'
+      const where = folder ? 'here' : `by default in the ${drawerName} drawer`
       toast?.({
         message: `${what} ${on ? 'on' : 'off'} ${where}. New chats use this.`,
         ...(undoable ? { action: { label: 'Undo', run: () => void switchMcp(servers, !on, false) } } : {}),
@@ -251,20 +243,12 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev
       <div className="setup-toolbar">
         {fixed ? (
           <span className="setup-for">
-            What applies in <span className="mono">{fixed}</span>: this project, local, yours, managed and plugins
+            What applies in <span className="mono">{fixed}</span>: this folder, local, yours, managed and plugins
           </span>
         ) : (
-          <label className="setup-for">
-            For
-            <select value={folder ?? ''} onChange={(e) => setForFolder((f) => ({ ...f, [profileId]: e.target.value }))} aria-label="For">
-              <option value="">Everywhere (yours, managed and plugins)</option>
-              {projects.map((p) => (
-                <option key={p.path} value={p.path}>
-                  {p.label} ({p.path})
-                </option>
-              ))}
-            </select>
-          </label>
+          <span className="setup-for">
+            What claude loads everywhere (yours, managed and plugins); the switches are the {drawerName} drawer's defaults
+          </span>
         )}
         <span className="spacer" />
         <button className="btn ghost" onClick={() => setTick((t) => t + 1)} title="Read claude’s files again">
@@ -292,8 +276,8 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev
         </details>
       )}
 
-      <div className="setup-sections" role="tablist" aria-label="Kinds">
-        {SECTIONS.map((s) => (
+      <div className={cx('setup-sections', shown.length === 1 && 'lone')} role="tablist" aria-label="Kinds">
+        {shown.map((s) => (
           <button key={s.id} role="tab" aria-selected={section === s.id} className={cx('setup-section', section === s.id && 'active')} onClick={() => showSection(s.id)}>
             <s.icon size={13} className="icon" />
             {s.label}
@@ -324,7 +308,7 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev
             <p className="setup-switch-hint">
               {folder
                 ? 'Switches work like /mcp in this folder.'
-                : 'Switches set this profile’s defaults: off now in each of its projects, and in other folders before their first chat.'}{' '}
+                : `Switches set the ${drawerName} drawer’s defaults: off now in each of its projects, and in other folders before their first chat.`}{' '}
               Running chats keep their servers until they restart.
             </p>
           )}
@@ -404,7 +388,8 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, rev
     </div>
   )
 
-  if (fixed) return body
+  // A project's tab and the rail's views bring their own frame.
+  if (fixed || kinds) return body
   return (
     <div className="page setup-page">
       <div className="page-kicker">Claude</div>

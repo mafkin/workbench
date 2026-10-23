@@ -462,9 +462,15 @@ export class Wiki extends EventEmitter {
           ...(typeof m.logo === 'string' ? { logo: m.logo } : {}),
           ...(typeof m.folder === 'string' ? { folder: m.folder } : {}),
           ...(Array.isArray(m.uses) ? { uses: m.uses.map(String) } : {}),
+          ...(Array.isArray(m.mcpOff) ? { mcpOff: m.mcpOff.map(String) } : {}),
           sections: await sectionsOf(page, d.rel),
         })
         navFiles.push(path.join(e.root, d.rel))
+      }
+      // MCP defaults are per drawer now (part 12): a key left on index.md counts as the first drawer's.
+      if (Array.isArray(index.meta.mcpOff) && drawers.length) {
+        drawers[0].mcpOff ??= index.meta.mcpOff.map(String)
+        problems.push(`index.md: mcpOff belongs on the first drawer's page now (${drawerLinks[0].rel}); the app writes it there`)
       }
       const isDrawer = (it: md.PageItem) => it.link.kind === 'wiki' && drawerLinks.some((d) => d.rel === known((it.link as { target: string }).target)?.rel)
       const others = index.sections.flatMap((s) => s.items).filter((it) => !isDrawer(it))
@@ -510,7 +516,7 @@ export class Wiki extends EventEmitter {
     const data: Record<string, unknown> = { notes: e.wiki, workflow, sections, ...(drawers ? { drawers } : {}) }
     for (const key of INDEX_META) if (meta[key] !== undefined && meta[key] !== null) data[key] = meta[key]
     if (data.name === undefined) data.name = e.id
-    for (const key of ['categories', 'openWith', 'mcpOff'] as const) if (meta[key] !== undefined && meta[key] !== null) data[key] = meta[key]
+    for (const key of ['categories', 'openWith', 'mcpOff'] as const) if (meta[key] !== undefined && meta[key] !== null && !(key === 'mcpOff' && drawers)) data[key] = meta[key]
     if (Object.keys(agents).length) data.agents = agents
     const parsed = Profile.safeParse(data)
     if (!parsed.success) return { ...fail(`index.md: ${describeIssue(parsed.error)}`), navFiles, pages, byName, refs, known }
@@ -706,6 +712,12 @@ export class Wiki extends EventEmitter {
       for (let n = 2; view.pages.has(lower(noExt(rel))) || draft.has(path.join(root, rel)); n++) rel = `${dir}/${file.replace(/\.md$/, ` ${n}.md`)}`
       return rel
     }
+    /** Where a drawer's new pages go: `drawers/<Name>/` once the drawer has a page (part 12), else `projects/`. */
+    const pageDir = (drawer: number | undefined): string => {
+      if (!profile.drawers?.length) return 'projects'
+      const file = view.navFiles[drawer ?? 0]
+      return file ? `drawers/${nameOf(path.relative(root, file))}` : 'projects'
+    }
     /** A link to a page made in this batch: its name when no other page has it, else its path. */
     const newLink = (rel: string, label: string) => {
       const name = nameOf(rel)
@@ -744,7 +756,7 @@ export class Wiki extends EventEmitter {
       if (!item) throw new OpError('No such entry')
       if (item.type !== 'folder') throw new OpError('Only pages have a card and tabs; this entry is a link')
       if (item.page) return { item: item as Folder & { page: string }, abs: path.join(root, item.page) }
-      const rel = freeRel('projects', item.label)
+      const rel = freeRel(pageDir(at.drawer), item.label)
       const steps = (item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx, true)}`)
       draft.create(path.join(root, rel), projectPage(item.label, steps, { folder: item.path, icon: item.icon }))
       setNav(at.drawer, (t) => md.replaceLink(t, at.section, at.group, at.index, newLink(rel, item.label)))
@@ -774,8 +786,11 @@ export class Wiki extends EventEmitter {
       const page = md.parsePage(indexText)
       const body = page.lines.slice(page.body).join('\n')
       const abs = path.join(root, first)
-      draft.create(abs, body.trim() ? body.replace(/\n*$/, '\n') : `## ${profile.name}\n`)
-      draft.put(index, `${page.lines.slice(0, page.body).join('\n')}${page.body ? '\n' : ''}## Drawers\n\n- [[${noExt(first)}]]\n`)
+      const pageText = body.trim() ? body.replace(/\n*$/, '\n') : `## ${profile.name}\n`
+      // The MCP defaults move with the nav: they are the drawer's.
+      draft.create(abs, Array.isArray(page.meta.mcpOff) ? md.setMeta(pageText, 'mcpOff', page.meta.mcpOff) : pageText)
+      const newIndex = `${page.lines.slice(0, page.body).join('\n')}${page.body ? '\n' : ''}## Drawers\n\n- [[${noExt(first)}]]\n`
+      draft.put(index, Array.isArray(page.meta.mcpOff) ? md.setMeta(newIndex, 'mcpOff', null) : newIndex)
       view.navFiles = [abs]
       return view.navFiles
     }
@@ -798,7 +813,7 @@ export class Wiki extends EventEmitter {
         let link: string
         if (op.item.type === 'item') {
           const input = op.item as { label: string; path?: string; icon?: string; steps?: ItemInput[] }
-          const rel = freeRel('projects', input.label)
+          const rel = freeRel(pageDir(op.to.drawer), input.label)
           const steps = (input.steps ?? []).map((s) => `- ${stepLink(s)}`)
           draft.create(path.join(root, rel), projectPage(input.label, steps, { folder: input.path, icon: input.icon }))
           link = newLink(rel, input.label)
@@ -850,9 +865,14 @@ export class Wiki extends EventEmitter {
         return
       }
       case 'setMcpOff': {
-        const set = new Set(profile.mcpOff ?? [])
+        // The drawer's page carries its MCP defaults; a profile without drawers keeps them on index.md.
+        const d = op.drawer ?? 0
+        const current = drawersOf(profile)[d]
+        if (!current) throw new OpError(`Drawer ${d} does not exist`)
+        const set = new Set(current.mcpOff ?? [])
         for (const n of op.names) op.off ? set.add(n) : set.delete(n)
-        draft.put(index, md.setMeta(text(index), 'mcpOff', set.size ? [...set] : null))
+        const file = profile.drawers?.length ? nav(d) : index
+        draft.put(file, md.setMeta(text(file), 'mcpOff', set.size ? [...set] : null))
         return
       }
       case 'setCard': {

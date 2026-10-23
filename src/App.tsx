@@ -42,6 +42,7 @@ import { ContextMenu } from './components/ContextMenu.tsx'
 import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
+import { Rail } from './components/Rail.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
 import type { ProjectActions } from './components/ProjectView.tsx'
 import type { GitMark } from '../shared/git.ts'
@@ -63,7 +64,10 @@ import {
   listLength,
   NOTE_KEY,
   SERVERS_KEY,
-  SETUP_KEY,
+  RAIL_KEY,
+  RAIL_LABEL,
+  RAIL_TOOLS,
+  type RailTool,
   entryId,
   parseKey,
   resolveEntry,
@@ -894,7 +898,10 @@ export function App() {
     if (key?.startsWith(NOTE_KEY)) return { kind: 'note', path: key.slice(NOTE_KEY.length) }
     if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
     if (key?.startsWith(CHAT_KEY)) return { kind: 'chat', id: key.slice(CHAT_KEY.length) }
-    if (key === SETUP_KEY) return { kind: 'setup' }
+    if (key?.startsWith(RAIL_KEY)) {
+      const tool = key.slice(RAIL_KEY.length) as RailTool
+      return RAIL_TOOLS.includes(tool) ? { kind: 'rail', tool } : null
+    }
     if (key === SERVERS_KEY) return { kind: 'servers' }
     if (key?.startsWith(CONTEXT_KEY)) {
       const name = key.slice(CONTEXT_KEY.length) as ContextFolder
@@ -1051,7 +1058,6 @@ export function App() {
     for (const c of chatsApi?.list ?? []) items.push({ id: `chat:${c.id}`, kind: 'chat', label: chatName(c), detail: `${c.cwd} · ${c.state}`, run: () => chatsApi?.open(c) })
     items.push(
       { id: 'page:home', kind: 'page', label: 'Home', detail: 'Recent work and today', run: goHome },
-      { id: 'page:setup', kind: 'page', label: 'Claude setup', detail: 'Skills, MCP servers, agents, hooks, plugins', run: () => navigate(SETUP_KEY) },
       { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your projects', run: () => navigate(SERVERS_KEY) },
     )
     // New note goes under the shown drawer's heading with the notes (the daily entry's), else its last one.
@@ -1069,8 +1075,13 @@ export function App() {
     if (!active.error) {
       items.push(
         { id: 'action:new-drawer', kind: 'action', label: 'New drawer…', detail: p.name, run: () => setDrawerDialog({ index: null }) },
-        { id: 'action:drawer-settings', kind: 'action', label: 'Drawer settings…', detail: all[drawer]?.name ?? '', run: () => setDrawerDialog({ index: drawer }) },
       )
+    }
+    // The rail's tools for the shown drawer.
+    for (const tool of RAIL_TOOLS) {
+      const d = all[drawer]
+      if (!d || ((tool === 'files' || tool === 'git') && !d.folder)) continue
+      items.push({ id: `rail:${tool}`, kind: 'page', label: all.length > 1 ? `${d.name} › ${RAIL_LABEL[tool]}` : RAIL_LABEL[tool], detail: tool === 'settings' ? 'Name, logo, folder, uses' : (d.folder ?? 'everywhere'), run: () => navigate(RAIL_KEY + tool) })
     }
     items.push(
       { id: 'action:look', kind: 'action', label: 'Theme and background…', detail: p.name, run: () => setLookOpen(true) },
@@ -1118,14 +1129,12 @@ export function App() {
                 onResizeStart={onResizeStart}
                 onHome={goHome}
                 onLook={() => setLookOpen(true)}
-                onSetup={() => navigate(SETUP_KEY)}
               onServers={() => navigate(SERVERS_KEY)}
               serversActive={selection?.kind === 'servers'}
               serverMarks={serverMarks}
               gitMarks={gitMarks}
               onProfileSettings={() => setProfileOpen(true)}
               onAddProfile={() => setProfileOpen('add')}
-                setupActive={selection?.kind === 'setup'}
                 contextSelected={selection?.kind === 'context' ? selection.name : null}
                 drawer={drawer}
                 onDrawer={pickDrawer}
@@ -1150,12 +1159,15 @@ export function App() {
                 recent={recent[active.id] ?? []}
                 drawer={drawer}
                 openRecent={openRecent}
-              onServersScan={(scan) => active && setServerScan({ profile: active.id, scan })}
+                onServersScan={(scan) => active && setServerScan({ profile: active.id, scan })}
+                onDrawerShow={(name) => setDrawerPick((s) => ({ ...s, [active.id]: name }))}
+                onDrawerDeleted={() => navigate(undefined)}
                 onHome={goHome}
                 activate={activate}
                 openExternally={openExternally}
                 startEditing={() => setEditing(true)}
               />
+              <Rail drawer={profile ? (drawersOf(profile)[drawer] ?? null) : null} active={selection?.kind === 'rail' ? selection.tool : null} onPick={(tool) => navigate(RAIL_KEY + tool)} />
               {dialog?.mode === 'note' ? (
                 <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
               ) : (

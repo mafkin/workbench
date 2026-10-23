@@ -19,11 +19,13 @@ interface Props {
   onShow: (name: string) => void
   onDeleted: () => void
   onClose: () => void
+  /** In the rail's Settings view: no scrim, no Cancel, Escape does nothing. */
+  inline?: boolean
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted, onClose }: Props) {
+export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted, onClose, inline }: Props) {
   const drawers = drawersOf(profile)
   const current = index === null ? undefined : drawers[index]
   const [name, setName] = useState(current?.name ?? '')
@@ -38,10 +40,11 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
   const suggested = `${(profile.notes ?? profile.home ?? '~').replace(/\/+$/, '')}/drawers/${drawerSlug(name.trim() || 'drawer')}`
 
   useEffect(() => {
+    if (inline) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !confirming && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, confirming])
+  }, [onClose, confirming, inline])
 
   async function choose(file: File | undefined) {
     if (!file) return
@@ -98,13 +101,16 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
 
   const entries = current?.sections.reduce((n, s) => n + s.items.length, 0) ?? 0
 
+  const Wrap = 'div'
   return (
-    <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="dialog drawer-dialog" role="dialog" aria-label={index === null ? 'New drawer' : 'Drawer settings'} onSubmit={save}>
-        <header>
-          {index === null ? 'New drawer' : 'Drawer settings'}
-          <small>{profileId}.yaml · saved in the file, comments kept</small>
-        </header>
+    <Wrap className={inline ? 'drawer-inline' : 'scrim'} onPointerDown={inline ? undefined : (e) => e.target === e.currentTarget && onClose()}>
+      <form className={inline ? 'dialog drawer-dialog inline' : 'dialog drawer-dialog'} role={inline ? 'form' : 'dialog'} aria-label={index === null ? 'New drawer' : 'Drawer settings'} onSubmit={save}>
+        {!inline && (
+          <header>
+            {index === null ? 'New drawer' : 'Drawer settings'}
+            <small>{profileId}.yaml · saved in the file, comments kept</small>
+          </header>
+        )}
         <div className="body">
           {index === null && !hasDrawers(profile) && (
             <p className="hint">Your current headings become the first drawer, {profile.name}. You can rename it.</p>
@@ -172,9 +178,11 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
             </button>
           )}
           <span style={{ flex: 1 }} />
-          <button type="button" className="btn ghost" onClick={onClose}>
-            Cancel
-          </button>
+          {!inline && (
+            <button type="button" className="btn ghost" onClick={onClose}>
+              Cancel
+            </button>
+          )}
           <button type="submit" className="btn primary" disabled={busy}>
             {index === null ? 'Add drawer' : 'Save'}
           </button>
@@ -185,6 +193,6 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
           Its {current.sections.length} {current.sections.length === 1 ? 'heading' : 'headings'} and {entries} {entries === 1 ? 'entry' : 'entries'} leave the switcher; the drawer’s page and the folders on disk stay. Undo brings it back.
         </ConfirmDialog>
       )}
-    </div>
+    </Wrap>
   )
 }

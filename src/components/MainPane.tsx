@@ -26,7 +26,7 @@ import {
 } from '../../shared/config-schema.ts'
 import { useChats } from '../lib/chats.ts'
 import { nameOf } from '../lib/files.ts'
-import { findEntry, FILES_KEY, NOTE_KEY, parseKey, resolveEntry, type Selection } from '../lib/nav.ts'
+import { findEntry, FILES_KEY, NOTE_KEY, parseKey, RAIL_LABEL, resolveEntry, type RailTool, type Selection } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { ago, type Recent } from '../lib/recent.ts'
 import { ChatPane } from './ChatPane.tsx'
@@ -42,6 +42,8 @@ import type { ToastInput } from './Toast.tsx'
 
 const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
 const ServersView = lazy(() => import('./ServersView.tsx'))
+const GitView = lazy(() => import('./GitView.tsx'))
+const DrawerDialog = lazy(() => import('./DrawerDialog.tsx').then((m) => ({ default: m.DrawerDialog })))
 
 export interface SearchState {
   open: boolean
@@ -72,6 +74,9 @@ interface Props {
   onServersScan: (scan: ServersScan) => void
   /** The drawer the nav shows. */
   drawer: number
+  /** The rail's Drawer settings: show a drawer by name (renamed), or go home after a delete. */
+  onDrawerShow: (name: string) => void
+  onDrawerDeleted: () => void
 }
 
 const noteName = (path: string) => (path.split('/').pop() ?? path).replace(NOTE_EXT, '')
@@ -141,10 +146,16 @@ export function MainPane(props: Props) {
               <span className="sep">/</span>
               <span>Chats</span>
             </>
-          ) : selected?.kind === 'setup' ? (
+          ) : selected?.kind === 'rail' ? (
             <>
+              {drawers.length > 1 && (
+                <>
+                  <span className="sep">/</span>
+                  <span>{drawers[props.drawer]?.name}</span>
+                </>
+              )}
               <span className="sep">/</span>
-              <span className="current">Claude setup</span>
+              <span className="current">{RAIL_LABEL[selected.tool]}</span>
             </>
           ) : selected?.kind === 'servers' ? (
             <>
@@ -223,10 +234,8 @@ export function MainPane(props: Props) {
           <Suspense fallback={null}>
             <ServersView key={active.id} profileId={active.id} onScan={props.onServersScan} toast={props.toast} />
           </Suspense>
-        ) : selected?.kind === 'setup' ? (
-          <Suspense fallback={null}>
-            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} rev={active.rev} toast={props.toast} />
-          </Suspense>
+        ) : selected?.kind === 'rail' ? (
+          <RailView key={`${active.id}:${props.drawer}:${selected.tool}`} tool={selected.tool} pane={props} />
         ) : (
           <Home active={active} drawer={props.drawer} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />
         )}
@@ -400,6 +409,60 @@ function describeRecent(profile: NonNullable<ProfileState['profile']>, r: Recent
   const where = drawers.length > 1 ? `${drawers[addr.drawer ?? 0]?.name} › ${heading}` : heading
   const step = r.step && stepsOf(profile, item, true).some((s) => s.label === r.step) ? r.step : undefined
   return { icon: <EntryIcon type={item.type} icon={item.icon} size={15} />, label: step ? `${item.label} › ${step}` : item.label, where }
+}
+
+/** A tool of the right rail, for the drawer the nav shows: its folder's files, its repository, what claude loads there, its settings. */
+function RailView({ tool, pane }: { tool: RailTool; pane: Props }) {
+  const { active, drawer } = pane
+  const profile = active.profile!
+  const d = drawersOf(profile)[drawer]
+  if (!d) return null
+  const folder = d.folder ?? null
+  if (tool === 'files') {
+    if (!folder) return <RailEmpty name={d.name} />
+    return <Browser key={`${active.id}:${folder}`} top={folder} kicker={d.name} heading="Files" pane={pane} />
+  }
+  if (tool === 'git') {
+    if (!folder) return <RailEmpty name={d.name} />
+    return (
+      <div className="page wide">
+        <div className="page-kicker">{d.name}</div>
+        <h1 className="page-title">Git</h1>
+        <Suspense fallback={null}>
+          <GitView key={`${active.id}|${folder}`} profileId={active.id} path={folder} toast={pane.toast} onChanged={pane.actions.gitChanged} />
+        </Suspense>
+      </div>
+    )
+  }
+  if (tool === 'settings') {
+    return (
+      <div className="page">
+        <div className="page-kicker">{d.name}</div>
+        <h1 className="page-title">Drawer settings</h1>
+        <Suspense fallback={null}>
+          <DrawerDialog key={`${active.id}:${drawer}:${active.rev}`} inline profile={profile} profileId={active.id} index={drawer} run={pane.actions.run} onShow={pane.onDrawerShow} onDeleted={pane.onDrawerDeleted} onClose={() => {}} />
+        </Suspense>
+      </div>
+    )
+  }
+  return (
+    <div className="page wide">
+      <div className="page-kicker">{d.name}</div>
+      <h1 className="page-title">{RAIL_LABEL[tool]}</h1>
+      <Suspense fallback={null}>
+        <ClaudeSetupView key={`${active.id}:${drawer}:${tool}`} profileId={active.id} profile={profile} folder={folder ?? undefined} drawer={drawer} kinds={[tool]} rev={active.rev} toast={pane.toast} />
+      </Suspense>
+    </div>
+  )
+}
+
+function RailEmpty({ name }: { name: string }) {
+  return (
+    <div className="empty-state">
+      <h2 style={{ color: 'var(--text)' }}>{name} has no folder yet</h2>
+      <p>Give the drawer a folder in its settings (the sliders on the rail) and its files and repository show here.</p>
+    </div>
+  )
 }
 
 /** A folder opened by path (outside a project's tabs): the file browser at `top`. */

@@ -348,6 +348,42 @@ describe('drawers are pages in drawers/', () => {
     expect(await status(run([{ op: 'deleteDrawer', drawer: 0 }]))).toBe(400)
   })
 
+  it('MCP defaults live on the drawer page: setMcpOff writes it, the first drawer op moves index.md’s key, a stray key is reported', async () => {
+    await run([{ op: 'setMcpOff', names: ['plugin:x:slack'], off: true }, { op: 'addDrawer', name: 'Game dev' }])
+    // The key moved with the nav into the first drawer's page.
+    expect(await read('index.md')).toBe('---\nname: Work\naccent: "#7d93ab"\n---\n## Drawers\n\n- [[drawers/Work]]\n- [[drawers/Game dev]]\n')
+    expect(await read('drawers/Work.md')).toMatch(/^---\nmcpOff:\n  - plugin:x:slack\n---\nWords about/)
+    expect(work().mcpOff).toBeUndefined()
+    expect(work().drawers?.map((d) => d.mcpOff)).toEqual([['plugin:x:slack'], undefined])
+    await run([{ op: 'setMcpOff', drawer: 1, names: ['tools'], off: true }, { op: 'setMcpOff', drawer: 0, names: ['plugin:x:slack'], off: false }])
+    expect(await read('drawers/Game dev.md')).toBe('---\nmcpOff:\n  - tools\n---\n# Game dev\n')
+    expect(await read('drawers/Work.md')).toMatch(/^Words about/)
+    expect(work().drawers?.map((d) => d.mcpOff)).toEqual([undefined, ['tools']])
+    // Put back by hand on index.md: read as the first drawer's, and said so.
+    await fsp.writeFile(path.join(NOTES(), 'index.md'), (await read('index.md')).replace('---\n## Drawers', 'mcpOff: [github]\n---\n## Drawers'))
+    const fresh = new Wiki(cfg, home)
+    await fresh.init({ watch: false })
+    expect(fresh.profile('work').profile?.drawers?.[0].mcpOff).toEqual(['github'])
+    expect(fresh.profile('work').problems).toContainEqual(expect.stringContaining('mcpOff'))
+    fresh.close()
+  })
+
+  it('a new item in a drawer with a page gets its page under drawers/<Name>/', async () => {
+    await run([{ op: 'addDrawer', name: 'Game dev' }, { op: 'addSection', drawer: 1, title: 'Chapters' }])
+    await run([
+      { op: 'addItem', to: { drawer: 1, section: 0 }, item: { type: 'item', label: '01 Intro screen' } },
+      { op: 'addItem', to: { drawer: 0, section: 0 }, item: { type: 'item', label: 'Delta', path: '~/delta' } },
+      { op: 'addItem', to: { drawer: 0, section: 0 }, item: { type: 'folder', label: 'Downloads', path: '~/Downloads' } },
+    ])
+    expect(await read('drawers/Game dev/01 Intro screen.md')).toBe('# 01 Intro screen\n')
+    expect(await read('drawers/Game dev.md')).toBe('# Game dev\n\n## Chapters\n\n- [[01 Intro screen]]\n')
+    expect(work().drawers?.[1].sections[0].items[0]).toMatchObject({ label: '01 Intro screen', page: 'drawers/Game dev/01 Intro screen.md' })
+    expect(await read('drawers/Work/Delta.md')).toBe('---\nfolder: ~/delta\n---\n# Delta\n')
+    // A folder link that needs a card becomes a page in the same place.
+    await run([{ op: 'setCard', at: { drawer: 0, section: 0, index: 4 }, field: 'status', value: 'paused' }])
+    expect(await read('drawers/Work/Downloads.md')).toContain('status: paused')
+  })
+
   it('a drawer setting on a profile without drawers makes the first drawer page', async () => {
     await run([{ op: 'setDrawer', drawer: 0, field: 'logo', value: 'abc.png' }])
     expect(await read('drawers/Work.md')).toMatch(/^---\nlogo: abc.png\n---\nWords about this profile.\n\n## Projects\n/)

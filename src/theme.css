@@ -71,8 +71,62 @@ button {
 
 .app {
   display: grid;
-  grid-template-columns: var(--nav-w, 280px) 1fr;
+  grid-template-columns: var(--nav-w, 280px) 1fr auto;
   height: 100%;
+}
+
+/* ── The right rail: the drawer's tools (part 12) ──── */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 52px;
+  padding: 10px 4px;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.rail-btn {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 7px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.rail-btn:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.rail-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.rail-label {
+  letter-spacing: 0.01em;
+}
+
+/* Drawer settings in the main pane: the dialog's form without its frame. */
+.drawer-inline .dialog.inline {
+  max-width: 560px;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.setup-sections.lone {
+  display: none;
 }
 
 .app.resizing {
@@ -2816,14 +2870,16 @@ button {
 }
 
 .app.backdrop .nav,
-.app.backdrop .main {
+.app.backdrop .main,
+.app.backdrop .rail {
   border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
   border-radius: 10px;
   backdrop-filter: blur(14px) saturate(1.15);
   box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
 }
 
-.app.backdrop .nav {
+.app.backdrop .nav,
+.app.backdrop .rail {
   background: color-mix(in srgb, var(--panel) 66%, transparent);
 }
 

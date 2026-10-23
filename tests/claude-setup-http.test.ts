@@ -141,11 +141,14 @@ describe('switching MCP servers', () => {
     expect(res.body.error).toMatch(/usable/)
   })
 
-  it('everywhere: the profile’s default, written to the YAML and to every project now', async () => {
-    expect((await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false })).status).toBe(422)
-    const off = await call<{ setup: ClaudeSetup; rev: string }>('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, rev: rev() })
+  it('a drawer’s default: written to its page and to every project of the drawer now', async () => {
+    // The rev and the drawer are both needed without a path.
+    expect((await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, drawer: 0 })).status).toBe(422)
+    expect((await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, rev: rev() })).status).toBe(422)
+    const off = await call<{ setup: ClaudeSetup; rev: string }>('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, rev: rev(), drawer: 0 })
     expect(off.status).toBe(200)
     expect(off.body.rev).toBe(rev())
+    // A profile without drawers is one drawer: the key is index.md's.
     expect(server.store.profile('work').profile!.mcpOff).toEqual(['tools'])
     expect(states(off.body.setup)).toMatchObject({ tools: 'off' })
     expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual(['tools'])
@@ -154,7 +157,7 @@ describe('switching MCP servers', () => {
     expect(alpha.body.setup.mcp.find((m) => m.key === 'tools')).toMatchObject({ state: 'on', note: expect.stringMatching(/off by default/) })
     // On everywhere: out of the YAML and on in every project.
     await call('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: false })
-    await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: true, rev: rev() })
+    await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: true, rev: rev(), drawer: 0 })
     expect(server.store.profile('work').profile!.mcpOff).toBeUndefined()
     expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual([])
   })

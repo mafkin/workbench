@@ -90,7 +90,7 @@ home: ~/Documents/work
 categories: { game: "#8fa58a" } # optional colours for project categories
 openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
   - { ext: [kra], command: krita }
-mcpOff: [plugin:toolkit:slack]  # MCP servers off by default (see Claude setup)
+mcpOff: [plugin:toolkit:slack]  # MCP servers off by default (see Claude setup); with drawers, on each drawer's page
 ---
 ## Projects
 - [[Tuohi]]
@@ -149,7 +149,7 @@ You review code. Don't edit files.
 ## Using it
 
 - **Profiles:** the person icon at the top of the sidebar lists them, with Profile settings… and Add profile…. **Ctrl+1 / Ctrl+2** (and on, in profile order) switch profiles. **Esc** leaves edit mode.
-- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Claude setup, Servers), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile or a drawer, New drawer…, Drawer settings…). With several drawers it searches all of them; picking an entry of another drawer shows that drawer. Letters match in order, word starts first; with an empty box, your recent picks come first.
+- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Servers, the drawer's Files, Git, Skills, MCP servers and Drawer settings), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile or a drawer, New drawer…). With several drawers it searches all of them; picking an entry of another drawer shows that drawer. Letters match in order, word starts first; with an empty box, your recent picks come first.
 - **Profile settings** (in the profile menu, or Ctrl+K) edits the profile's name, accent, home and notes folder, keeping your YAML comments; Undo works. **Add a profile** makes a blank one or a copy of the current one's headings and workflow. **Remove** asks first and moves the file to the Trash; the last profile stays.
 - The selected entry and **Recent work** follow an entry you move or rename, in the app or by hand.
 - **Edit mode** (pencil):
@@ -164,6 +164,7 @@ You review code. Don't edit files.
 ### Drawers
 
 - A **drawer** is a nav of its own inside a profile: its own headings, entries, groups and projects, and a small logo. The button under the header row shows the drawer and switches between them; **New drawer…** and **Drawer settings…** are in its menu. The Context links live in the first drawer's page.
+- **The rail** on the right edge is the drawer's toolbox (part 12): **Files** and **Git** for the drawer's folder (once it has one), **Skills** and **MCP** (what claude loads there, and the drawer's MCP defaults), and **Settings** (the same form as Drawer settings…, in the main pane). Pages you add in a drawer go under `drawers/<Name>/` in the wiki, so a drawer is a workspace: its folder, its repository, its chapters.
 - The first **New drawer…** turns your headings into the first drawer, named after the profile (rename it in Drawer settings). Until then the file keeps `sections:` as it was.
 - The drawer you were in is remembered per profile in this browser. Back, Recent work and Ctrl+K bring an entry's drawer along.
 - **Logo:** **Choose picture…** in Drawer settings, or right-click a picture in the file browser and choose **Use as drawer logo**. Its middle is scaled to 64 × 64 and kept in `~/.config/workbench/logos/`. Without one, the drawer's initials on a tinted square.
@@ -264,9 +265,9 @@ You review code. Don't edit files.
   - **Local** (only you, in that folder),
   - **Managed** (`/etc/claude-code`),
   - or the **plugin** that brings it.
-- Two places show it, so you can keep the one you like:
-  - **The page** opens from the blocks button at the top of the sidebar. **For** picks Everywhere or one of the profile's projects.
-  - **The tab:** an item's **Claude setup** step (an older project has one after All files) shows what applies in its folder.
+- Two places show it:
+  - **The rail** on the right edge (part 12) has **Skills** and **MCP** for the drawer you're in: what claude loads in the drawer's folder (everywhere, when the drawer has no folder). The rail also has **Files** and **Git** for that folder and the drawer's **Settings**.
+  - **The tab:** an item's **Claude setup** step (an older project has one after All files) shows every kind, for its folder: skills, MCP servers, agents, commands, hooks and plugins.
 - **Overridden** items are dimmed and say what claude uses instead: a skill of the same name in a nearer scope, or a local MCP server over a project or user one. A skill also wins over a command of the same name.
 - **MCP servers** show their state:
   - **On**,
@@ -275,8 +276,8 @@ You review code. Don't edit files.
   - **Blocked** (managed policy),
   - **Broken**.
 - **Switches** turn MCP servers on and off, the way `/mcp` does: the folder's `disabledMcpServers` list in `~/.claude.json`, so the app and `/mcp` always agree.
-  - In a project (its tab, or the page's For), a switch acts in that folder. A folder inside a repository shares the repository's list, as in claude.
-  - On the page's **Everywhere**, a switch is the profile's default (`mcpOff:`): off turns it off now in every project of the profile, and the first chat the app starts in any other folder turns it off there too. Switch it back on in one project and it stays on there. On, everywhere, takes it out of `mcpOff:` and turns it on in every project.
+  - In a folder (a project's tab, or the rail of a drawer with a folder), a switch acts in that folder. A folder inside a repository shares the repository's list, as in claude.
+  - In the rail of a drawer **without a folder**, a switch is the drawer's default (`mcpOff:` on the drawer's page; on `index.md` for a profile without drawers): off turns it off now in every project of the drawer, and the first chat the app starts in any other folder of the drawer turns it off there too. Switch it back on in one project and it stays on there. On again takes it out of `mcpOff:` and turns it on in every project.
   - A plugin's details have **Turn all off** / **Turn all on** for its servers.
   - Servers that are off fold behind **N off · Show**. The filter still finds them.
   - New chats use the change. Running chats keep their servers until they restart (or use `/mcp` in them). Undo is in the toast.
@@ -454,4 +455,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
 | after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
 | 11 | The wiki: pages as configuration (done) |
+| 12 | Workspaces: the drawer rail, pinned skills, the chats dock (in progress) |
 | later | A Tauri window, if wanted |

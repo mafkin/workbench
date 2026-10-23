@@ -39,6 +39,7 @@ import {
   type NavItem,
   type Profile,
   type StepItem,
+  drawersOf,
 } from '../shared/config-schema.ts'
 
 /** Ops that change an item's steps: the first one on an older project seeds its steps. */
@@ -132,7 +133,8 @@ const ChatPatch = z.object({
   pinned: z.boolean().optional(),
 })
 const ChatRestart = z.object({ fresh: z.boolean().default(false) })
-const SetupQuery = z.object({ profile: z.string(), path: z.string().optional() })
+// Claude setup: a folder's, or (no path) a drawer's defaults.
+const SetupQuery = z.object({ profile: z.string(), path: z.string().optional(), drawer: z.coerce.number().int().nonnegative().optional() })
 // Git: every request names a project (its path as written in the config).
 const GitQuery = z.object({ profile: z.string(), path: z.string() })
 const GitHunk = z.object({ file: z.string().min(1), id: z.string().regex(/^[0-9a-f]{16}$/, 'Not a hunk') })
@@ -557,8 +559,8 @@ export async function buildServer(opts: ServerOptions) {
     const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
     if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
     if (program === 'shell') return { agent: program, args, agentProfile: null, bypass: false, context: false }
-    // The profile's MCP defaults, the first time a chat starts in this folder.
-    await mcpDefaults.apply(profile.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
+    // The drawer's MCP defaults, the first time a chat starts in this folder.
+    await mcpDefaults.apply(drawersOf(profile)[drawer]?.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
     const ctx = await context.chatContext(id)
     // The context folders, then the wiki (and the project's page), then the drawer's shared folders: one --add-dir, one --append-system-prompt.
     const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(mergeContext(ctx, await wikiContext(profile, home, page)), await drawerContext(profile, drawer, home)))
@@ -799,22 +801,31 @@ export async function buildServer(opts: ServerOptions) {
     return { folder, profile: p.profile, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
   }
 
-  /** The setup as the page shows it: everywhere, the profile's defaults are what the switches show. */
-  function withDefaults(setup: ClaudeSetup, profile: Profile, folder: string | null): ClaudeSetup {
-    const off = new Set(profile.mcpOff ?? [])
+  /** The setup as the rail shows it: without a folder, the drawer's defaults are what the switches show. */
+  function withDefaults(setup: ClaudeSetup, profile: Profile, folder: string | null, drawer: number): ClaudeSetup {
+    const off = new Set(drawersOf(profile)[drawer]?.mcpOff ?? [])
     if (!off.size) return setup
     const mcp = setup.mcp.map((m): McpEntry => {
       if (m.state !== 'on' || !off.has(m.key)) return m
-      if (folder) return { ...m, note: 'On here, though off by default in this profile' }
-      return { ...m, state: 'off', note: 'Off by default: turned off in each project before its first chat' }
+      if (folder) return { ...m, note: 'On here, though off by default in this drawer' }
+      return { ...m, state: 'off', note: 'Off by default: turned off in each project of the drawer before its first chat' }
     })
     return { ...setup, mcp }
+  }
+
+  /** The drawer a setup request is about: the one holding the folder (a project's, or a drawer's own), else the one named. */
+  const drawerFor = (profile: Profile, raw: string | undefined, drawer: number | undefined): number => {
+    if (raw) {
+      const own = drawersOf(profile).findIndex((d) => d.folder === raw)
+      return own >= 0 ? own : projectDrawer(profile, raw)
+    }
+    return drawer ?? 0
   }
 
   app.get('/api/claude/setup', async (req) => {
     const q = parse(SetupQuery, req.query)
     const { folder, read, profile } = await setupFor(q.profile, q.path)
-    return withDefaults(read.setup, profile, folder)
+    return withDefaults(read.setup, profile, folder, drawerFor(profile, q.path, q.drawer))
   })
 
   // Switch MCP servers off or on the way /mcp does, in one folder; or, with no
@@ -833,11 +844,16 @@ export async function buildServer(opts: ServerOptions) {
       await setFoldersOff(claudeJson(home), [await projectKey(folder)], b.keys, !b.on)
     } else {
       if (!b.rev) throw new StoreError('The profile’s rev is needed to change its defaults', 422)
-      rev = (await store.apply(b.profile, b.rev, [{ op: 'setMcpOff', names: b.keys, off: !b.on }])).rev
+      if (b.drawer === undefined) throw new StoreError('Say which drawer the defaults are for', 422)
+      const own = drawersOf(profile)[b.drawer]
+      if (!own) throw new StoreError(`Drawer ${b.drawer} does not exist`, 404)
+      rev = (await store.apply(b.profile, b.rev, [{ op: 'setMcpOff', drawer: b.drawer, names: b.keys, off: !b.on }])).rev
+      // Every project of the drawer, and the drawer's own folder.
+      const folders = walkItems(profile).flatMap(({ addr, item }) => ((addr.drawer ?? 0) === b.drawer && item.type === 'folder' && item.path ? [item.path] : []))
+      if (own.folder) folders.push(own.folder)
       const keys = new Set<string>()
-      for (const { item } of walkItems(profile)) {
-        if (item.type !== 'folder' || !item.path) continue
-        const dir = await chatFolder(profile, item.path, false)
+      for (const p of folders) {
+        const dir = await chatFolder(profile, p, false)
         if (await fs.promises.stat(dir).then((st) => st.isDirectory(), () => false)) keys.add(await projectKey(dir))
       }
       await setFoldersOff(claudeJson(home), [...keys], b.keys, !b.on)
@@ -845,7 +861,7 @@ export async function buildServer(opts: ServerOptions) {
       else await mcpDefaults.noteApplied([...keys], b.keys)
     }
     const fresh = await setupFor(b.profile, b.path)
-    return { setup: withDefaults(fresh.read.setup, fresh.profile, fresh.folder), ...(rev ? { rev } : {}) }
+    return { setup: withDefaults(fresh.read.setup, fresh.profile, fresh.folder, drawerFor(fresh.profile, b.path, b.drawer)), ...(rev ? { rev } : {}) }
   })
 
   app.get('/api/claude/doc', async (req) => {

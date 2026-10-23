@@ -229,6 +229,8 @@ export const Drawer = z.object({
   logo: z.string().trim().min(1).optional(),
   folder: z.string().trim().regex(/^(~|\/)/, 'A drawer folder must start with ~ or /').optional(),
   uses: z.array(z.string().trim().min(1)).optional(),
+  /** MCP servers (by their /mcp names) turned off in every project of this drawer before its first chat (part 12; was the profile's). */
+  mcpOff: z.array(z.string().trim().min(1)).optional(),
   sections: list(Section),
 })
 
@@ -362,7 +364,8 @@ export const Op = z.discriminatedUnion('op', [
   /** A category's colour in `categories:`; null goes back to the palette's pick. */
   z.object({ op: z.literal('setCategory'), name: z.string().trim().min(1), color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb').nullable() }),
   /** Add MCP servers to `mcpOff:` (off) or take them out. */
-  z.object({ op: z.literal('setMcpOff'), names: z.array(z.string().trim().min(1)).min(1), off: z.boolean() }),
+  /** A drawer's MCP defaults (index.md's for a profile without drawers). */
+  z.object({ op: z.literal('setMcpOff'), drawer: index.optional(), names: z.array(z.string().trim().min(1)).min(1), off: z.boolean() }),
   // Steps of the item at `at`. The first change to an item without `steps:`
   // writes `seed` (the tabs it showed, which the service works out) as its own.
   // A step on the item's own folder (files, git, setup) needs one: `folder`
@@ -449,7 +452,7 @@ export function itemKey(a: ItemAddr): string {
 /** The profile's drawers; without `drawers:`, one named after the profile holding its `sections:`. */
 export function drawersOf(profile: Profile): Drawer[] {
   if (profile.drawers?.length) return profile.drawers
-  return [{ name: profile.name, sections: profile.sections }]
+  return [{ name: profile.name, sections: profile.sections, ...(profile.mcpOff ? { mcpOff: profile.mcpOff } : {}) }]
 }
 
 /** A drawer's name as a folder name: "Game dev" → game-dev. */

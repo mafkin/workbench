@@ -159,15 +159,17 @@ export const sendToInbox = (profile: string, path: string) => api<{ path: string
 
 // Claude setup, masked. `folder` adds that folder's project and local items.
 const inFolder = (folder: string | null): Record<string, string> => (folder ? { path: folder } : {})
-export const claudeSetup = (profile: string, folder: string | null) => api<ClaudeSetup>(`/api/claude/setup?${query({ profile, ...inFolder(folder) })}`)
+export const claudeSetup = (profile: string, folder: string | null, drawer?: number) =>
+  api<ClaudeSetup>(`/api/claude/setup?${query({ profile, ...inFolder(folder), ...(drawer !== undefined ? { drawer: String(drawer) } : {}) })}`)
 export const claudeDoc = (profile: string, folder: string | null, id: string) =>
   api<{ body: string }>(`/api/claude/doc?${query({ profile, id, ...inFolder(folder) })}`)
 /** Start a server (or connect), list its tools and stop it. `confirm` for a project server claude has not approved. */
 export const checkMcp = (profile: string, folder: string | null, id: string, confirm = false) =>
   api<McpCheck>('/api/claude/check', { body: { profile, id, confirm, ...inFolder(folder) } })
 /** MCP servers (by their /mcp names) on or off in a folder, like /mcp; without a folder, the profile's defaults (needs its rev). */
-export const switchMcp = (profile: string, folder: string | null, keys: string[], on: boolean, rev?: string) =>
-  api<{ setup: ClaudeSetup; rev?: string }>('/api/claude/mcp', { body: { profile, keys, on, ...(folder ? { path: folder } : { rev }) } })
+/** In a folder, or (no folder) as the drawer's defaults, which need the profile's rev. */
+export const switchMcp = (profile: string, folder: string | null, keys: string[], on: boolean, rev?: string, drawer?: number) =>
+  api<{ setup: ClaudeSetup; rev?: string }>('/api/claude/mcp', { body: { profile, keys, on, drawer, ...(folder ? { path: folder } : { rev }) } })
 
 /** Make <notes or home>/drawers/<name> for a drawer; returns it for `folder:`. */
 export const drawerFolder = (profile: string, name: string) => api<{ folder: string }>('/api/drawers/folder', { body: { profile, name } })

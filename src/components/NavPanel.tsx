@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Blocks, BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
+import { BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, projectRef, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section,
   profileFile,
@@ -57,9 +57,6 @@ interface Props extends NavActions {
   onHome: () => void
   /** Open the theme and background panel. */
   onLook: () => void
-  /** Open the Claude setup page; `setupActive` while it shows. */
-  onSetup: () => void
-  setupActive: boolean
   onProfileSettings: () => void
   /** Profile settings with the add-profile form focused. */
   onAddProfile: () => void
@@ -165,7 +162,7 @@ function dropTarget(over: DropData, sections: Section[], drawer: number): { to: 
 }
 
 export function NavPanel(props: Props) {
-  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook, onSetup, setupActive } = props
+  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook } = props
   const profile = active.profile
   const drawers = profile ? drawersOf(profile) : []
   const drawer = Math.min(props.drawer, Math.max(0, drawers.length - 1))
@@ -274,9 +271,6 @@ export function NavPanel(props: Props) {
           </button>
           <button className={cx('icon-btn', props.serversActive && 'on')} onClick={props.onServers} title="Servers running in your projects" aria-label="Servers" aria-pressed={props.serversActive}>
             <Server size={13} />
-          </button>
-          <button className={cx('icon-btn', setupActive && 'on')} onClick={onSetup} title="Claude setup: skills, MCP servers, agents…" aria-label="Claude setup" aria-pressed={setupActive}>
-            <Blocks size={13} />
           </button>
           <button
             className={cx('icon-btn', editing && 'on')}

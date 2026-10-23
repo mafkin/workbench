@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -90,6 +91,17 @@ describe('drawers in the service', { timeout: 15_000 }, () => {
     // Research uses nothing: its own project gets only its own folder.
     const { body: lab } = await start({ drawer: 1, section: 0, index: 1 })
     await sees(lab.id, `"--add-dir","${path.join(home, 'notes')}","${path.join(home, 'shared/research')}","--session-id"`)
+  })
+
+  test('the git routes may open a drawer folder that is a repository', async () => {
+    const game = path.join(home, 'shared/game')
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: game, env: { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: '/dev/null' } })
+    const status = await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/shared/game')}`)
+    expect(status.status, JSON.stringify(status.body)).toBe(200)
+    expect(status.body.branch).toBe('main')
+    // A drawer folder outside a repository, and a folder that is no drawer's and no project's.
+    expect((await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/shared/research')}`)).status).toBe(404)
+    expect((await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/notes')}`)).status).toBe(404)
   })
 
   test('the file routes may open drawer folders', async () => {
