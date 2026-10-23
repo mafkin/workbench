@@ -44,6 +44,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 7 | Context folders | Done (same branch); see below |
 | 8 | Polish, the known gaps, Servers | Done (same branch); merged to `main` with parts 2–7 (PR #1) |
 | 9 | Git per project | Done; merged to `main`; see below |
+| 10 | Assets and media | Done (branch restarted from `main`); see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -241,11 +242,68 @@ The user asked: launchers in the sidebar started on a single click of their name
   - where `disabledMcpServers` is kept (read from `~/.claude.json` `projects[<folder>]`),
   - `.claude.json` inside `$CLAUDE_CONFIG_DIR` when that is set.
 - **Left for later:**
-  - Enabling or disabling things from the app.
+  - Enabling or disabling things from the app (MCP servers came later; see the next section).
   - Watching claude's files (there is a Refresh button instead).
   - Skills in nested folders below the project (claude loads them when it works there).
   - Skills, agents or MCP servers passed only on the command line (`--agents`, `--mcp-config`); agent profiles name the latter.
   - OAuth sign-in for remote servers (done in claude with `/mcp`).
+
+### MCP switches (after drawers, done)
+
+- **Why:** chats for Blender work or the game loaded Slack, Gmail and the other plugin servers. `/mcp`'s off list is per folder, so turning them off once didn't reach other projects.
+- **Decisions (2026-10-23):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Where a switch acts | Per folder, writing the same `disabledMcpServers` list as `/mcp`, so the app and `/mcp` agree |
+  | Defaults | Off by default per profile (`mcpOff:`). The first chat the app starts in a folder turns them off there, once, so one switched back on stays on |
+  | Hide | No separate Hide: servers that are off fold behind "N off · Show" |
+  | Extras | A plugin's servers all at once (its detail pane). Not chosen: Approve/Reject for project servers, whole plugins on/off |
+
+- **What claude does** (read from its binary, 2.x):
+  - `/mcp` toggles write `projects[<key>].disabledMcpServers` in `~/.claude.json`. Plugin servers are named `plugin:<plugin>:<name>`, others by name.
+  - `<key>` is the git root of the cwd (real path), else the cwd. `readSetup` used the folder itself before; it now uses `projectKey`.
+  - There is no `claude mcp enable/disable`.
+  - Spike on the desktop: a claude running in the folder saved its state after an outside write, and the outside change survived (claude checks the file's stats and re-reads it).
+- **Built:**
+  - `server/mcp-switch.ts`: `setFoldersOff`, which re-reads, changes only those lists, and writes atomically with the mode kept and claude's 2-space JSON. `McpDefaults` keeps the ledger (`mcp-defaults.json` in the state dir) of defaults already applied per folder.
+  - `POST /api/claude/mcp`: keys must be listed and switchable. With a folder, it switches that folder. Without one, it runs the `setMcpOff` op (rev-checked) and switches every project.
+  - `agentFor` applies the defaults before a claude chat starts.
+  - `McpEntry.key` and `fixed` (blocked, broken and overridden servers can't be switched).
+  - UI: the switch on rows and in the detail pane, the fold, the plugin buttons, and a toast with Undo.
+- **Left for later:** Approve/Reject for `.mcp.json` servers; whole plugins on/off (`enabledPlugins`); defaults for folders outside the app's chats (a claude started in a terminal in a new folder loads everything until a switch or an app chat runs there).
+
+### Items: blank entries built from removable steps (after MCP switches, done)
+
+- **Why:** "Creating an item should give a blank slate. An item can then have a file-browser, note, git-tree etc. Those steps should then be removable. Removing a step does not delete files permanently."
+- **Decisions (2026-10-23):**
+
+  | Question | Answer |
+  | --- | --- |
+  | Which entries | Every new nav entry is an item: no kind to pick |
+  | A new item shows | Nothing but an Add menu (File browser, Note, Git, Claude setup, More…); All files, Git and Claude setup are ordinary steps |
+  | Existing entries | Kept as they are, nothing rewritten; old projects keep their tabs until their first step change |
+  | `workflow:` | A template: Add profile steps / Save as profile steps |
+  | Folder | Optional; a File browser, Git or Claude setup step asks for one |
+  | One step | Full page, no tab row; the row shows from two tabs |
+  | Card | On every item |
+  | Removing | Only the tab; files stay, Undo in the toast |
+
+- **Built:**
+  - Schema: `type: item` is read as the one internal kind `folder` (a preprocess), and a line keeps its word on edit. `path` is optional. Step kinds `files`, `git`, `setup` (`FOLDER_STEPS`, `STEP_LABEL`). `legacySteps` gives an old project's tabs. `projectRef` (path, else `id:<id>`, else `label:<label>`) keys chats, saved tabs and pages. `itemBase` (folder, else the profile's home) is where relative step paths, launchers and chats start. `itemsWithFolder` is used by git and servers.
+  - Ops:
+    - `addItem` with `type: item` writes `steps: []` and, without a folder, an 8-character `id` (a letter first, so YAML never reads it as a number).
+    - The first step op on an old project writes `seed`, the tabs it showed. The client sends it, or the ops route works it out with Git only in a repository (`stepsFor`).
+    - `addStep` of a folder step takes `folder` for an item without one.
+    - `addWorkflow` replaced `resetSteps`, and `setWorkflow` keeps the item's own steps.
+  - UI:
+    - ProjectView takes its tabs only from steps, with an empty state, single-step pages, Remove tab (also Delete) and the profile-steps menu.
+    - ItemDialog has no kind picker for entries (Add item: label, optional folder, icon). The step dialog has the ten kinds and asks for the item's folder when needed.
+    - `resolveEntry` keeps an entry selected when only its folder changed.
+- **Left for later:**
+  - Nav icons: a folderless item still shows the folder icon unless it names one.
+  - Old entries can't be turned into items in the app.
+  - A shared entry finds a folderless original by its label alone.
 
 ### Part 7: Context folders (done)
 
@@ -344,6 +402,49 @@ The user asked: launchers in the sidebar started on a single click of their name
   - Untracked files are listed one by one (`--untracked-files=all`) in the tab; the nav's counts use `normal` (a new folder counts once) to stay cheap.
   - Discard's Undo is kept in memory for an hour; the content itself is a git object.
 - **Left for later:** rebase, cherry-pick, tags, submodules, force push, editing remotes, `git init` and clone, a branch graph, resolving conflicts inside the tab (ours/theirs per file).
+
+### Part 10: Assets and media (done)
+
+- **Decisions (2026-10-22):**
+
+  | Question | Answer |
+  | --- | --- |
+  | What part 10 is | Assets and media (over project tasks and logs, a tasks board, activity and time) |
+  | Where | A List / Gallery switch in every file browser, remembered per folder |
+  | Thumbnails | Workbench's own cache (`~/.cache/workbench`): made in the browser; `.blend` from the preview inside the file |
+  | 3D | A viewer for glTF/GLB, OBJ, FBX and STL (three.js, lazy) |
+  | Extras | All four: type filters and size slider; open with the right program; image info and compare; audio waveforms |
+
+- **Built:** `server/thumbs.ts`, `server/open-with.ts`, `server/programs.ts`; `Gallery.tsx`, `src/lib/thumbs.ts`, `ModelPreview.tsx`, `AudioPreview.tsx`, `ImageCompare.tsx`; `FileBrowser` and `FilePreview` changes; `openWith:` in the schema; folder tickets for 3D files.
+- **Choices made while building:**
+  - A subfolder takes its parent's view until it has its own (otherwise a gallery's subfolders opened as lists).
+  - The audio preview shows length and channels, not the sample rate: the browser resamples when decoding.
+  - Open with runs a profile rule even when its program isn't found (the error says so); the built-in rules apply only when Blender or Godot is installed.
+- **Left for later:** thumbnails for Godot scenes, TGA/EXR/PSD/DDS decoding, Draco glTF, animation playback in the viewer, a gallery step kind, and keeping the view choice in the YAML.
+
+### After part 10: profile menu and drawers (done)
+
+- **Spec (2026-10-23):** "Profile selection in to a menu selection" and "New project or subject selection that has its own structure", called a **drawer**: its own structure, its own little logo no bigger than the narrowest sidebar, its items shown when chosen, and material shared between drawers. Planned first, then a clickable prototype (<https://claude.ai/artifact/A9ZDGSRPGPC14dr5tT3gm4>), approved before building.
+- **Decisions:**
+
+  | Question | Answer |
+  | --- | --- |
+  | Profile button | Icon only: a person icon tinted with the accent; menu with the profiles (Ctrl+N), Profile settings…, Add profile… |
+  | What a drawer is | Its own nav inside a profile (headings, entries, groups, projects); Context stays on top |
+  | Where the picker sits | Where the profile tabs were: logo, name, menu (drawers, New drawer…, Drawer settings…) |
+  | Logo | A square picture scaled to 64×64 (22 px in the picker, 24 px in the menu); else initials on a tint |
+  | Sharing | Show an entry in other drawers (the same entry, marked); a shared folder per drawer, picked per drawer, used by others under a fixed Shared heading and given to chats with `--add-dir` |
+  | Per drawer | The last drawer per profile (localStorage); Ctrl+K searches every drawer. Recent work stays per profile |
+  | Defaults approved with the prototype | Without `drawers:` the file keeps `sections:` as its one drawer, moved into a first drawer named after the profile on the first drawer change; a shared entry lands under a heading of the same title (added if missing); the Shared heading lists the drawer's own folder too; deleting an original removes it everywhere after asking |
+
+- **Built:** `Drawer`, `SharedItem`, `drawer` in addresses (`d:s.i` keys past the first drawer), `drawersOf`/`entryAt`/`sharedRefs`/`walkItems` in the schema; ops `addDrawer`, `setDrawer`, `deleteDrawer`, `setShared` and drawer-aware section ops with cascades; `server/logos.ts`, `/api/logos`, `/api/drawers/folder`; `drawerContext` merged into chat args; `DrawerDialog.tsx` (lazy), `DrawerLogo.tsx`, `src/lib/logos.ts`; NavPanel's picker and `SharedBlock`.
+- **Choices made while building:**
+  - A shared entry opens under its own address (the nav highlight and drawer stay), while the page and its ops use the original's address.
+  - Entries can't be moved across drawers (the op refuses); Show in drawers is the way.
+  - Picking a drawer goes Home when the page showing is an entry of the drawer left; notes, folders and other pages stay.
+  - The one-click shared folder is made by the service from the drawer's name only (`<notes or home>/drawers/<slug>`).
+  - Logos are content-named PNGs; nothing prunes unused ones.
+- **Left for later (the user's other two sharing ideas):** a shared shelf heading shown in every drawer of a profile, and dragging entries onto a drawer in the picker (Ctrl to link instead of move). Also: reordering drawers in the app, and pruning unused logos.
 
 ## Reference
 

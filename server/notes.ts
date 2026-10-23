@@ -7,8 +7,10 @@ import { EventEmitter } from 'node:events'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import {
+  allSections,
   displayPath,
   NOTE_EXT,
+  itemBase,
   stepPath,
   stepsOf,
   type NavItem,
@@ -69,11 +71,11 @@ function noteEntries(profile: Profile): string[] {
       if (item.type === 'note') out.push(item.path)
       else if (item.type === 'group') visit(item.items)
       else if (item.type === 'folder') {
-        for (const step of stepsOf(profile, item)) if (step.type === 'note') out.push(stepPath(item.path, step.path))
+        for (const step of stepsOf(profile, item)) if (step.type === 'note') out.push(stepPath(itemBase(profile, item), step.path))
       }
     }
   }
-  for (const s of profile.sections) visit(s.items)
+  for (const s of allSections(profile)) visit(s.items)
   return out
 }
 

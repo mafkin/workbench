@@ -94,7 +94,7 @@ describe('agent profiles at chat start', { timeout: 15_000 }, () => {
   })
 
   test('chat steps and chat entries name their profile; an unknown name is refused', async () => {
-    expect((await start({ at: BETA, step: 0 })).body).toMatchObject({ agentProfile: 'Reviewer', slot: 'step:~/beta|review' })
+    expect((await start({ at: BETA, step: 2 })).body).toMatchObject({ agentProfile: 'Reviewer', slot: 'step:~/beta|review' })
     expect((await start({ at: { section: 0, index: 2 } })).body).toMatchObject({ agentProfile: 'Wild' })
     const unknown = await start<{ error: string }>({ at: ALPHA, agent: 'Nobody' })
     expect(unknown.status).toBe(422)

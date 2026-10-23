@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { closeChats, NOTES, PERSONAL_FILE, PORT, resetFixture } from './fixture.ts'
+import { closeChats, NOTES, PERSONAL_FILE, pickProfile, PORT, resetFixture } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -57,7 +57,7 @@ test('Set up context from the nav; its notes open in tabs', async ({ page }) => 
 })
 
 test('a profile without a notes folder gets one when context is set up', async ({ page }) => {
-  await page.getByRole('tab', { name: 'Personal' }).click()
+  await pickProfile(page, 'Personal')
   await context(page).getByRole('button', { name: 'Set up context in ~/notes' }).click()
   await expect(row(page, 'Inbox')).toBeVisible()
   expect(await fsp.readFile(PERSONAL_FILE, 'utf8')).toContain('notes: ~/notes')

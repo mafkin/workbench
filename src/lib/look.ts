@@ -1,10 +1,12 @@
 // What the rest of the UI can do with the profile's look: the file browser
-// offers "Use as background" on pictures.
+// offers "Use as background" and "Use as drawer logo" on pictures.
 import { createContext, useContext } from 'react'
 
 export interface LookApi {
   /** Copy a picture from the profile's folders and make it the background. */
   pictureFrom: (path: string) => void
+  /** Make a picture the shown drawer's logo (scaled to 64×64). */
+  logoFrom: (path: string) => void
 }
 
 export const LookCtx = createContext<LookApi | null>(null)

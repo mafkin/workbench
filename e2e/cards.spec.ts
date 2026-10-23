@@ -83,7 +83,8 @@ test("a project's right-click menu archives it, with Undo", async ({ page }) => 
 test('a report tab shows the HTML report with its own stylesheet, sandboxed', async ({ page }) => {
   await withProjects('        steps:\n          - { label: tests, type: report, path: reports/index.html }\n')
   await entry(page, 'Alpha').click()
-  await tabs(page).getByRole('tab', { name: 'tests' }).click()
+  // The only step fills the page: no tab row.
+  await expect(tabs(page)).toHaveCount(0)
   const frame = page.locator('.report-frame')
   await expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-popups allow-forms')
   const h1 = page.frameLocator('.report-frame').locator('h1')
@@ -93,7 +94,7 @@ test('a report tab shows the HTML report with its own stylesheet, sandboxed', as
 })
 
 test('a file tab shows one file large', async ({ page }) => {
-  await withProjects('        steps:\n          - { label: diagram, type: file, path: diagram.svg }\n')
+  await withProjects('        steps:\n          - { label: All files, type: files }\n          - { label: diagram, type: file, path: diagram.svg }\n')
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('tab', { name: 'diagram' }).click()
   const img = page.locator('.file-step-body img')
@@ -101,7 +102,7 @@ test('a file tab shows one file large', async ({ page }) => {
 })
 
 test('a link tab opens the browser and stays on the current tab', async ({ page }) => {
-  await withProjects('        steps:\n          - { label: board, type: link, url: "https://example.com/board" }\n')
+  await withProjects('        steps:\n          - { label: All files, type: files }\n          - { label: board, type: link, url: "https://example.com/board" }\n')
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('button', { name: 'board' }).click()
   await expect(page.locator('.toast')).toContainText('Opened board')
@@ -109,15 +110,16 @@ test('a link tab opens the browser and stays on the current tab', async ({ page 
   await expect(tabs(page).getByRole('tab', { name: 'All files' })).toHaveAttribute('aria-selected', 'true')
 })
 
-test('the entry dialog has no Project type; the step dialog offers six kinds', async ({ page }) => {
+test('a new entry is an item with no kind to pick; the step dialog offers every kind of step', async ({ page }) => {
   await page.getByRole('button', { name: 'Edit navigation' }).click()
   await page.getByRole('button', { name: 'Add entry to Tools' }).click()
-  const add = page.getByRole('form', { name: 'Add entry' })
-  await expect(add.getByRole('radio')).toHaveText(['Folder', 'Note', 'Daily', 'Chat', 'Link', 'Launcher', 'Group'])
+  const add = page.getByRole('form', { name: 'Add item' })
+  await expect(add.getByRole('radio')).toHaveCount(0)
+  await expect(add.getByLabel('Folder (optional)')).toBeVisible()
   await add.getByRole('button', { name: 'Cancel' }).click()
   await page.getByRole('button', { name: 'Edit navigation' }).click()
 
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('button', { name: 'Add step' }).click()
-  await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['Folder', 'Note', 'Report', 'File', 'Chat', 'Launcher', 'Link'])
+  await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['File browser', 'Folder', 'Note', 'Git', 'Claude setup', 'Report', 'File', 'Chat', 'Launcher', 'Link'])
 })

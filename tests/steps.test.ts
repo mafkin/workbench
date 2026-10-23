@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseDocument } from 'yaml'
 import { applyOps, OpError } from '../server/config-ops.ts'
 import { buildServer } from '../server/main.ts'
-import { categoryColor, chatName, entrySlot, folderRoots, NavItem, Profile, projectHost, stepEntry, stepPath, stepSlot, stepsOf, type Op } from '../shared/config-schema.ts'
+import { categoryColor, chatName, entrySlot, folderRoots, itemBase, NavItem, Profile, projectHost, projectRef, stepEntry, stepPath, stepSlot, stepsOf, type Op } from '../shared/config-schema.ts'
 
 const SOURCE = `# Personal
 name: Personal
@@ -44,8 +44,9 @@ const labels = (profile: Profile, index: number) => stepsOf(profile, profile.sec
 describe('steps in the schema', () => {
   const profile = Profile.parse(parseDocument(SOURCE).toJS())
 
-  it('uses the profile workflow unless the project has its own steps', () => {
-    expect(labels(profile, 0)).toEqual(['assets', 'modeling'])
+  it('an older project without steps: shows All files, Git in a repository, Claude setup and the workflow', () => {
+    expect(labels(profile, 0)).toEqual(['All files', 'Claude setup', 'assets', 'modeling'])
+    expect(stepsOf(profile, profile.sections[0].items[0], true).map((s) => s.type)).toEqual(['files', 'git', 'setup', 'folder', 'launch'])
     expect(labels(profile, 1)).toEqual(['rules'])
     expect(labels(profile, 2)).toEqual([])
   })
@@ -159,12 +160,18 @@ describe('category colours', () => {
 })
 
 describe('step ops', () => {
-  it('copies the workflow into a project on its first change, keeping comments', () => {
+  it('writes the tabs an older project showed on its first change, keeping comments', () => {
     const { text, profile } = run([{ op: 'addStep', at: tuohi, step: { label: 'design', type: 'note', path: 'docs/design.md' } }])
-    expect(labels(profile, 0)).toEqual(['assets', 'modeling', 'design'])
+    expect(labels(profile, 0)).toEqual(['All files', 'Claude setup', 'assets', 'modeling', 'design'])
     expect(profile.workflow.map((s) => s.label)).toEqual(['assets', 'modeling'])
     expect(text.match(/# textures and sprites/g)).toHaveLength(2)
     expect(text).toContain('# Every project starts with these')
+  })
+
+  it('uses the seed the service gives (Git in a repository) for that first change', () => {
+    const seed = stepsOf(Profile.parse(parseDocument(SOURCE).toJS()), { label: 'x', type: 'folder', path: '~/x' }, true)
+    const { profile } = run([{ op: 'deleteStep', at: tuohi, index: 2, seed }])
+    expect(labels(profile, 0)).toEqual(['All files', 'Git', 'assets', 'modeling'])
   })
 
   it('writes a new step on one line when the list is written that way', () => {
@@ -185,21 +192,24 @@ describe('step ops', () => {
   })
 
   it('removes and reorders steps', () => {
-    expect(labels(run([{ op: 'deleteStep', at: tuohi, index: 0 }]).profile, 0)).toEqual(['modeling'])
-    expect(labels(run([{ op: 'moveStep', at: tuohi, from: 1, to: 0 }]).profile, 0)).toEqual(['modeling', 'assets'])
+    expect(labels(run([{ op: 'deleteStep', at: wargame, index: 0 }]).profile, 1)).toEqual([])
+    const two = run([{ op: 'addStep', at: wargame, step: { label: 'Git', type: 'git' } }]).text
+    expect(labels(run([{ op: 'moveStep', at: wargame, from: 1, to: 0 }], two).profile, 1)).toEqual(['Git', 'rules'])
   })
 
-  it('resets a project to the profile workflow', () => {
-    const { text, profile } = run([{ op: 'resetSteps', at: wargame }])
-    expect(labels(profile, 1)).toEqual(['assets', 'modeling'])
-    expect(text).not.toContain('steps:')
+  it('adds the profile steps an item does not have yet', () => {
+    const { profile } = run([{ op: 'addWorkflow', at: wargame }])
+    expect(labels(profile, 1)).toEqual(['rules', 'assets', 'modeling'])
+    const again = run([{ op: 'addWorkflow', at: wargame }, { op: 'addWorkflow', at: wargame }])
+    expect(labels(again.profile, 1)).toEqual(['rules', 'assets', 'modeling'])
   })
 
-  it("makes a project's steps the profile workflow", () => {
-    const { profile } = run([{ op: 'setWorkflow', at: wargame }])
+  it("makes an item's steps the profile workflow; the item keeps its own", () => {
+    const { text, profile } = run([{ op: 'setWorkflow', at: wargame }])
     expect(profile.workflow.map((s) => s.label)).toEqual(['rules'])
-    expect(labels(profile, 0)).toEqual(['rules'])
+    expect(labels(profile, 0)).toEqual(['All files', 'Claude setup', 'rules'])
     expect(labels(profile, 1)).toEqual(['rules'])
+    expect(text).toContain('# my own')
   })
 
   it('creates the workflow before sections when the profile has none', () => {
@@ -212,18 +222,66 @@ describe('step ops', () => {
 
   it('works without a workflow to copy', () => {
     const source = SOURCE.replace(/# Every project starts with these\nworkflow:\n(  - .*\n)+/, '')
-    expect(labels(run([{ op: 'addStep', at: tuohi, step: { label: 'a', type: 'folder', path: 'a' } }], source).profile, 0)).toEqual(['a'])
+    expect(labels(run([{ op: 'addStep', at: tuohi, step: { label: 'a', type: 'folder', path: 'a' } }], source).profile, 0)).toEqual(['All files', 'Claude setup', 'a'])
   })
 
   it('refuses steps on other entries and other step types', () => {
     expect(() => run([{ op: 'addStep', at: { section: 0, index: 2 }, step: { label: 'a', type: 'folder', path: 'a' } }])).toThrow(OpError)
-    expect(() => run([{ op: 'addStep', at: tuohi, step: { label: 'a', type: 'daily' } }])).toThrow(/A step is a folder, note, report, file, launcher or link/)
+    expect(() => run([{ op: 'addStep', at: tuohi, step: { label: 'a', type: 'daily' } }])).toThrow(/A step is a file browser, folder, note, Git/)
     expect(() => run([{ op: 'deleteStep', at: tuohi, index: 5 }])).toThrow(/Step 5 does not exist/)
   })
 
   it('keeps steps when the entry itself is edited', () => {
     const { profile } = run([{ op: 'updateItem', at: wargame, item: { label: 'War game', type: 'folder', path: '~/wargame' } }])
     expect(labels(profile, 1)).toEqual(['rules'])
+  })
+})
+
+describe('blank items', () => {
+  const blank = { section: 0, index: 3 }
+  const withItem = (text = SOURCE) => run([{ op: 'addItem', to: { section: 0 }, item: { label: 'Ideas', type: 'item' } }], text)
+
+  it('a new item is written as type: item with no steps, and an id when it has no folder', () => {
+    const { text, profile } = withItem()
+    const item = profile.sections[0].items[3]
+    expect(item).toMatchObject({ label: 'Ideas', type: 'folder', steps: [] })
+    expect(item.type === 'folder' && item.path).toBeUndefined()
+    expect(item.id).toMatch(/^i[0-9a-f]{7}$/)
+    expect(text).toMatch(/- label: Ideas\n\s+type: item\n\s+id: i[0-9a-f]{7}\n\s+steps: \[\]/)
+    expect(projectRef(item as { label: string })).toBe(`id:${item.id}`)
+    expect(itemBase(profile, item as { path?: string })).toBe('~')
+    // No folder: not a browse root; chats and keys still work.
+    expect(folderRoots(profile).map((r) => r.label)).not.toContain('Ideas')
+    expect(projectHost(projectRef(item as { label: string }))).toBe(`project:id:${item.id}`)
+  })
+
+  it('a new item with a folder has no id; type: folder and type: item read alike', () => {
+    const { profile } = run([{ op: 'addItem', to: { section: 0 }, item: { label: 'Game', type: 'item', path: '~/game' } }])
+    expect(profile.sections[0].items[3]).toEqual({ label: 'Game', type: 'folder', path: '~/game', steps: [] })
+    expect(NavItem.parse({ label: 'A', type: 'item' })).toEqual({ label: 'A', type: 'folder' })
+  })
+
+  it('a note step needs no folder; a file browser, Git or Claude setup step gives the item its folder', () => {
+    const { text } = withItem()
+    const noted = run([{ op: 'addStep', at: blank, step: { label: 'ideas', type: 'note', path: '~/notes/ideas.md' } }], text)
+    expect(labels(noted.profile, 3)).toEqual(['ideas'])
+    expect(() => run([{ op: 'addStep', at: blank, step: { label: 'Git', type: 'git' } }], noted.text)).toThrow(/no folder yet/)
+    const git = run([{ op: 'addStep', at: blank, step: { label: 'Git', type: 'git' }, folder: '~/ideas' }], noted.text)
+    expect(git.profile.sections[0].items[3]).toMatchObject({ path: '~/ideas' })
+    expect(git.text).toMatch(/type: item\n\s+path: ~\/ideas\n/)
+    expect(labels(git.profile, 3)).toEqual(['ideas', 'Git'])
+  })
+
+  it('removing every step leaves a blank item, not the profile steps', () => {
+    const { text } = withItem()
+    const one = run([{ op: 'addStep', at: blank, step: { label: 'n', type: 'note', path: '~/n.md' } }], text)
+    expect(labels(run([{ op: 'deleteStep', at: blank, index: 0 }], one.text).profile, 3)).toEqual([])
+  })
+
+  it('editing an item keeps the word its line has', () => {
+    const { text } = withItem()
+    expect(run([{ op: 'updateItem', at: blank, item: { label: 'Ideas 2', type: 'folder' } }], text).text).toContain('type: item')
+    expect(run([{ op: 'updateItem', at: tuohi, item: { label: 'Tuohi', type: 'folder', path: '~/Projects/tuohi' } }]).text).toMatch(/label: Tuohi\n\s+type: folder/)
   })
 })
 
@@ -263,6 +321,7 @@ sections:
   - title: P
     items:
       - { label: Proj, type: folder, path: ~/proj }
+      - { label: Loose, type: item, id: abc12345, steps: [{ label: build, type: launch, command: make }] }
 `,
     )
     spawned = []
@@ -274,23 +333,30 @@ sections:
     await fsp.rm(dir, { recursive: true, force: true })
   })
 
-  const open = async (step?: number) => {
+  const open = async (step?: number, index = 0) => {
     const rev = (await server.app.inject({ method: 'GET', url: '/api/state', headers })).json().profiles[0].rev
-    return server.app.inject({ method: 'POST', url: '/api/open', headers, payload: { profile: 'work', rev, at: { section: 0, index: 0 }, step } })
+    return server.app.inject({ method: 'POST', url: '/api/open', headers, payload: { profile: 'work', rev, at: { section: 0, index }, step } })
   }
 
+  // Proj has no steps: of its own: All files and Claude setup (no repository) come before the workflow.
   it('opens a link step in the browser, by address', async () => {
-    expect((await open(3)).statusCode).toBe(200)
+    expect((await open(5)).statusCode).toBe(200)
     expect(spawned).toEqual([{ command: 'xdg-open', args: ['https://example.com/board'], cwd: undefined }])
   })
 
   it('does not open report or file steps outside the app', async () => {
-    expect((await open(4)).statusCode).toBe(422)
+    expect((await open(6)).statusCode).toBe(422)
   })
 
   it('starts a launcher step in the project folder, by address', async () => {
-    expect((await open(2)).statusCode).toBe(200)
+    expect((await open(4)).statusCode).toBe(200)
     expect(spawned).toEqual([{ command: 'blender', args: ['models/main.blend'], cwd: path.join(home, 'proj') }])
+  })
+
+  it('an item without a folder runs its launchers in home, and has nothing to open in Files', async () => {
+    expect((await open(0, 1)).statusCode).toBe(200)
+    expect(spawned).toEqual([{ command: 'make', args: [], cwd: home }])
+    expect((await open(undefined, 1)).statusCode).toBe(422)
   })
 
   it('reports a step that does not exist', async () => {

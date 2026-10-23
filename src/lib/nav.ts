@@ -1,17 +1,19 @@
-import { getItem, type ContextFolder, type ItemAddr, type ItemType, type ListAddr, type NavItem, type Profile, type StepItem } from '../../shared/config-schema.ts'
+import { getItem, sectionsOf, walkItems, type ContextFolder, type ItemAddr, type ItemType, type ListAddr, type NavItem, type Profile, type SharedItem, type StepItem } from '../../shared/config-schema.ts'
 
 export const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(' ')
 
+/** An address from its key (`itemKey`): `s.i`, `s.g.i`, or either with `d:` in front for a later drawer. */
 export function parseKey(key: string | undefined): ItemAddr | null {
-  if (!key) return null
-  const parts = key.split('.').map(Number)
-  if (parts.some((n) => !Number.isInteger(n) || n < 0)) return null
-  if (parts.length === 2) return { section: parts[0], index: parts[1] }
-  if (parts.length === 3) return { section: parts[0], group: parts[1], index: parts[2] }
-  return null
+  const m = key?.match(/^(?:(\d+):)?(\d+(?:\.\d+){1,2})$/)
+  if (!m) return null
+  const drawer = m[1] ? Number(m[1]) : 0
+  const parts = m[2].split('.').map(Number)
+  const at = drawer ? { drawer } : {}
+  if (parts.length === 2) return { ...at, section: parts[0], index: parts[1] }
+  return { ...at, section: parts[0], group: parts[1], index: parts[2] }
 }
 
-export const sameList = (a: ListAddr, b: ListAddr) => a.section === b.section && a.group === b.group
+export const sameList = (a: ListAddr, b: ListAddr) => (a.drawer ?? 0) === (b.drawer ?? 0) && a.section === b.section && a.group === b.group
 
 /** What an entry does when clicked outside edit mode. */
 export const opensExternally = (item: NavItem) => item.type === 'link' || item.type === 'launch'
@@ -19,6 +21,7 @@ export const opensExternally = (item: NavItem) => item.type === 'link' || item.t
 export function describeTarget(item: NavItem): string {
   switch (item.type) {
     case 'folder':
+      return item.path ?? 'An item without a folder'
     case 'note':
       return item.path
     case 'daily':
@@ -31,6 +34,8 @@ export function describeTarget(item: NavItem): string {
       return [item.command, ...item.args].join(' ')
     case 'group':
       return `${item.items.length} entries`
+    case 'shared':
+      return `From ${item.drawer}`
   }
 }
 
@@ -38,8 +43,13 @@ export type DialogState =
   | { mode: 'add'; list: ListAddr; index?: number; context: string; presetType?: ItemType }
   | { mode: 'edit'; at: ItemAddr; item: NavItem; context: string }
   | { mode: 'note'; list: ListAddr; context: string }
-  /** Add a workflow step to the project at `at`, or edit step `index`; `base` is the project folder. */
-  | { mode: 'step'; at: ItemAddr; index?: number; item?: StepItem; context: string; base: string }
+  /**
+   * Add a step to the item at `at`, or edit step `index`; `base` is the folder its
+   * relative paths start from. `seed` is what an older project shows until it has
+   * steps of its own; `needsFolder` asks for the item's folder (it has none) when
+   * the step shows it. `presetType` picks the kind.
+   */
+  | { mode: 'step'; at: ItemAddr; index?: number; item?: StepItem; context: string; base: string; seed?: StepItem[]; needsFolder?: boolean; presetType?: StepItem['type'] }
 
 /**
  * What the main pane shows: a nav entry, a note opened by path (a link or a
@@ -47,7 +57,8 @@ export type DialogState =
  * a chat whose project or entry is gone, the Claude setup page, or a context folder.
  */
 export type Selection =
-  | { kind: 'entry'; addr: ItemAddr; item: NavItem }
+  /** `addr` is where it is in the nav; `item` and `origin` are the original a shared entry stands for (else the same). */
+  | { kind: 'entry'; addr: ItemAddr; item: NavItem; origin: ItemAddr; shared?: SharedItem }
   | { kind: 'note'; path: string }
   | { kind: 'files'; path: string }
   | { kind: 'chat'; id: string }
@@ -71,16 +82,10 @@ export function entryId(item: NavItem): string {
   return `${item.type}|${item.label}|${'path' in item ? (item.path ?? '') : ''}`
 }
 
-/** Every entry with its address, groups' children included. */
-function allEntries(profile: Profile): { addr: ItemAddr; item: NavItem }[] {
-  const out: { addr: ItemAddr; item: NavItem }[] = []
-  for (const [si, section] of profile.sections.entries()) {
-    for (const [i, item] of section.items.entries()) {
-      out.push({ addr: { section: si, index: i }, item })
-      if (item.type === 'group') for (const [ci, child] of item.items.entries()) out.push({ addr: { section: si, group: i, index: ci }, item: child })
-    }
-  }
-  return out
+/** Every entry with its address, groups' children included; those of drawer `first` come first. */
+function allEntries(profile: Profile, first = 0): { addr: ItemAddr; item: NavItem }[] {
+  const all = walkItems(profile)
+  return [...all.filter((e) => (e.addr.drawer ?? 0) === first), ...all.filter((e) => (e.addr.drawer ?? 0) !== first)]
 }
 
 /**
@@ -93,30 +98,24 @@ export function resolveEntry(profile: Profile, key: string, id?: string): ItemAd
   const item = addr ? getItem(profile, addr) : undefined
   if (!id) return addr && item ? addr : null
   if (addr && item && entryId(item) === id) return addr
-  const all = allEntries(profile)
+  // Moved: look in its own drawer first.
+  const all = allEntries(profile, addr?.drawer ?? 0)
   const same = all.find((e) => entryId(e.item) === id)
   if (same) return same.addr
-  const [type, , path] = id.split('|')
+  const [type, label, path] = id.split('|')
   const renamed = path ? all.find((e) => e.item.type === type && 'path' in e.item && e.item.path === path) : undefined
-  return renamed?.addr ?? null
+  if (renamed) return renamed.addr
+  // Still in its place with its name: only its folder changed (an item given one).
+  return addr && item && item.type === type && item.label === label ? addr : null
 }
 
-/** The first entry of a type that matches, searching headings and groups. */
-export function findEntry(profile: Profile, type: ItemType, matches: (item: NavItem) => boolean = () => true): ItemAddr | null {
-  for (const [si, section] of profile.sections.entries()) {
-    for (const [i, item] of section.items.entries()) {
-      if (item.type === type && matches(item)) return { section: si, index: i }
-      if (item.type !== 'group') continue
-      for (const [ci, child] of item.items.entries()) {
-        if (child.type === type && matches(child)) return { section: si, group: i, index: ci }
-      }
-    }
-  }
-  return null
+/** The first entry of a type that matches, searching headings and groups, drawer `first` before the others. */
+export function findEntry(profile: Profile, type: ItemType, matches: (item: NavItem) => boolean = () => true, first = 0): ItemAddr | null {
+  return allEntries(profile, first).find((e) => e.item.type === type && matches(e.item))?.addr ?? null
 }
 
 export function listLength(profile: Profile, list: ListAddr): number {
-  const items = profile.sections[list.section]?.items ?? []
+  const items = sectionsOf(profile, list.drawer)[list.section]?.items ?? []
   if (list.group === undefined) return items.length
   const group = items[list.group]
   return group?.type === 'group' ? group.items.length : 0
@@ -129,6 +128,9 @@ export interface MenuEntry {
   detail?: string
   danger?: boolean
   disabled?: boolean
+  /** A choice (`radio`, one of several) or a toggle (`checkbox`); `checked` shows a tick. */
+  kind?: 'radio' | 'checkbox'
+  checked?: boolean
   run: () => void
 }
 

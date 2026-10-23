@@ -194,14 +194,15 @@ export class Files extends EventEmitter {
   /**
    * A short-lived URL for an image, PDF, video or audio file. Media elements
    * cannot send the X-Workbench header, so the app asks for this with it.
-   * With `folder`, an HTML report gets a URL whose folder serves the files next
-   * to it (its CSS, scripts and images), and nothing outside that folder.
+   * With `folder`, an HTML report or a 3D model gets a URL whose folder serves
+   * the files next to it (its CSS, scripts and images; a glTF's .bin and
+   * textures, an OBJ's .mtl), and nothing outside that folder.
    */
   async ticket(id: string, raw: string, opts: { folder?: boolean } = {}): Promise<{ url: string }> {
     const { real, display } = await this.#resolve(id, raw)
     const type = MEDIA_TYPES[path.extname(real).toLowerCase()]
-    if (opts.folder ? !/\.html?$/i.test(real) : !type) {
-      throw new StoreError(opts.folder ? 'Only an HTML report opens with its folder' : 'No preview for this type of file', 415)
+    if (opts.folder ? !/\.(html?|gltf|glb|obj|fbx|stl)$/i.test(real) : !type) {
+      throw new StoreError(opts.folder ? 'Only an HTML report or a 3D model opens with its folder' : 'No preview for this type of file', 415)
     }
     if (!(await fsp.stat(real).catch(() => null))?.isFile()) throw new StoreError('Not found', 404)
     const now = this.#now()
@@ -439,6 +440,11 @@ export class Files extends EventEmitter {
   }
 
   /** A path to read: symlinks followed, and it must be one of the profile's folders or inside one. */
+  /** A path inside the profile's folders, resolved through symlinks (thumbnails, Open with). */
+  resolve(id: string, raw: string): Promise<{ real: string; display: string }> {
+    return this.#resolve(id, raw)
+  }
+
   async #resolve(id: string, raw: string): Promise<{ real: string; display: string }> {
     const profile = this.#profile(id)
     const lexical = absPath(raw, this.home)

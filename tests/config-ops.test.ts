@@ -265,7 +265,7 @@ describe('project cards', () => {
   it('validates the value and the entry', () => {
     expect(() => run([{ op: 'setCard', at, field: 'status', value: 'someday' }])).toThrow(/status/)
     expect(() => run([{ op: 'setCard', at, field: 'pinned', value: 'yes' }])).toThrow(OpError)
-    expect(() => run([{ op: 'setCard', at: { section: 0, index: 1 }, field: 'status', value: 'done' }])).toThrow(/folder/)
+    expect(() => run([{ op: 'setCard', at: { section: 0, index: 1 }, field: 'status', value: 'done' }])).toThrow(/Only items/)
   })
 
   it('keeps card fields when the entry is edited in the dialog', () => {

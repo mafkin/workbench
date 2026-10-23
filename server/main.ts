@@ -2,6 +2,7 @@
 // Listens on loopback only; see guard.ts for who may call it.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,11 +17,16 @@ import {
   CHAT_COLORS,
   chatName,
   chatProgram,
+  displayPath,
   entrySlot,
   expandHome,
   FileOp,
   findAgent,
+  Drawer,
+  drawerSlug,
+  entryAt,
   getItem,
+  walkItems,
   isReservedAgent,
   ItemAddr,
   Op,
@@ -29,22 +35,34 @@ import {
   stepEntry,
   stepSlot,
   stepsOf,
+  itemBase,
+  projectRef,
+  type NavItem,
   type Profile,
+  type StepItem,
 } from '../shared/config-schema.ts'
+
+/** Ops that change an item's steps: the first one on an older project seeds its steps. */
+const STEP_OPS = new Set(['addStep', 'updateStep', 'deleteStep', 'moveStep', 'addWorkflow', 'setWorkflow'])
 import { agentArgs, claudeAgents } from './agents.ts'
 import { Backgrounds } from './backgrounds.ts'
+import { Logos } from './logos.ts'
 import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
-import { frontmatter, readSetup } from './claude-setup.ts'
+import { claudeJson, frontmatter, projectKey, readSetup } from './claude-setup.ts'
+import type { ClaudeSetup, McpEntry } from '../shared/claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { applyOps, describeIssue } from './config-ops.ts'
 import { ConfigStore, StoreError } from './config-store.ts'
-import { Context } from './context.ts'
+import { Context, drawerContext, mergeContext } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { Git, type Repo } from './git.ts'
+import { openProgram } from './open-with.ts'
+import { Thumbs } from './thumbs.ts'
 import { makeGuard } from './guard.ts'
-import { LaunchError, openItem, runToExit } from './launch.ts'
+import { LaunchError, openItem, runDetached, runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
+import { McpDefaults, setFoldersOff } from './mcp-switch.ts'
 import { projectDates } from './project-dates.ts'
 import { Servers } from './servers.ts'
 import { Notes, type NoteEvent } from './notes.ts'
@@ -74,6 +92,8 @@ export interface ServerOptions {
   mcpTimeoutMs?: number
   /** How often the active profile's repositories are fetched; 0 for never (tests). */
   gitFetchEveryMs?: number
+  /** Where gallery thumbnails are cached; defaults to ~/.cache/workbench/thumbs. */
+  thumbsDir?: string
 }
 
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
@@ -89,6 +109,7 @@ const FileOpBody = z.object({ profile: z.string(), op: FileOp })
 const StopServer = z.object({ profile: z.string(), pid: z.int().positive(), port: z.int().min(1).max(65535) })
 const FindQuery = z.object({ profile: z.string(), path: z.string(), q: z.string().default(''), hidden: z.string().optional() })
 const UploadQuery = z.object({ profile: z.string(), dir: z.string(), name: z.string() })
+const DrawerFolder = z.object({ profile: z.string(), name: Drawer.shape.name })
 const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.boolean().optional() })
 const ChatStart = z.object({
   profile: z.string(),
@@ -138,6 +159,8 @@ const GitLog = GitQuery.extend({ skip: z.coerce.number().int().nonnegative().def
 const GitShow = GitQuery.extend({ hash: z.string().regex(/^[0-9a-f]{4,64}$/, 'Not a commit'), file: z.string().optional() })
 const DocQuery = SetupQuery.extend({ id: z.string() })
 const CheckBody = SetupQuery.extend({ id: z.string(), confirm: z.boolean().optional() })
+// MCP servers on or off: by their /mcp names, in a folder, or (no path) as the profile's defaults.
+const McpSwitch = SetupQuery.extend({ keys: z.array(z.string().min(1)).min(1).max(500), on: z.boolean(), rev: z.string().optional() })
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body)
@@ -148,6 +171,11 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 export function defaultConfigDir(): string {
   if (process.env.WORKBENCH_CONFIG_DIR) return process.env.WORKBENCH_CONFIG_DIR
   const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config')
+  return path.join(base, 'workbench')
+}
+
+export function defaultCacheDir(): string {
+  const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache')
   return path.join(base, 'workbench')
 }
 
@@ -166,10 +194,14 @@ export async function buildServer(opts: ServerOptions) {
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
   const files = new Files(store, home, { spawn: opts.spawn })
+  const thumbs = new Thumbs(opts.thumbsDir ?? path.join(defaultCacheDir(), 'thumbs'))
   const backgrounds = new Backgrounds(path.join(opts.configDir, 'backgrounds'), store, home)
+  const logos = new Logos(path.join(opts.configDir, 'logos'))
   const context = new Context(store, home)
   const servers = new Servers(store, home)
-  const chats = new Chats({ stateDir: opts.stateDir ?? path.join(opts.configDir, 'state'), home, commands: opts.chatCommands, ...opts.chatTiming })
+  const stateDir = opts.stateDir ?? path.join(opts.configDir, 'state')
+  const chats = new Chats({ stateDir, home, commands: opts.chatCommands, ...opts.chatTiming })
+  const mcpDefaults = new McpDefaults({ stateDir, claudeJson: claudeJson(home) })
   await chats.init()
   const git = new Git(store, home, {
     spawn: opts.spawn,
@@ -217,6 +249,8 @@ export async function buildServer(opts: ServerOptions) {
 
   // Uploads arrive as raw bytes; the route streams them to disk (and counts them) itself.
   app.addContentTypeParser('application/octet-stream', (_req, payload, done) => done(null, payload))
+  // Thumbnails the gallery made, as bytes (checked again in Thumbs.put).
+  app.addContentTypeParser(['image/webp', 'image/png'], { parseAs: 'buffer', bodyLimit: 600 * 1024 }, (_req, body, done) => done(null, body))
 
   app.get('/api/health', async () => ({ ok: true }))
 
@@ -224,16 +258,30 @@ export async function buildServer(opts: ServerOptions) {
 
   app.post<{ Params: { id: string } }>('/api/profiles/:id/ops', async (req) => {
     const { rev, ops } = parse(OpsBody, req.body)
-    // A chat step's chat is found by its label: a rename moves the chat with it.
     const before = store.profile(req.params.id).profile
-    const renames = ops.flatMap((op) => {
-      if (op.op !== 'updateStep' || !before) return []
-      const project = getItem(before, op.at)
-      const old = project?.type === 'folder' ? stepsOf(before, project)[op.index] : undefined
-      return project?.type === 'folder' && old?.type === 'chat' && old.label !== op.step.label ? [{ from: stepSlot(project.path, old.label), to: stepSlot(project.path, String(op.step.label)) }] : []
-    })
+    // An older project without `steps:` gets the tabs it showed as its own on its first step change.
+    if (before) {
+      for (const op of ops) {
+        if (!('at' in op) || !STEP_OPS.has(op.op) || 'seed' in op) continue
+        const item = getItem(before, op.at)
+        if (item?.type === 'folder' && !item.steps) Object.assign(op, { seed: await stepsFor(req.params.id, before, item) })
+      }
+    }
+    // A chat step's chat is found by its label: a rename moves the chat with it.
+    const renames = before
+      ? await Promise.all(
+          ops.map(async (op) => {
+            if (op.op !== 'updateStep') return null
+            const project = getItem(before, op.at)
+            if (project?.type !== 'folder') return null
+            const old = (await stepsFor(req.params.id, before, project))[op.index]
+            const ref = projectRef(project)
+            return old?.type === 'chat' && old.label !== op.step.label ? { from: stepSlot(ref, old.label), to: stepSlot(ref, String(op.step.label)) } : null
+          }),
+        )
+      : []
     const result = await store.apply(req.params.id, rev, ops)
-    for (const r of renames) chats.moveSlot(req.params.id, r.from, r.to)
+    for (const r of renames) if (r) chats.moveSlot(req.params.id, r.from, r.to)
     return result
   })
 
@@ -278,15 +326,16 @@ export async function buildServer(opts: ServerOptions) {
     const { profile: id, rev, at, step } = parse(OpenBody, req.body)
     const p = store.profile(id)
     if (p.rev !== rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
-    const item = getItem(p.profile, at)
+    // A shared entry opens its original.
+    const item = entryAt(p.profile, at)?.item
     if (!item) throw new StoreError('No such entry', 404)
     if (step === undefined) {
       await openItem(item, home, opts.spawn)
       return { ok: true }
     }
-    const s = stepsOf(p.profile, item)[step]
+    const s = item.type === 'folder' ? (await stepsFor(id, p.profile, item))[step] : undefined
     if (!s || item.type !== 'folder') throw new StoreError('No such step', 404)
-    const entry = stepEntry(item.path, s)
+    const entry = stepEntry(itemBase(p.profile, item), s)
     if (entry.type !== 'launch' && entry.type !== 'link') throw new StoreError('This step opens in its tab', 422)
     await openItem(entry, home, opts.spawn)
     return { ok: true }
@@ -374,6 +423,48 @@ export async function buildServer(opts: ServerOptions) {
     return { ok: true }
   })
 
+  // Gallery thumbnails: the cached one, a .blend's own preview, or what the
+  // browser should make one from. The browser's thumbnail is stored under the
+  // file as it is now; only files of the profile's folders.
+  app.get('/api/thumbs', async (req, reply) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    const { real } = await files.resolve(profile, p)
+    const got = await thumbs.get(real, (x) => displayPath(x, home))
+    if ('data' in got) return reply.type(got.type).header('cache-control', 'no-store').send(got.data)
+    return reply.code(404).send({ error: 'No thumbnail yet', ...got })
+  })
+  app.put('/api/thumbs', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    if (!Buffer.isBuffer(req.body)) throw new StoreError('Send the thumbnail as image/webp or image/png', 415)
+    const { real } = await files.resolve(profile, p)
+    await thumbs.put(real, req.body)
+    return { ok: true }
+  })
+
+  // Open with: the program a file opens in, from the profile's openWith: or the
+  // built-in ones (Blender, Godot). The request names only the file.
+  app.get('/api/files/open-with', async (req) => {
+    const { profile: id, path: p } = parse(PathQuery, req.query)
+    const prof = store.profile(id)
+    if (!prof.profile) throw new StoreError('The profile file is broken', 423)
+    const { real } = await files.resolve(id, p)
+    return { label: (await openProgram(prof.profile, real, home))?.label ?? null }
+  })
+  app.post('/api/files/open-with', async (req) => {
+    const { profile: id, path: p } = parse(PathQuery, req.body)
+    const prof = store.profile(id)
+    if (!prof.profile) throw new StoreError('The profile file is broken', 423)
+    const { real } = await files.resolve(id, p)
+    const program = await openProgram(prof.profile, real, home)
+    if (!program) throw new StoreError('No program is set up for this kind of file', 422)
+    try {
+      await runDetached({ command: program.command, args: program.args, cwd: program.cwd }, opts.spawn)
+    } catch (err) {
+      throw new StoreError((err as Error).message, 422)
+    }
+    return { label: program.label }
+  })
+
   // Media and HTML reports for previews. <video>, <audio>, the PDF viewer and iframes
   // cannot send X-Workbench, so they use a ticket the app asked for with it; the Host
   // and Origin checks still apply. A report's scripts run in a sandbox without our
@@ -412,6 +503,28 @@ export async function buildServer(opts: ServerOptions) {
     return { ok: true }
   })
 
+  // Drawer logos: 64×64 PNGs the browser made, named by their content.
+  app.put('/api/logos', async (req) => {
+    if (!Buffer.isBuffer(req.body)) throw new StoreError('A logo must be a PNG', 415)
+    return logos.put(req.body)
+  })
+
+  app.get<{ Params: { name: string } }>('/api/logos/:name', async (req, reply) => {
+    const body = await logos.read(req.params.name)
+    return reply.header('content-type', 'image/png').header('x-content-type-options', 'nosniff').header('cache-control', 'max-age=31536000, immutable').send(body)
+  })
+
+  // A drawer's shared folder in one click: <notes or home>/drawers/<name>, made
+  // here; the UI then sets `folder:` (with Undo). Only the name comes from the request.
+  app.post('/api/drawers/folder', async (req) => {
+    const b = parse(DrawerFolder, req.body)
+    const profile = store.profile(b.profile).profile
+    if (!profile) throw new StoreError('The profile is not loaded', 404)
+    const folder = `${(profile.notes ?? profile.home ?? '~').replace(/\/+$/, '')}/drawers/${drawerSlug(b.name)}`
+    await fsp.mkdir(absPath(folder, home), { recursive: true })
+    return { folder }
+  })
+
   // Chats: started from an entry or step in the config, by address; a request
   // never carries a command or arguments.
   async function chatFolder(profile: Profile, raw: string, confine: boolean): Promise<string> {
@@ -427,38 +540,56 @@ export async function buildServer(opts: ServerOptions) {
   app.get('/api/chats/token', async () => ({ token: ptyToken }))
 
   /** What a chat's `agent:` starts: the shell, plain claude, or claude with an agent profile's flags. */
-  /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up. */
-  async function agentFor(id: string, profile: Profile, name: string | undefined, cwd: string, args: string[]) {
+  /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up, and its drawer's shared folders. */
+  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[]) {
     const program = name && isReservedAgent(name) ? chatProgram(name) : 'claude'
     const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
     if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
     if (program === 'shell') return { agent: program, args, agentProfile: null, bypass: false, context: false }
+    // The profile's MCP defaults, the first time a chat starts in this folder.
+    await mcpDefaults.apply(profile.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
     const ctx = await context.chatContext(id)
-    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, ctx)
+    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(ctx, await drawerContext(profile, drawer, home)))
     return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
+  }
+
+  /** The drawer holding a project (its folder entry), for its chats' shared folders. */
+  const projectDrawer = (profile: Profile, projectPath: string) =>
+    walkItems(profile).find((e) => e.item.type === 'folder' && e.item.path === projectPath)?.addr.drawer ?? 0
+
+  /** An item's steps; an older project's include Git only when its folder is in a repository, as its page shows them. */
+  async function stepsFor(profileId: string, profile: Profile, item: NavItem): Promise<StepItem[]> {
+    if (item.type !== 'folder' || item.steps) return stepsOf(profile, item)
+    const repo = item.path ? !!(await git.repo(profileId, item.path).catch(() => null)) : false
+    return stepsOf(profile, item, repo)
   }
 
   app.post('/api/chats', async (req) => {
     const body = parse(ChatStart, req.body)
     const p = store.profile(body.profile)
     if (p.rev !== body.rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
-    const item = getItem(p.profile, body.at)
-    if (!item) throw new StoreError('No such entry', 404)
+    // A shared entry starts its original's chat; the chat gets the shared folders of the drawer holding the original.
+    const found = entryAt(p.profile, body.at)
+    if (!found) throw new StoreError('No such entry', 404)
+    const { item } = found
+    const drawer = found.addr.drawer ?? 0
     let spec: ChatSpec
     if (item.type === 'chat') {
       const slot = entrySlot(item)
       const cwd = await chatFolder(p.profile, item.path ?? '~', false)
-      spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, item.agent, cwd, item.args)) }
+      spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, drawer, item.agent, cwd, item.args)) }
     } else if (item.type === 'folder' && body.step !== undefined) {
-      const step = stepsOf(p.profile, item)[body.step]
+      const step = (await stepsFor(body.profile, p.profile, item))[body.step]
       if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
-      const entry = stepEntry(item.path, step) as typeof step
-      const cwd = await chatFolder(p.profile, entry.path ?? item.path, false)
-      spec = { profile: body.profile, host: projectHost(item.path), slot: stepSlot(item.path, step.label), cwd, ...(await agentFor(body.profile, p.profile, step.agent, cwd, step.args)) }
+      const base = itemBase(p.profile, item)
+      const entry = stepEntry(base, step) as typeof step
+      const cwd = await chatFolder(p.profile, entry.path ?? base, false)
+      const ref = projectRef(item)
+      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args)) }
     } else if (item.type === 'folder') {
-      const cwd = body.path === undefined ? await chatFolder(p.profile, item.path, false) : await chatFolder(p.profile, body.path, true)
+      const cwd = body.path === undefined ? await chatFolder(p.profile, itemBase(p.profile, item), false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(item.path), slot: null, cwd, ...(await agentFor(body.profile, p.profile, body.agent ?? item.agent, cwd, [])) }
+      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [])) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -634,7 +765,7 @@ export async function buildServer(opts: ServerOptions) {
       `This repository has merge conflicts from ${what}. Resolve the conflicts in ${files.join(', ')}` +
       ` (paths from the repository's top folder${s.sub ? `; this chat runs in ${s.sub}` : ''}): keep what both sides meant,` +
       ` remove the conflict markers, and say what you chose. Don't stage, commit or abort; I'll mark the files resolved myself.`
-    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, r.project.agent, r.dir, [])) }
+    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [])) }
     return chats.start({ ...spec, prompt, label: 'Conflicts' })
   })
 
@@ -653,12 +784,56 @@ export async function buildServer(opts: ServerOptions) {
     const p = store.profile(id)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
     const folder = raw ? await chatFolder(p.profile, raw, true) : null
-    return { folder, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
+    return { folder, profile: p.profile, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
+  }
+
+  /** The setup as the page shows it: everywhere, the profile's defaults are what the switches show. */
+  function withDefaults(setup: ClaudeSetup, profile: Profile, folder: string | null): ClaudeSetup {
+    const off = new Set(profile.mcpOff ?? [])
+    if (!off.size) return setup
+    const mcp = setup.mcp.map((m): McpEntry => {
+      if (m.state !== 'on' || !off.has(m.key)) return m
+      if (folder) return { ...m, note: 'On here, though off by default in this profile' }
+      return { ...m, state: 'off', note: 'Off by default: turned off in each project before its first chat' }
+    })
+    return { ...setup, mcp }
   }
 
   app.get('/api/claude/setup', async (req) => {
     const q = parse(SetupQuery, req.query)
-    return (await setupFor(q.profile, q.path)).read.setup
+    const { folder, read, profile } = await setupFor(q.profile, q.path)
+    return withDefaults(read.setup, profile, folder)
+  })
+
+  // Switch MCP servers off or on the way /mcp does, in one folder; or, with no
+  // folder, as the profile's defaults, which also switches every project now.
+  // Only names the setup lists (and that can be switched) are accepted.
+  app.post('/api/claude/mcp', async (req) => {
+    const b = parse(McpSwitch, req.body)
+    const { folder, read, profile } = await setupFor(b.profile, b.path)
+    for (const key of b.keys) {
+      const listed = read.setup.mcp.filter((m) => m.key === key)
+      if (!listed.length) throw new StoreError(`No MCP server ${key} here`, 422)
+      if (listed.every((m) => m.fixed)) throw new StoreError(`${key}: ${listed[0].fixed}`, 422)
+    }
+    let rev: string | undefined
+    if (folder) {
+      await setFoldersOff(claudeJson(home), [await projectKey(folder)], b.keys, !b.on)
+    } else {
+      if (!b.rev) throw new StoreError('The profile’s rev is needed to change its defaults', 422)
+      rev = (await store.apply(b.profile, b.rev, [{ op: 'setMcpOff', names: b.keys, off: !b.on }])).rev
+      const keys = new Set<string>()
+      for (const { item } of walkItems(profile)) {
+        if (item.type !== 'folder' || !item.path) continue
+        const dir = await chatFolder(profile, item.path, false)
+        if (await fs.promises.stat(dir).then((st) => st.isDirectory(), () => false)) keys.add(await projectKey(dir))
+      }
+      await setFoldersOff(claudeJson(home), [...keys], b.keys, !b.on)
+      if (b.on) await mcpDefaults.forget(b.keys)
+      else await mcpDefaults.noteApplied([...keys], b.keys)
+    }
+    const fresh = await setupFor(b.profile, b.path)
+    return { setup: withDefaults(fresh.read.setup, fresh.profile, fresh.folder), ...(rev ? { rev } : {}) }
   })
 
   app.get('/api/claude/doc', async (req) => {

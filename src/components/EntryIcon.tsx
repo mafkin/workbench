@@ -1,8 +1,8 @@
-import { CalendarDays, File, FileChartColumn, FileText, Folder, FolderTree, Link2, Play, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { ArrowLeftRight, Blocks, CalendarDays, File, FileChartColumn, FileText, Folder, FolderOpen, FolderTree, GitBranch, Link2, Play, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { DynamicIcon, iconNames, type IconName } from 'lucide-react/dynamic.mjs'
 import type { Agent, AnyType } from '../../shared/config-schema.ts'
 
-// Nav entry types, and the step-only report and file.
+// Nav entry types, and the step-only kinds (report, file, and the item's own files, Git and Claude setup).
 export const TYPE_ICON: Record<AnyType, LucideIcon> = {
   folder: Folder,
   note: FileText,
@@ -13,6 +13,10 @@ export const TYPE_ICON: Record<AnyType, LucideIcon> = {
   link: Link2,
   launch: Play,
   group: FolderTree,
+  shared: ArrowLeftRight,
+  files: FolderOpen,
+  git: GitBranch,
+  setup: Blocks,
 }
 
 export const TYPE_LABEL: Record<AnyType, string> = {
@@ -25,6 +29,10 @@ export const TYPE_LABEL: Record<AnyType, string> = {
   link: 'Link',
   launch: 'Launcher',
   group: 'Group',
+  shared: 'Shared',
+  files: 'File browser',
+  git: 'Git',
+  setup: 'Claude setup',
 }
 
 const known = new Set<string>(iconNames)

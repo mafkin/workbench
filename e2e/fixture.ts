@@ -2,9 +2,12 @@
 import { execFileSync } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import type { Page } from '@playwright/test'
 
 export const PORT = 7431
 export const DIR = path.resolve(import.meta.dirname, '.tmp-config')
+/** The gallery's thumbnail cache (cleared with each reset); outside the config folder, as ~/.cache is. */
+export const THUMBS = path.resolve(import.meta.dirname, '.tmp-thumbs')
 export const HOME = path.join(DIR, 'home')
 export const SPAWN_LOG = path.join(DIR, 'spawned.log')
 export const WORK_FILE = path.join(DIR, 'profiles/work.yaml')
@@ -152,7 +155,9 @@ export async function resetFixture() {
   await fsp.rm(HOME, { recursive: true, force: true })
   await fsp.rm(TRASH, { recursive: true, force: true })
   await fsp.rm(path.join(DIR, 'backgrounds'), { recursive: true, force: true })
+  await fsp.rm(path.join(DIR, 'logos'), { recursive: true, force: true })
   await fsp.rm(MANAGED, { recursive: true, force: true })
+  await fsp.rm(THUMBS, { recursive: true, force: true })
   await fsp.mkdir(ALPHA, { recursive: true })
   for (const [rel, data] of Object.entries(ALPHA_FILES)) {
     await fsp.mkdir(path.dirname(path.join(ALPHA, rel)), { recursive: true })
@@ -225,4 +230,17 @@ export async function closeChats() {
       await fetch(`http://127.0.0.1:${PORT}/api/chats/${chat.id}`, { method: 'DELETE', headers })
     }
   }
+}
+
+/** The profile button in the nav header and its menu. */
+export const profileButton = (page: Page) => page.getByRole('button', { name: 'Profile', exact: true })
+
+export async function profileMenu(page: Page, item: string) {
+  await profileButton(page).click()
+  await page.getByRole('menu').getByRole('menuitem', { name: item }).click()
+}
+
+export async function pickProfile(page: Page, name: string) {
+  await profileButton(page).click()
+  await page.getByRole('menu').getByRole('menuitemradio', { name }).click()
 }

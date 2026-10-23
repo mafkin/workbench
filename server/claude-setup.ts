@@ -290,9 +290,23 @@ async function projectDirs(folder: string, home: string): Promise<string[]> {
   }
 }
 
-const findProject = (projects: unknown, folder: string): Json | undefined => {
+/**
+ * The key claude files a folder's state under in `~/.claude.json` `projects`:
+ * the repository's top folder when the folder is inside one, else the folder (real paths).
+ */
+export async function projectKey(folder: string): Promise<string> {
+  const real = await fsp.realpath(folder).catch(() => path.resolve(folder))
+  for (let cur = real; ; ) {
+    if ((await fsp.stat(path.join(cur, '.git')).catch(() => null)) !== null) return cur
+    const parent = path.dirname(cur)
+    if (parent === cur) return real
+    cur = parent
+  }
+}
+
+const findProject = (projects: unknown, key: string): Json | undefined => {
   if (!isObj(projects)) return undefined
-  const v = projects[folder] ?? projects[folder.replace(/\/+$/, '')]
+  const v = projects[key]
   return isObj(v) ? v : undefined
 }
 
@@ -324,7 +338,7 @@ export async function readSetup(opts: SetupOptions): Promise<SetupRead> {
 
   const globalFile = opts.globalFile ?? claudeJson(home)
   const global = (await r.json(globalFile)) ?? {}
-  const projectState = folder ? findProject(global.projects, folder) : undefined
+  const projectState = folder ? findProject(global.projects, await projectKey(folder)) : undefined
 
   // Plugins: on or off by enabledPlugins, the last settings file that names one deciding.
   const enabled = new Map<string, { on: boolean; file: string }>()
@@ -573,11 +587,14 @@ export async function readSetup(opts: SetupOptions): Promise<SetupRead> {
       else set('pending', 'Not approved yet: claude asks before it starts this one')
     }
     const id = `mcp:${def.scope}:${def.plugin ?? ''}:${def.name}`
+    const key = def.plugin ? `plugin:${def.plugin}:${def.name}` : def.name
+    const fixed: Partial<Record<McpState, string>> = { blocked: 'Blocked by policy', broken: 'Not a usable entry', overridden: 'A nearer server of the same name is used instead' }
     const words: Partial<Record<McpState, string>> = { off: 'off', blocked: 'blocked', broken: 'not a usable entry', overridden: 'overridden, so claude does not start it' }
     const uncheckable = words[state] ? `It is ${words[state]}` : transport === 'ws' ? 'ws servers cannot be checked here' : undefined
     const entry: McpEntry = {
       id,
       name: def.name,
+      key,
       scope: def.scope,
       ...(def.plugin ? { plugin: def.plugin } : {}),
       transport,
@@ -591,6 +608,7 @@ export async function readSetup(opts: SetupOptions): Promise<SetupRead> {
       ...(note ? { note } : {}),
       ...(uncheckable ? { uncheckable } : {}),
       ...(state === 'pending' ? { confirm: true } : {}),
+      ...(fixed[state] ? { fixed: fixed[state] } : {}),
     }
     mcp.push(entry)
     r.servers.set(id, { entry, config: c, ...(def.pluginRoot ? { pluginRoot: def.pluginRoot } : {}) })

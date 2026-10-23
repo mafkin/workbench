@@ -3,7 +3,7 @@
 // servers a project declares (`servers:`), which show "down" when nothing
 // answers. Each gets an HTTP check. Stopping one re-checks all of that first.
 import fsp from 'node:fs/promises'
-import { displayPath, type NavItem, type Profile, type ProjectServers, type ServerHealth, type ServerRow, type ServersScan } from '../shared/config-schema.ts'
+import { displayPath, itemsWithFolder, type ProjectServers, type ServerHealth, type ServerRow, type ServersScan } from '../shared/config-schema.ts'
 import { StoreError, type ConfigStore } from './config-store.ts'
 import { absPath, realish, within } from './paths.ts'
 import { Procfs } from './procfs.ts'
@@ -35,23 +35,14 @@ const portOf = (url: string) => {
   }
 }
 
-function projectsOf(profile: Profile): Extract<NavItem, { type: 'folder' }>[] {
-  const out: Extract<NavItem, { type: 'folder' }>[] = []
-  for (const section of profile.sections) {
-    for (const item of section.items) {
-      if (item.type === 'folder') out.push(item)
-      if (item.type === 'group') for (const child of item.items) if (child.type === 'folder') out.push(child)
-    }
-  }
-  return out
-}
+const projectsOf = itemsWithFolder
 
 export class Servers {
   #store: ConfigStore
   #home: string
   #proc: Procfs
   #cacheMs: number
-  #cache = new Map<string, { at: number; scan: Promise<ServersScan> }>()
+  #cache = new Map<string, { at: number; rev: string; scan: Promise<ServersScan> }>()
 
   constructor(store: ConfigStore, home: string, opts: ServersOptions = {}) {
     this.#store = store
@@ -61,10 +52,12 @@ export class Servers {
   }
 
   scan(id: string): Promise<ServersScan> {
+    // A scan of the profile as it was before an edit lists the old projects.
+    const rev = this.#store.profile(id).rev
     const hit = this.#cache.get(id)
-    if (hit && Date.now() - hit.at < this.#cacheMs) return hit.scan
+    if (hit && hit.rev === rev && Date.now() - hit.at < this.#cacheMs) return hit.scan
     const scan = this.#scan(id)
-    this.#cache.set(id, { at: Date.now(), scan })
+    this.#cache.set(id, { at: Date.now(), rev, scan })
     scan.catch(() => this.#cache.delete(id))
     return scan
   }

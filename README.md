@@ -51,12 +51,16 @@ theme: fjord                    # slate (default) | fjord | moss | ember | dusk 
 background: theme               # theme (default) | none | a picture in ~/.config/workbench/backgrounds/
 home: ~/Documents/work
 notes: ~/Documents/work/notes   # new notes, daily notes, search and [[wiki links]]
-workflow:                       # the steps every project (folder entry) starts with
-  - { label: assets, type: folder, path: assets }                                  # paths are inside the project
+workflow:                       # profile steps: a template (Add profile steps), and the tabs of older projects without steps:
+  - { label: assets, type: folder, path: assets }                                  # paths are inside the item's folder
   - { label: modeling, type: launch, command: blender, args: [models/main.blend] }  # runs in the project folder
   - { label: design, type: note, path: docs/design.md }
   - { label: agent, type: chat }                                                   # claude in the project folder
   - { label: shell, type: chat, agent: shell, path: src }                          # your login shell, in src/
+openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
+  - { ext: [kra], command: krita }                                       # args default to ["{file}"]
+  - { ext: [tscn, gd], command: godot, args: [--editor, --path, "{godot}"] }  # {file}, {dir}, {godot}: the project folder
+mcpOff: [plugin:productivity:slack, plugin:product-management:gmail]   # MCP servers off by default (names as /mcp writes them)
 categories:                     # optional colours for project categories
   game: "#8fa58a"
 agents:                         # agent profiles: how claude starts when you pick one
@@ -77,6 +81,12 @@ sections:
     collapsed: false
     items:
       - { label: IFC Checker, type: folder, path: ~/ifc_checker_project }
+      - label: Ideas board      # a new entry: an item, blank until you add steps
+        type: item
+        id: i3f9c2a1            # an item without a folder gets an id (written by the app)
+        steps:
+          - { label: ideas, type: note, path: ~/notes/ideas.md }
+          - { label: board, type: link, url: "https://example.com/b" }
       - label: Tuohi
         type: folder
         path: ~/Projects/tuohi
@@ -88,7 +98,10 @@ sections:
         servers:                # optional: servers to check even when they're not running
           - { name: web, port: 5173 }
           - { name: api, url: "http://127.0.0.1:9000/health" }
-        steps:                  # this project's own steps instead of the workflow
+        steps:                  # its tabs, in order (without steps: an older project shows All files, Git, Claude setup and the workflow)
+          - { label: All files, type: files }        # the item's folder in the file browser
+          - { label: Git, type: git }                # its repository
+          - { label: Claude setup, type: setup }     # what claude loads there
           - { label: sprites, type: folder, path: assets/sprites }
           - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
           - { label: tests, type: report, path: reports/index.html }   # an HTML page shown in the tab
@@ -110,11 +123,31 @@ sections:
 
 Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://lucide.dev/icons). Keys the app doesn't know about are kept.
 
+A profile can hold several **drawers**, each a nav of its own. Then `drawers:` takes the place of `sections:` (a file has one or the other):
+
+```yaml
+drawers:
+  - name: Game dev
+    logo: 3fa2c19e04b1.png        # a 64×64 PNG in ~/.config/workbench/logos/ (set from the app)
+    folder: ~/notes/drawers/game-dev   # its shared folder
+    uses: [Research]              # drawers whose shared folders it uses; unknown names are ignored
+    sections:
+      - title: Projects
+        items:
+          - { label: Tower, type: folder, path: ~/dev/tower }
+  - name: Research
+    sections:
+      - title: Projects
+        items:
+          # Tower from Game dev, shown here too: found by drawer, label and path
+          - { label: Tower, type: shared, drawer: Game dev, path: ~/dev/tower }
+```
+
 ## Using it
 
-- **Ctrl+1 / Ctrl+2** (and on, in profile order) switch profiles. **Esc** leaves edit mode.
-- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Claude setup, Servers), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile). Letters match in order, word starts first; with an empty box, your recent picks come first.
-- **Profile settings** (the sliders button on the profile switcher, or Ctrl+K) edits the profile's name, accent, home and notes folder, keeping your YAML comments; Undo works. **Add a profile** makes a blank one or a copy of the current one's headings and workflow. **Remove** asks first and moves the file to the Trash; the last profile stays.
+- **Profiles:** the person icon at the top of the sidebar lists them, with Profile settings… and Add profile…. **Ctrl+1 / Ctrl+2** (and on, in profile order) switch profiles. **Esc** leaves edit mode.
+- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Claude setup, Servers), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile or a drawer, New drawer…, Drawer settings…). With several drawers it searches all of them; picking an entry of another drawer shows that drawer. Letters match in order, word starts first; with an empty box, your recent picks come first.
+- **Profile settings** (in the profile menu, or Ctrl+K) edits the profile's name, accent, home and notes folder, keeping your YAML comments; Undo works. **Add a profile** makes a blank one or a copy of the current one's headings and workflow. **Remove** asks first and moves the file to the Trash; the last profile stays.
 - The selected entry and **Recent work** follow an entry you move or rename, in the app or by hand.
 - **Edit mode** (pencil):
   - Drag headings and entries to reorder them, or move entries between headings and groups.
@@ -125,6 +158,16 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - **Alt+←** or the back arrow in the top bar goes back to the previous page.
 - **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
 
+### Drawers
+
+- A **drawer** is a nav of its own inside a profile: its own headings, entries, groups and projects, and a small logo. The button under the header row shows the drawer and switches between them; **New drawer…** and **Drawer settings…** are in its menu. Context stays at the top of every drawer.
+- The first **New drawer…** turns your headings into the first drawer, named after the profile (rename it in Drawer settings). Until then the file keeps `sections:` as it was.
+- The drawer you were in is remembered per profile in this browser. Back, Recent work and Ctrl+K bring an entry's drawer along.
+- **Logo:** **Choose picture…** in Drawer settings, or right-click a picture in the file browser and choose **Use as drawer logo**. Its middle is scaled to 64 × 64 and kept in `~/.config/workbench/logos/`. Without one, the drawer's initials on a tinted square.
+- **Show in drawers:** right-click an entry and tick **Show in <drawer>**. The same entry shows there too, under a heading of the same name, marked ⇄ with its own drawer; it opens the same page, chats and all. Renaming the original updates it; deleting the original asks first and removes it everywhere (Undo brings it back). Right-click a shared entry for **Go to <drawer>** or **Remove from this drawer**.
+- **Shared folder:** a drawer can have a folder of its own (Drawer settings offers `<notes>/drawers/<name>` in one click) and use other drawers' folders. They're listed under a fixed **Shared** heading, open in the file browser, and claude chats started in the drawer can read them (`--add-dir`, with a line in the system prompt). A project's chats get the folders of the drawer it lives in.
+- Entries move between headings within their drawer only.
+
 ### Themes and backgrounds
 
 - The palette button at the top of the sidebar opens **Theme and background** for the current profile. Work and Personal each have their own; the accent colour stays the profile's.
@@ -132,9 +175,14 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - **Background:** the theme's own, **None** (the flat look, panels edge to edge), or your own picture. Add one by path in the panel, or right-click a picture in the file browser and choose **Use as background**. Workbench keeps a copy in `~/.config/workbench/backgrounds/` (jpg, png, webp, avif or gif, up to 25 MB), so it still works if you move the original; the × on a picture in the panel deletes the copy.
 - Choices are written to the profile's YAML (`theme:`, `background:`) at once, with Undo in the toast.
 
-### Projects: cards and workflow steps
+### Items: cards and steps
 
-- A **folder** entry is a project. The top of its page is its card:
+- **Add entry…** makes an **item**: a name, and optionally a folder. It starts blank, with buttons for **File browser**, **Note**, **Git**, **Claude setup** and **More…** (every kind of step). You add what it needs, and each step is a tab.
+  - An item with one step shows it on the whole page, without a tab row; **+** by the title adds the next one. From two tabs on (steps or chats) the tab row is back.
+  - File browser, Git and Claude setup show the item's folder. An item without one asks for it the first time you add one of these, and keeps it.
+  - **Remove tab** (right-click a tab, or Delete on it) takes away only the tab. Its folder or file stays on disk, and the toast has Undo. With no steps left the item is blank again.
+  - Entries made before items (folders, notes, launchers, links, chats, daily) keep working as they are. A `type: folder` entry is an item too.
+- The top of an item's page is its card:
   - a **category** chip (pick one or make a new one),
   - a **status** (active, paused, done, archived),
   - a **pin**,
@@ -142,14 +190,16 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 - **Under the description:** when the folder was created and last updated (the last commit in a git repository, else the newest file), and how many servers are running there.
 - **Categories** get colours from the category menu (**Colour of …**: a palette or any colour), saved in `categories:`.
 - **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, mark it or archive it.
-- Below the card is a row of tabs: **All files** (the project folder), then the project's workflow steps.
+- Below the card are its steps:
+  - **File browser** (`files`), **Git** (`git`) and **Claude setup** (`setup`) show the item's folder, its repository and what claude loads there.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
   - A **note** step shows the note in place, with Edit and autosave.
   - A **report** step shows an HTML page (a test or analysis report) with its own styles and scripts. It runs in a sandbox, cut off from Workbench.
   - A **file** step shows one image, PDF, video or text file large.
-  - A **launcher** step starts its program in the project folder, and a **link** step opens its address in your browser.
-- Steps are yours to name: **+** adds one (paths are inside the project). Right-click a tab to edit or remove it, and drag tabs to reorder them.
-- Every project starts with the profile's `workflow:` steps. Changing a project's steps gives it its own `steps:`. From the right-click menu, **Use these steps for every project** makes them the `workflow:`, and **Reset to profile steps** goes back to it.
+  - A **launcher** step starts its program in the item's folder (or home), and a **link** step opens its address in your browser.
+- Steps are yours to name: **+** adds one (relative paths are inside the item's folder, else home). Right-click a tab to edit or remove it, and drag tabs to reorder them.
+- The profile's `workflow:` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, and **Save as profile steps** makes this item's steps the template.
+- An older project without `steps:` shows All files, Git (in a repository), Claude setup and the workflow. Its first step change writes those tabs as its own `steps:`.
 - Note steps also count as notes, so they show up in search and wiki links.
 
 ### Chats
@@ -204,7 +254,7 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
 
 ### Claude setup
 
-- **Claude setup** shows what claude loads, read-only: **skills**, **MCP servers**, **agents**, **commands**, **hooks** and **plugins**. Each item has a badge for where it comes from:
+- **Claude setup** shows what claude loads: **skills**, **MCP servers**, **agents**, **commands**, **hooks** and **plugins**. Only MCP servers can be changed here (switched on or off); the rest is read-only. Each item has a badge for where it comes from:
   - **Yours** (`~/.claude`, `~/.claude.json`),
   - **Project** (the folder's `.claude/`, `.mcp.json`),
   - **Local** (only you, in that folder),
@@ -212,7 +262,7 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
   - or the **plugin** that brings it.
 - Two places show it, so you can keep the one you like:
   - **The page** opens from the blocks button at the top of the sidebar. **For** picks Everywhere or one of the profile's projects.
-  - **The tab:** every project has a **Claude setup** tab after All files, with what applies in its folder.
+  - **The tab:** an item's **Claude setup** step (an older project has one after All files) shows what applies in its folder.
 - **Overridden** items are dimmed and say what claude uses instead: a skill of the same name in a nearer scope, or a local MCP server over a project or user one. A skill also wins over a command of the same name.
 - **MCP servers** show their state:
   - **On**,
@@ -220,6 +270,12 @@ Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://
   - **Not approved** (a project server claude will ask about),
   - **Blocked** (managed policy),
   - **Broken**.
+- **Switches** turn MCP servers on and off, the way `/mcp` does: the folder's `disabledMcpServers` list in `~/.claude.json`, so the app and `/mcp` always agree.
+  - In a project (its tab, or the page's For), a switch acts in that folder. A folder inside a repository shares the repository's list, as in claude.
+  - On the page's **Everywhere**, a switch is the profile's default (`mcpOff:`): off turns it off now in every project of the profile, and the first chat the app starts in any other folder turns it off there too. Switch it back on in one project and it stays on there. On, everywhere, takes it out of `mcpOff:` and turns it on in every project.
+  - A plugin's details have **Turn all off** / **Turn all on** for its servers.
+  - Servers that are off fold behind **N off · Show**. The filter still finds them.
+  - New chats use the change. Running chats keep their servers until they restart (or use `/mcp` in them). Undo is in the toast.
 - **Check** on a server tests it: Workbench starts it (or connects), asks for its tools, and stops it again. The tools and their descriptions are listed, or the error with the end of the server's log. **Check all** checks every server that is on.
   - A server that wants a sign-in says so; signing in is done in claude (`/mcp`).
   - A project server that claude hasn't approved asks before it runs.
@@ -238,7 +294,7 @@ The **Servers** page (the stacked-boxes button in the nav header, or Ctrl+K) sho
 
 ### Git
 
-A project in a git repository (or in a folder of one) gets a **Git** tab after All files, with its count of changed files.
+An item's **Git** step shows its folder's repository, with its count of changed files. An older project in a git repository (or in a folder of one) has one after All files.
 
 - **Changes:** staged files and changes (new files included), each with Stage, Unstage and Discard. Space stages the selected file; **Stage all**, **Unstage all** and **Discard all** do the whole list.
 - **The diff** of the selected file is on the right. Each hunk has **Stage hunk**, **Unstage hunk** or **Discard hunk**, so you can commit part of a file.
@@ -276,7 +332,7 @@ A project in a git repository (or in a folder of one) gets a **Git** tab after A
 
 ### Files
 
-- A project's **All files** and folder-step tabs show a file browser: a tree with sizes and dates, and a preview of the selected file on the right.
+- An item's **File browser** (All files) and folder steps show a file browser: a tree with sizes and dates, and a preview of the selected file on the right.
 - Click the arrow to expand a folder in place; **double-click** (or **Enter**) to make it the top. The path bar jumps back up, and so does **Backspace** or **Alt+←**.
 - **Filter by name** narrows the tree to matching names in the folders you have open; **Search all folders** looks through the closed ones too. Click a column header to sort.
 - Dotfiles are hidden; **Ctrl+H** shows them. In a git repository, files `.gitignore` excludes (`node_modules`, `dist`, logs) are shown dimmed.
@@ -287,6 +343,26 @@ A project in a git repository (or in a folder of one) gets a **Git** tab after A
 - Very large folders draw only the rows in view.
 - Right-click for the rest: open in the default app, open the folder in Files, copy the path.
 - The tree follows changes on disk while it is open.
+
+### Assets and media
+
+- **List / Gallery:** the two buttons in every file browser's toolbar. The choice is remembered per folder, and a subfolder takes its parent's until you pick one for it.
+- **Tiles:** each tile has a thumbnail. Folders are tiles too, and a Godot project shows its icon.
+  - Click, Ctrl/Shift-click, the arrow keys, Enter, F2, Delete, right-click and drag work as in the list.
+  - The chips filter by type (Images, 3D, Video, Audio, Other); the slider sets the tile size.
+- **Thumbnails** are kept in `~/.cache/workbench/thumbs` and made once per version of a file.
+  - The browser makes them for images, video (a frame a tenth of the way in), audio (its waveform) and 3D models (a render).
+  - A `.blend` shows the preview Blender saves inside the file (Blender's default when saving).
+  - Formats a browser can't decode (TGA, EXR, PSD, DDS, many MKV/H.265 videos, Draco-compressed glTF) show an icon.
+  - The cache prunes itself past 300 MB.
+- **Previews:**
+  - **3D files** (glTF/GLB, OBJ with its .mtl, FBX, STL) open in a viewer: drag to turn, scroll to zoom, right-drag to pan. It has Wireframe and Grid toggles and Reset view, and shows vertex, triangle, mesh and material counts and the model's size.
+  - **Images** show their size in pixels and format. Select two images (Ctrl-click) to compare them, with a slider or side by side.
+  - **Audio** shows its waveform; click it to seek.
+- **Open in Blender / Godot:**
+  - A `.blend` opens in Blender, and a Godot project's files (or the project folder) open in the Godot editor, when those programs are installed.
+  - Use the button in the preview, double-click or Enter (or the right-click menu, for a project folder).
+  - `openWith:` in the profile adds your own programs, or overrides these.
 
 ## Security
 
@@ -312,19 +388,21 @@ Agent profiles only choose flags for claude (`--model`, `--permission-mode` and 
 
 **Servers** lists only your own processes whose folder is inside one of the profile's projects. **Stop** names a process and port; the service checks again that this process is yours, still listens on that port and runs in a project before it sends SIGTERM, and refuses anything else.
 
+**Thumbnails** are read and stored only for files of the profile's folders. An uploaded one must be a WebP or PNG under 512 KB, and is stored under the file as it is at that moment. A 3D model's preview loads through a link that serves only its own folder. **Open with** names only the file: the program and its arguments come from `openWith:` or the built-in rules, each `{file}`/`{dir}`/`{godot}` becomes one argument, and nothing runs through a shell.
+
 **Git** works only on the repositories of the profile's projects. A request names the project; files, branches, stashes and commits must be ones git lists. A hunk is found again by its hash before it is applied, so the page never sends a patch. Git runs with no shell and never prompts. It also runs with `core.fsmonitor` off: a repository's config could otherwise name a program to run on a plain `git status`, so looking at a cloned repository never runs anything from it. Committing, merging and switching branches run the repository's hooks, as git in a terminal does. Error messages have credentials in URLs masked. **Draft** runs `claude -p` with no tools and no saved session; only the staged diff (up to 60 KB) and your recent commit subjects are sent.
 
 Each claude chat starts with a `SessionStart` hook (passed with `--settings`, merged with your own hooks) that runs `server/session-hook.mjs`. It only writes the chat's new session id to `~/.local/state/workbench/sessions/`, so a chat's tab follows `/clear` and `/resume`.
 
 **Context** is set up only when you ask, and only inside the profile's notes folder; it never overwrites a file. **Send to inbox** copies only files from the profile's folders (checked after resolving symlinks), under a free name.
 
-**Claude setup** reads claude's files and never writes them. Secret values are masked in the service, so they never reach the browser, and only the MCP servers' keys and the open folder's entry are read from `~/.claude.json`. A check names a server by its id; the command or URL comes from claude's files, read again at that moment, never from the request. It runs only servers claude would start. One that claude hasn't approved yet runs only after you confirm. Folders are limited to the profile's own.
+**Claude setup** reads claude's files and writes only one thing: the `disabledMcpServers` list of a folder's entry in `~/.claude.json`, for the MCP switches. That list is the same one `/mcp` writes. The file is read again just before each write and written atomically, with its mode kept. A switch takes only servers the setup lists for that folder. Secret values are masked in the service, so they never reach the browser, and only the MCP servers' keys and the open folder's entry are read from `~/.claude.json`. A check names a server by its id; the command or URL comes from claude's files, read again at that moment, never from the request. It runs only servers claude would start. One that claude hasn't approved yet runs only after you confirm. Folders are limited to the profile's own.
 
 ## Development
 
 ```sh
 npm run dev        # service on 7420 (auto-restart) + Vite with hot reload on 7421
-npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, servers, git, profiles, HTTP API
+npm test           # Vitest: config ops, store, guard, launch, notes, wiki links, files, chats, context, Claude setup, MCP checks, servers, git, thumbnails, .blend previews, open with, profiles, HTTP API
 npm run e2e        # Playwright against a throwaway config; programs are not started, chats and MCP checks run stand-ins
 npm run build      # type check + production build
 ```
@@ -339,6 +417,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/trash.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; putting things back from the Trash; the folders a profile may reach; folder watching |
 | `server/servers.ts`, `server/procfs.ts` | servers running in projects: listening sockets and their processes from `/proc`, declared servers, health checks, Stop |
+| `server/thumbs.ts`, `server/open-with.ts` | gallery thumbnails (the cache, .blend previews, a Godot project's icon); the program a file opens in |
 | `server/git.ts`, `shared/git.ts` | git per project: status, diffs and hunks, stage, discard with Undo, commit, Draft, branches, stash, fetch, pull, push, conflicts, history, the nav's marks |
 | `server/project-dates.ts` | a project's created and updated dates |
 | `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
@@ -347,7 +426,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
 | `server/guard.ts`, `server/launch.ts`, `server/main.ts` | request checks, opening and launching entries, the HTTP API and the chat socket |
 | `bin/workbench` | opens the window; installs, removes and prints the systemd units; the update step after a pull |
-| `src/` | the UI: nav panel, main pane, dialogs, Ctrl+K, profile settings, notes (view, editor, search, daily), file browser, project page, Git tab, chats, context, Claude setup, servers |
+| `src/` | the UI: nav panel, main pane, dialogs, Ctrl+K, profile settings, notes (view, editor, search, daily), file browser and gallery, 3D viewer, project page, Git tab, chats, context, Claude setup, servers |
 
 ## Roadmap
 
@@ -361,4 +440,6 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 7 | Context folders (done) |
 | 8 | Polish: Ctrl+K, profile settings, systemd service, the known gaps, Servers (done) |
 | 9 | Git per project: changes, hunks, commit with Draft, branches, stash, pull and push, conflicts, history (done) |
+| 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
+| after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
 | later | A Tauri window, if wanted |

@@ -1,7 +1,8 @@
-// The file browser: one folder at the top of an expandable tree, with a
-// preview of the selected file beside it. Folders list lazily and again when
-// they change on disk. Operations go through the service, which confines them
-// to the profile's folders; deletes go to the Trash.
+// The file browser: one folder at the top of an expandable tree, or its
+// entries as a gallery of thumbnails (remembered per folder), with a preview of
+// the selected file beside it. Folders list lazily and again when they change
+// on disk. Operations go through the service, which confines them to the
+// profile's folders; deletes go to the Trash.
 import {
   ArrowDown,
   ArrowUp,
@@ -17,6 +18,8 @@ import {
   FolderPlus,
   ImageIcon,
   Inbox,
+  LayoutGrid,
+  List,
   ListFilter,
   PencilLine,
   Search,
@@ -30,7 +33,7 @@ import { PATHS_TYPE } from '../lib/chats.ts'
 import { useContextFolders } from '../lib/context.ts'
 import { PICTURE_EXT, useLook } from '../lib/look.ts'
 import { onFilesEvent } from '../lib/events.ts'
-import { formatDate, formatSize, isMarkdown, nameOf, parentOf, segments, uniqueName } from '../lib/files.ts'
+import { ASSET_FILTERS, assetFilterOf, formatDate, formatSize, isMarkdown, nameOf, parentOf, previewKind, segments, uniqueName, type AssetFilter } from '../lib/files.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx, type MenuEntry, type MenuState } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
@@ -38,6 +41,7 @@ import { normalizePath } from '../lib/wikilinks.ts'
 import { ContextMenu } from './ContextMenu.tsx'
 import { FileIcon } from './FileIcon.tsx'
 import { FilePreview } from './FilePreview.tsx'
+import { Gallery } from './Gallery.tsx'
 import type { ToastInput } from './Toast.tsx'
 
 type Listing = { status: 'loading' } | { status: 'ok'; entries: FileEntry[] } | { status: 'error'; message: string }
@@ -110,6 +114,11 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
   const [sizes, setSizes] = useState<Record<string, FolderSize | 'busy'>>({})
   const [found, setFound] = useState<{ q: string; result: FileFind | null } | null>(null)
   const [range, setRange] = useState<[number, number]>([0, 160])
+  // List or Gallery, per folder; the gallery's type filter and tile size for every folder.
+  const [views, setViews] = useLocal<Record<string, 'list' | 'gallery'>>('filesView', {})
+  const [assetFilter, setAssetFilter] = useLocal<AssetFilter>('galleryFilter', 'all')
+  const [tileSize, setTileSize] = useLocal('gallerySize', 140)
+  const cols = useRef(1)
   const dragging = useRef<string[] | null>(null)
   const treeRef = useRef<HTMLDivElement>(null)
 
@@ -120,8 +129,17 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
     return rootPaths.some((r) => abs === r || abs.startsWith(r === '/' ? '/' : `${r}/`))
   }
 
-  // Expanded folders are remembered per profile and top folder, in this browser.
+  // Expanded folders (and List or Gallery) are remembered per profile and top folder, in this browser.
   const expandKey = `${profile}|${norm(top)}`
+  // A folder without its own choice takes its nearest parent's, so a gallery's subfolders are galleries too.
+  const gallery = (() => {
+    for (let dir = norm(top); ; dir = norm(parentOf(dir))) {
+      const v = views[`${profile}|${dir}`]
+      if (v) return v === 'gallery'
+      if (parentOf(dir) === dir || dir === '/') return false
+    }
+  })()
+  const setGallery = (on: boolean) => setViews((v) => ({ ...v, [expandKey]: on ? 'gallery' : 'list' }))
   const expanded = useMemo(() => new Set(expandedAll[expandKey] ?? []), [expandedAll, expandKey])
   const setExpanded = (change: (s: Set<string>) => void) =>
     setExpandedAll((all) => {
@@ -197,6 +215,15 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       }
       return out
     }
+    // The gallery: the top folder's entries, by name filter and type.
+    if (gallery && !(found?.result && found.q === q)) {
+      const l = listings[top]
+      if (!l || l.status !== 'ok') return []
+      return sorted(l.entries.filter((e) => showHidden || !e.hidden), sort.key, sort.dir)
+        .filter((e) => !q || e.name.toLowerCase().includes(q))
+        .filter((e) => assetFilter === 'all' || assetFilterOf(e) === assetFilter)
+        .map((entry): Row => ({ kind: 'entry', entry, depth: 0, open: false }))
+    }
     // Search all folders: the hits as a flat list, each with the folder it is in.
     if (found?.result && found.q === q) {
       const topNorm = norm(top)
@@ -205,10 +232,24 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       )
     }
     return walk(top, 0)
-  }, [listings, top, expanded, showHidden, sort, q, found, norm])
+  }, [listings, top, expanded, showHidden, sort, q, found, norm, gallery, assetFilter])
 
-  // Huge folders: only the rows in view (and a margin) are drawn.
-  const virtual = rows.length > VIRTUAL_AT
+  // The gallery's type chips count the top folder's files.
+  const typeCounts = useMemo(() => {
+    const counts: Record<AssetFilter, number> = { all: 0, image: 0, model: 0, video: 0, audio: 0, other: 0 }
+    const l = listings[top]
+    if (l?.status !== 'ok') return counts
+    for (const e of l.entries) {
+      if (!showHidden && e.hidden) continue
+      counts.all++
+      const f = assetFilterOf(e)
+      if (f) counts[f]++
+    }
+    return counts
+  }, [listings, top, showHidden])
+
+  // Huge folders: only the rows in view (and a margin) are drawn (the gallery does its own).
+  const virtual = !gallery && rows.length > VIRTUAL_AT
   useEffect(() => {
     const tree = treeRef.current
     if (!virtual || !tree) return
@@ -235,9 +276,14 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
   const current = chosen.at(-1) ?? null
 
   useEffect(() => {
-    if (!current || !treeRef.current) return
+    if (!current || !treeRef.current || gallery) return
     const el = treeRef.current.querySelector(`[data-path="${CSS.escape(current.path)}"]`)
-    if (el) return el.scrollIntoView({ block: 'nearest' })
+    // Not returned: scrollIntoView returns a Promise in Chromium 156, and React
+    // would call it as the effect's cleanup.
+    if (el) {
+      el.scrollIntoView({ block: 'nearest' })
+      return
+    }
     // Not drawn: scroll its place into view, and it will be.
     const i = rows.findIndex((r) => r.kind === 'entry' && r.entry.path === current.path)
     if (i < 0) return
@@ -283,11 +329,26 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
     }
   }
 
-  /** A folder becomes the top; Markdown opens as a note; anything else in its default app. */
-  function openEntry(e: FileEntry) {
-    if (e.kind === 'dir') onNavigate(e.path)
-    else if (isMarkdown(e.name)) notes.open(e.path)
-    else void openDefault(e.path)
+  /** In the program set up for it: the profile's openWith:, or Blender and Godot when installed. */
+  async function openWith(path: string) {
+    try {
+      const { label } = await api.openWith(profile, path)
+      toast({ message: `Opened ${nameOf(path)} in ${label}` })
+    } catch (err) {
+      toast({ message: message(err), kind: 'error' })
+    }
+  }
+
+  /**
+   * A folder becomes the top; Markdown opens as a note; a file with a program set
+   * up for it (a .blend, a Godot scene) opens there; anything else in its default app.
+   */
+  async function openEntry(e: FileEntry) {
+    if (e.kind === 'dir') return onNavigate(e.path)
+    if (isMarkdown(e.name)) return notes.open(e.path)
+    const program = await api.openWithLabel(profile, e.path).catch(() => ({ label: null }))
+    if (program.label) await openWith(e.path)
+    else await openDefault(e.path)
   }
 
   async function run<T extends FileOpResult>(op: FileOp): Promise<T | null> {
@@ -506,22 +567,31 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
 
   const chatEntries = (dir: string): MenuEntry[] => chatMenu?.(dir) ?? []
 
-  function rowMenu(e: React.MouseEvent, entry: FileEntry) {
+  async function rowMenu(e: React.MouseEvent, entry: FileEntry) {
     e.preventDefault()
     e.stopPropagation()
+    const at = { x: e.clientX, y: e.clientY }
     const paths = selected.includes(entry.path) ? selected : [entry.path]
     if (!selected.includes(entry.path)) pick(entry.path)
     const many = paths.length > 1
     const dir = entry.kind === 'dir'
     const items: (MenuEntry | 'sep')[] = []
     if (!many) {
-      items.push({ label: 'Open', icon: dir ? <FolderOpen size={14} /> : <ExternalLink size={14} />, run: () => openEntry(entry) })
+      // Blender, Godot or one of the profile's openWith: programs, when one fits.
+      const program = (await api.openWithLabel(profile, entry.path).catch(() => ({ label: null }))).label
+      items.push({ label: 'Open', icon: dir ? <FolderOpen size={14} /> : <ExternalLink size={14} />, run: () => void openEntry(entry) })
+      if (program && dir) items.push({ label: `Open in ${program}`, icon: <ExternalLink size={14} />, run: () => void openWith(entry.path) })
       if (isMarkdown(entry.name)) items.push({ label: 'Open as note', icon: <FileText size={14} />, run: () => notes.open(entry.path) })
       if (!dir) items.push({ label: 'Open in default app', icon: <ExternalLink size={14} />, run: () => void openDefault(entry.path) })
       items.push(
         { label: 'Open folder in Files', icon: <FolderOpen size={14} />, run: () => void openDefault(dir ? entry.path : parentOf(entry.path)) },
         { label: 'Copy path', icon: <Copy size={14} />, run: () => void copyPath(entry.path) },
-        ...(look && !dir && PICTURE_EXT.test(entry.name) ? [{ label: 'Use as background', icon: <ImageIcon size={14} />, run: () => look.pictureFrom(entry.path) }] : []),
+        ...(look && !dir && PICTURE_EXT.test(entry.name)
+          ? [
+              { label: 'Use as background', icon: <ImageIcon size={14} />, run: () => look.pictureFrom(entry.path) },
+              { label: 'Use as drawer logo', icon: <ImageIcon size={14} />, run: () => look.logoFrom(entry.path) },
+            ]
+          : []),
         ...(inbox && !dir && !norm(entry.path).startsWith(`${norm(inbox)}/`)
           ? [{ label: 'Send to inbox', icon: <Inbox size={14} />, run: () => context!.sendToInbox(entry.path) }]
           : []),
@@ -541,7 +611,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       ...(many ? [{ label: `Duplicate ${paths.length} items`, icon: <CopyPlus size={14} />, run: () => void copyTo(paths, parentOf(paths[0])) }] : []),
       { label: many ? `Move ${paths.length} items to Trash` : 'Move to Trash', icon: <Trash2 size={14} />, danger: true, run: () => void trash(paths) },
     )
-    setMenu({ x: e.clientX, y: e.clientY, entries: items })
+    setMenu({ ...at, entries: items })
   }
 
   function backgroundMenu(e: React.MouseEvent) {
@@ -571,6 +641,13 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
       const p = paths[Math.max(0, Math.min(paths.length - 1, j))]
       if (p) pick(p)
     }
+    // In the gallery the arrows move across the grid.
+    if (gallery && e.key.startsWith('Arrow')) {
+      const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols.current, ArrowUp: -cols.current }[e.key] ?? 0
+      go(i < 0 ? 0 : i + step)
+      e.preventDefault()
+      return
+    }
     switch (e.key) {
       case 'ArrowDown':
         go(i + 1)
@@ -586,7 +663,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
         else if (current && byPath.has(parentOf(current.path))) pick(parentOf(current.path))
         break
       case 'Enter':
-        if (current) openEntry(current)
+        if (current) void openEntry(current)
         break
       case 'F2':
         if (chosen.length === 1) setRenaming(chosen[0].path)
@@ -616,6 +693,33 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
     }
     e.preventDefault()
   }
+
+  /** What a row or a tile does: select, open, menu, drag (and take drops, for a folder). */
+  const entryProps = (entry: FileEntry) => ({
+    draggable: renaming !== entry.path,
+    onDragStart: (e: React.DragEvent) => {
+      const paths = selected.includes(entry.path) ? selected : [entry.path]
+      dragging.current = paths
+      e.dataTransfer.effectAllowed = 'copyMove'
+      e.dataTransfer.setData('text/plain', paths.map((p) => expandHome(p, home)).join('\n'))
+      // Dropped on a chat, the paths are typed into its prompt.
+      e.dataTransfer.setData(PATHS_TYPE, JSON.stringify(paths.map((p) => expandHome(p, home))))
+    },
+    onDragEnd: () => {
+      dragging.current = null
+      setDropTarget(null)
+    },
+    ...(entry.kind === 'dir' ? dropProps(entry.path) : {}),
+    onClick: (e: React.MouseEvent) => onRowClick(e, entry.path),
+    onDoubleClick: () => void openEntry(entry),
+    onContextMenu: (e: React.MouseEvent) => void rowMenu(e, entry),
+  })
+
+  const nameLabel = (entry: FileEntry) =>
+    renaming === entry.path ? <RenameInput name={entry.name} onDone={(v) => void rename(entry.path, v)} /> : <span className="label">{entry.name}</span>
+
+  // Exactly two images selected: the preview compares them.
+  const pair = chosen.length === 2 && chosen.every((c) => previewKind(c) === 'image') ? ([chosen[0], chosen[1]] as [FileEntry, FileEntry]) : undefined
 
   const sortBy = (key: SortKey) => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))
   const sortMark = (key: SortKey) => (sort.key === key ? sort.dir === 1 ? <ArrowUp size={11} /> : <ArrowDown size={11} /> : null)
@@ -665,6 +769,14 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
             }}
           />
         </label>
+        <span className="view-switch" role="radiogroup" aria-label="View">
+          <button role="radio" aria-checked={!gallery} className={cx('icon-btn', !gallery && 'on')} onClick={() => setGallery(false)} title="List" aria-label="List">
+            <List size={15} />
+          </button>
+          <button role="radio" aria-checked={gallery} className={cx('icon-btn', gallery && 'on')} onClick={() => setGallery(true)} title="Gallery" aria-label="Gallery">
+            <LayoutGrid size={15} />
+          </button>
+        </span>
         <button className="icon-btn" onClick={() => void create('mkdir')} title="New folder" aria-label="New folder">
           <FolderPlus size={15} />
         </button>
@@ -692,21 +804,51 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
         <div
           ref={treeRef}
           className="file-tree"
-          role="tree"
-          aria-label="Files"
+          role={gallery ? 'listbox' : 'tree'}
+          aria-label={gallery ? 'Gallery' : 'Files'}
           aria-multiselectable
           tabIndex={0}
           onKeyDown={onKeyDown}
           onContextMenu={backgroundMenu}
           {...dropProps(top)}
         >
-          <div className="file-head">
-            <button onClick={() => sortBy('name')}>Name {sortMark('name')}</button>
-            <button onClick={() => sortBy('size')}>Size {sortMark('size')}</button>
-            <button onClick={() => sortBy('mtime')}>Modified {sortMark('mtime')}</button>
-          </div>
+          {gallery ? (
+            <div className="gallery-bar">
+              <div className="gallery-chips" role="radiogroup" aria-label="Show">
+                {ASSET_FILTERS.filter((f) => f.id === 'all' || typeCounts[f.id] > 0 || assetFilter === f.id).map((f) => (
+                  <button key={f.id} role="radio" aria-checked={assetFilter === f.id} className={cx('chip', assetFilter === f.id && 'on')} onClick={() => setAssetFilter(f.id)}>
+                    {f.label} <span className="count">{typeCounts[f.id]}</span>
+                  </button>
+                ))}
+              </div>
+              <span className="spacer" />
+              <button className="link-btn" onClick={() => sortBy(sort.key === 'name' ? 'mtime' : sort.key === 'mtime' ? 'size' : 'name')} title="Sort by">
+                {sort.key === 'name' ? 'Name' : sort.key === 'mtime' ? 'Modified' : 'Size'} {sortMark(sort.key)}
+              </button>
+              <input type="range" min={96} max={256} step={8} value={tileSize} onChange={(e) => setTileSize(Number(e.target.value))} aria-label="Thumbnail size" className="gallery-size" />
+            </div>
+          ) : (
+            <div className="file-head">
+              <button onClick={() => sortBy('name')}>Name {sortMark('name')}</button>
+              <button onClick={() => sortBy('size')}>Size {sortMark('size')}</button>
+              <button onClick={() => sortBy('mtime')}>Modified {sortMark('mtime')}</button>
+            </div>
+          )}
+          {gallery && (
+            <Gallery
+              profile={profile}
+              entries={entryRows.map((r) => r.entry)}
+              selected={selected}
+              size={tileSize}
+              current={current?.path ?? null}
+              dropTarget={dropTarget}
+              onCols={(n) => (cols.current = n)}
+              tileProps={entryProps}
+              label={nameLabel}
+            />
+          )}
           {from > 0 && <div style={{ height: from * ROW }} aria-hidden />}
-          {rows.slice(from, to).map((row, j) => {
+          {(gallery ? [] : rows.slice(from, to)).map((row, j) => {
             const i = from + j
             if (row.kind === 'note') {
               return (
@@ -735,23 +877,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
                 )}
                 style={{ '--depth': depth } as React.CSSProperties}
                 title={entry.ignored ? 'Ignored by .gitignore' : undefined}
-                draggable={renaming !== entry.path}
-                onDragStart={(e) => {
-                  const paths = selected.includes(entry.path) ? selected : [entry.path]
-                  dragging.current = paths
-                  e.dataTransfer.effectAllowed = 'copyMove'
-                  e.dataTransfer.setData('text/plain', paths.map((p) => expandHome(p, home)).join('\n'))
-                  // Dropped on a chat, the paths are typed into its prompt.
-                  e.dataTransfer.setData(PATHS_TYPE, JSON.stringify(paths.map((p) => expandHome(p, home))))
-                }}
-                onDragEnd={() => {
-                  dragging.current = null
-                  setDropTarget(null)
-                }}
-                {...(entry.kind === 'dir' ? dropProps(entry.path) : {})}
-                onClick={(e) => onRowClick(e, entry.path)}
-                onDoubleClick={() => openEntry(entry)}
-                onContextMenu={(e) => rowMenu(e, entry)}
+                {...entryProps(entry)}
               >
                 <span className="file-name">
                   {entry.kind === 'dir' ? (
@@ -768,11 +894,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
                     <span className="chevron-space" />
                   )}
                   <FileIcon entry={entry} open={open} />
-                  {renaming === entry.path ? (
-                    <RenameInput name={entry.name} onDone={(v) => void rename(entry.path, v)} />
-                  ) : (
-                    <span className="label">{entry.name}</span>
-                  )}
+                  {nameLabel(entry)}
                   {entry.link && <span className="link-mark" title="Symbolic link">↗</span>}
                   {row.where && <span className="file-where mono">{row.where}</span>}
                 </span>
@@ -781,7 +903,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
               </div>
             )
           })}
-          {to < rows.length && <div style={{ height: (rows.length - to) * ROW }} aria-hidden />}
+          {!gallery && to < rows.length && <div style={{ height: (rows.length - to) * ROW }} aria-hidden />}
           {q && (found?.q !== q || !found.result) && (
             <button className="file-row find-all" onClick={() => void searchAll()} disabled={found?.q === q}>
               <span className="file-name">
@@ -801,7 +923,7 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
           )}
           {topListing?.status === 'ok' && entryRows.length === 0 && !(found?.q === q && found.result) && (
             <div className="file-empty">
-              {q ? 'Nothing matches the filter' : topListing.entries.length ? 'Only hidden files here (Ctrl+H shows them)' : 'Empty folder'}
+              {q ? 'Nothing matches the filter' : gallery && assetFilter !== 'all' ? 'Nothing of this type here' : topListing.entries.length ? 'Only hidden files here (Ctrl+H shows them)' : 'Empty folder'}
             </div>
           )}
         </div>
@@ -810,8 +932,10 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
             entry={chosen.length === 1 ? chosen[0] : null}
             count={chosen.length}
             childCount={childCount}
-            onOpen={openEntry}
+            onOpen={(e) => void openEntry(e)}
             onOpenDefault={(p) => void openDefault(p)}
+            onOpenWith={(p) => void openWith(p)}
+            pair={pair}
           />
         </aside>
       </div>

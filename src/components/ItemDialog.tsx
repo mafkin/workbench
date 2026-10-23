@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { chatProgram, ITEM_TYPES, NavItem, StepItem, STEP_TYPES, stepPath, type AnyType, type ItemInput } from '../../shared/config-schema.ts'
+import { chatProgram, FOLDER_STEPS, NavItem, STEP_LABEL, StepItem, STEP_TYPES, stepPath, type AnyType, type ItemInput } from '../../shared/config-schema.ts'
 import { stat } from '../lib/api.ts'
 import { cx, type DialogState } from '../lib/nav.ts'
 import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
 
-// For a workflow step, paths are inside the project.
+// For a step, paths are inside the item's folder (or home, for an item without one).
 const STEP_HINTS: Partial<Record<AnyType, string>> = {
+  files: 'The item’s folder in the file browser.',
+  git: 'Changes, commits, branches and history of the item’s repository.',
+  setup: 'What claude loads in the item’s folder: skills, MCP servers and more.',
   folder: 'A folder in the project, like assets. It opens in the browser.',
   note: 'A note in the project, like docs/design.md. It opens in place, with Edit.',
   report: 'An HTML file in the project, like reports/index.html. Shown in the tab, with the files next to it.',
@@ -16,7 +19,7 @@ const STEP_HINTS: Partial<Record<AnyType, string>> = {
 }
 
 const HINTS: Record<AnyType, string> = {
-  folder: 'A project: its card, workflow tabs and files.',
+  folder: 'An item: its card, and the steps you add as tabs.',
   note: 'A Markdown file. Opens formatted in the main pane; Edit (Ctrl+E) to change it.',
   report: '',
   file: '',
@@ -25,7 +28,13 @@ const HINTS: Record<AnyType, string> = {
   link: 'Opens in your default browser.',
   launch: 'Starts a program directly, without a shell.',
   group: 'Holds entries one level deep under this heading.',
+  shared: 'An entry of another drawer, shown here too. Edit it in its own drawer.',
+  files: '',
+  git: '',
+  setup: '',
 }
+
+const isFolderStep = (t: AnyType) => (FOLDER_STEPS as readonly string[]).includes(t)
 
 const PATH_TYPES: AnyType[] = ['folder', 'note', 'report', 'file']
 
@@ -34,20 +43,22 @@ interface Props {
   /** The profile's agent profiles, offered for a chat. */
   agents: string[]
   onClose: () => void
-  onSubmit: (item: ItemInput) => Promise<boolean>
+  /** `folder` gives an item without one its folder, for a step that shows it. */
+  onSubmit: (item: ItemInput, extra?: { folder?: string }) => Promise<boolean>
 }
 
 export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
   const step = dialog.mode === 'step' ? dialog : null
   const initial = dialog.mode === 'edit' ? dialog.item : step?.item
   const adding = dialog.mode === 'add' || (step !== null && step.index === undefined)
-  const insideGroup = dialog.mode === 'edit' ? dialog.at.group !== undefined : dialog.mode === 'add' && dialog.list.group !== undefined
-  const lockedGroup = initial?.type === 'group' && initial.items.length > 0
-  const types: readonly AnyType[] = step ? STEP_TYPES : ITEM_TYPES
-  const noun = step ? 'step' : 'entry'
+  // Entries have no kind to pick: a new one is a blank item (or a group, from Add group…), and an old one keeps its type.
+  const types: readonly AnyType[] = step ? STEP_TYPES : []
+  const noun = step ? 'step' : initial?.type === 'group' || (dialog.mode === 'add' && dialog.presetType === 'group') ? 'group' : initial && initial.type !== 'folder' ? 'entry' : 'item'
+  const preset = dialog.mode === 'add' ? dialog.presetType : step?.presetType
 
-  const [type, setType] = useState<AnyType>(initial?.type ?? (dialog.mode === 'add' ? (dialog.presetType ?? 'folder') : 'folder'))
-  const [label, setLabel] = useState(initial?.label ?? '')
+  const [type, setType] = useState<AnyType>(initial?.type ?? preset ?? 'folder')
+  const [label, setLabel] = useState(initial?.label ?? (preset ? (STEP_LABEL[preset] ?? '') : ''))
+  const [itemFolder, setItemFolder] = useState('')
   const [path, setPath] = useState(initial && 'path' in initial ? (initial.path ?? '') : '')
   const [url, setUrl] = useState(initial?.type === 'link' ? initial.url : '')
   const [command, setCommand] = useState(initial?.type === 'launch' ? initial.command : '')
@@ -79,7 +90,7 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
     setPathStatus(null)
     if ((!PATH_TYPES.includes(type) && type !== 'chat') || !path.trim()) return
     const t = setTimeout(() => {
-      stat(step ? stepPath(step.base, path.trim()) : path.trim()).then(setPathStatus, () => setPathStatus(null))
+      stat(step ? stepPath(itemFolder.trim() || step.base, path.trim()) : path.trim()).then(setPathStatus, () => setPathStatus(null))
     }, 250)
     return () => clearTimeout(t)
   }, [type, path])
@@ -88,6 +99,14 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
     const base = { label: label.trim(), icon: icon.trim() || undefined }
     switch (type) {
       case 'folder':
+        // An item: its folder is optional, and a new one is written `type: item`.
+        if (!step && dialog.mode === 'add') return { ...base, type: 'item', path: path.trim() || undefined }
+        if (!step) return { ...base, type, path: path.trim() || undefined }
+        return { ...base, type, path: path.trim() }
+      case 'files':
+      case 'git':
+      case 'setup':
+        return { ...base, type }
       case 'note':
       case 'report':
       case 'file':
@@ -114,6 +133,8 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
         }
       case 'group':
         return { ...base, type, items: [] }
+      case 'shared':
+        throw new Error('A shared entry is edited in its own drawer')
     }
   }
 
@@ -126,8 +147,13 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
       setError({ field: String(issue?.path[0] ?? ''), message: issue?.message ?? 'Invalid entry' })
       return
     }
+    const askFolder = !!step?.needsFolder && isFolderStep(type)
+    if (askFolder && !itemFolder.trim()) {
+      setError({ field: 'itemFolder', message: 'Choose the folder this item is about' })
+      return
+    }
     setBusy(true)
-    const ok = await onSubmit(item)
+    const ok = await onSubmit(item, askFolder ? { folder: itemFolder.trim() } : undefined)
     setBusy(false)
     if (ok) onClose()
   }
@@ -158,31 +184,33 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
           <small>{dialog.context}</small>
         </header>
         <div className="body">
-          <div className="type-picker" role="radiogroup" aria-label="Type" style={{ gridTemplateColumns: `repeat(${types.length}, 1fr)` }}>
-            {types.map((t) => {
-              const Icon = TYPE_ICON[t]
-              const disabled = (t === 'group' && insideGroup) || (lockedGroup && t !== 'group')
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  role="radio"
-                  aria-checked={type === t}
-                  className={cx(type === t && 'active')}
-                  disabled={disabled}
-                  title={disabled ? (lockedGroup ? 'Empty the group first' : 'Groups are one level deep') : TYPE_LABEL[t]}
-                  onClick={() => {
-                    setType(t)
-                    setError(null)
-                  }}
-                >
-                  <Icon size={15} />
-                  {TYPE_LABEL[t]}
-                </button>
-              )
-            })}
-          </div>
-          <span className="hint" style={{ color: 'var(--faint)', fontSize: 11, marginTop: -6 }}>
+          {types.length > 0 && (
+            <div className="type-picker" role="radiogroup" aria-label="Type" style={{ gridTemplateColumns: `repeat(${Math.min(types.length, 5)}, 1fr)` }}>
+              {types.map((t) => {
+                const Icon = TYPE_ICON[t]
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={type === t}
+                    className={cx(type === t && 'active')}
+                    title={TYPE_LABEL[t]}
+                    onClick={() => {
+                      setType(t)
+                      // The built-in kinds bring their own name, until you type one.
+                      if (!label.trim() || Object.values(STEP_LABEL).includes(label)) setLabel(STEP_LABEL[t] ?? '')
+                      setError(null)
+                    }}
+                  >
+                    <Icon size={15} />
+                    {TYPE_LABEL[t]}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <span className="hint" style={{ color: 'var(--faint)', fontSize: 11, marginTop: types.length ? -6 : 0 }}>
             {(step && STEP_HINTS[type]) || HINTS[type]}
           </span>
 
@@ -192,9 +220,17 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
             {fieldError('label')}
           </label>
 
+          {step?.needsFolder && isFolderStep(type) && (
+            <label className="field">
+              <span>Folder of this item</span>
+              <input className="mono" value={itemFolder} onChange={(e) => setItemFolder(e.target.value)} placeholder="~/Projects/name" name="itemFolder" />
+              {fieldError('itemFolder') ?? <span className="hint">This item has no folder yet. It gets this one, for this step and the next.</span>}
+            </label>
+          )}
+
           {PATH_TYPES.includes(type) && (
             <label className="field">
-              <span>{type === 'folder' ? 'Folder' : 'File'}</span>
+              <span>{type === 'folder' ? (step ? 'Folder' : 'Folder (optional)') : 'File'}</span>
               <input
                 className="mono"
                 value={path}
@@ -209,7 +245,7 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
                 }
                 name="path"
               />
-              {fieldError('path') ?? pathHint()}
+              {fieldError('path') ?? pathHint() ?? (!step && type === 'folder' ? <span className="hint">Without one, the item holds notes, links, launchers and chats; a file browser, Git or Claude setup step asks for it.</span> : null)}
             </label>
           )}
 

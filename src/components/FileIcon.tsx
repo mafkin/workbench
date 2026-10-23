@@ -1,4 +1,4 @@
-import { File, FileAudio, FileImage, FileText, FileVideo, Folder, FolderOpen } from 'lucide-react'
+import { Box, File, FileAudio, FileImage, FileText, FileVideo, Folder, FolderOpen } from 'lucide-react'
 import type { FileEntry } from '../../shared/config-schema.ts'
 import { previewKind } from '../lib/files.ts'
 
@@ -6,6 +6,8 @@ const ICONS = {
   image: FileImage,
   video: FileVideo,
   audio: FileAudio,
+  model: Box,
+  blend: Box,
   pdf: FileText,
   markdown: FileText,
   text: File,

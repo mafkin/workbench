@@ -1,6 +1,6 @@
 import fsp from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
-import { resetFixture, SPAWN_LOG, WORK, WORK_FILE } from './fixture.ts'
+import { pickProfile, profileButton, resetFixture, SPAWN_LOG, WORK, WORK_FILE } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -16,7 +16,11 @@ test.beforeEach(async ({ page }) => {
 
 test('profile switch swaps nav, accent and title', async ({ page }) => {
   expect(await accent(page)).toBe('#7d93ab')
-  await page.getByRole('tab', { name: 'Personal' }).click()
+  await profileButton(page).click()
+  await expect(page.getByRole('menuitemradio', { name: 'Work' })).toHaveAttribute('aria-checked', 'true')
+  await page.screenshot({ path: 'test-results/profile-menu.png' })
+  await page.keyboard.press('Escape')
+  await pickProfile(page, 'Personal')
   await expect(entry(page, 'Tuohi')).toBeVisible()
   await expect(entry(page, 'Alpha')).toHaveCount(0)
   expect(await accent(page)).toBe('#8fa58a')
@@ -61,17 +65,14 @@ test('adding a heading in the UI writes the YAML and keeps comments', async ({ p
 test('adding an entry through the dialog', async ({ page }) => {
   await page.getByRole('button', { name: 'Edit navigation' }).click()
   await page.getByRole('button', { name: 'Add entry to Tools' }).click()
-  const dialog = page.getByRole('form', { name: 'Add entry' })
-  await dialog.getByRole('radio', { name: 'Link' }).click()
-  await dialog.locator('input[name=label]').fill('Docs site')
-  await dialog.locator('input[name=url]').fill('not a url')
+  const dialog = page.getByRole('form', { name: 'Add item' })
   await dialog.getByRole('button', { name: 'Add' }).click()
-  await expect(dialog.locator('.err')).toHaveText('Not a valid URL')
-  await dialog.locator('input[name=url]').fill('https://example.com/docs')
+  await expect(dialog.locator('.err')).toHaveText('Label is required')
+  await dialog.locator('input[name=label]').fill('Docs site')
   await dialog.getByRole('button', { name: 'Add' }).click()
   await expect(dialog).toHaveCount(0)
   await expect(entry(page, 'Docs site')).toBeVisible()
-  expect(await workYaml()).toContain('url: https://example.com/docs')
+  expect(await workYaml()).toMatch(/- label: Docs site\n\s+type: item\n/)
 })
 
 test('a hand edit to the YAML shows up live', async ({ page }) => {

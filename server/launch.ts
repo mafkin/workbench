@@ -19,6 +19,8 @@ export function launchFor(item: NavItem, home: string): Launch {
     case 'link':
       return { command: 'xdg-open', args: [item.url] }
     case 'folder':
+      if (!item.path) throw new LaunchError('This item has no folder')
+      return { command: 'xdg-open', args: [expandHome(item.path, home)] }
     case 'note':
       return { command: 'xdg-open', args: [expandHome(item.path, home)] }
     case 'launch':

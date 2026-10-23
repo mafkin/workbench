@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { isoDate } from '../shared/config-schema.ts'
-import { HOME, NOTES, PERSONAL_FILE, resetFixture, WORK_FILE } from './fixture.ts'
+import { HOME, NOTES, PERSONAL_FILE, pickProfile, resetFixture, WORK_FILE } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -166,7 +166,7 @@ test('Today creates the daily note from the template', async ({ page }) => {
 })
 
 test('a profile without a notes folder offers one', async ({ page }) => {
-  await page.getByRole('tab', { name: 'Personal' }).click()
+  await pickProfile(page, 'Personal')
   const hint = page.locator('.notes-hint')
   await expect(hint).toContainText('personal.yaml')
   await hint.getByRole('button', { name: 'Use ~/notes' }).click()

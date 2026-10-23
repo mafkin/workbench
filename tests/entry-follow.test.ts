@@ -31,6 +31,15 @@ describe('an entry is found again after it moves', () => {
     expect(resolveEntry(gone, '0.1', beta)).toBeNull()
   })
 
+  it('an item given a folder stays itself', () => {
+    const loose = profile([{ title: 'P', items: [{ label: 'Board', type: 'item', id: 'abc12345' }] }])
+    const id = entryId(loose.sections[0].items[0])
+    const given = profile([{ title: 'P', items: [{ label: 'Board', type: 'item', id: 'abc12345', path: '~/board' }] }])
+    expect(resolveEntry(given, '0.0', id)).toEqual({ section: 0, index: 0 })
+    const other = profile([{ title: 'P', items: [{ label: 'Other', type: 'item', path: '~/board' }] }])
+    expect(resolveEntry(other, '0.0', id)).toBeNull()
+  })
+
   it('without an identity (older saved state), the address is trusted', () => {
     expect(resolveEntry(before, '1.0')).toEqual({ section: 1, index: 0 })
     expect(resolveEntry(before, '5.0')).toBeNull()

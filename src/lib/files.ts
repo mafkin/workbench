@@ -1,12 +1,14 @@
 // Helpers for the file browser: paths in `~/…` form, names, formatting, and what a file previews as.
 import type { FileEntry } from '../../shared/config-schema.ts'
 
-export type PreviewKind = 'folder' | 'image' | 'pdf' | 'video' | 'audio' | 'markdown' | 'text'
+export type PreviewKind = 'folder' | 'image' | 'pdf' | 'video' | 'audio' | 'model' | 'blend' | 'markdown' | 'text'
 
 const EXT_KIND: Record<string, PreviewKind> = {}
 for (const e of ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'bmp']) EXT_KIND[e] = 'image'
 for (const e of ['mp4', 'm4v', 'webm', 'ogv', 'mov', 'mkv']) EXT_KIND[e] = 'video'
 for (const e of ['mp3', 'ogg', 'oga', 'opus', 'flac', 'wav', 'm4a', 'aac']) EXT_KIND[e] = 'audio'
+for (const e of ['gltf', 'glb', 'obj', 'fbx', 'stl']) EXT_KIND[e] = 'model'
+EXT_KIND.blend = 'blend'
 EXT_KIND.pdf = 'pdf'
 EXT_KIND.md = 'markdown'
 EXT_KIND.markdown = 'markdown'
@@ -16,7 +18,27 @@ const extOf = (name: string) => (name.includes('.') ? name.slice(name.lastIndexO
 /** Anything not known as media is tried as text; the service says when it is binary. */
 export function previewKind(entry: Pick<FileEntry, 'name' | 'kind'>): PreviewKind {
   if (entry.kind === 'dir') return 'folder'
-  return EXT_KIND[extOf(entry.name)] ?? 'text'
+  const ext = extOf(entry.name)
+  // `x.blend1` and on are Blender's backups.
+  return EXT_KIND[ext] ?? (/^blend\d+$/.test(ext) ? 'blend' : 'text')
+}
+
+/** The gallery's type filters; a file is in one of them, folders only in All. */
+export type AssetFilter = 'all' | 'image' | 'model' | 'video' | 'audio' | 'other'
+export const ASSET_FILTERS: { id: AssetFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'image', label: 'Images' },
+  { id: 'model', label: '3D' },
+  { id: 'video', label: 'Video' },
+  { id: 'audio', label: 'Audio' },
+  { id: 'other', label: 'Other' },
+]
+
+export function assetFilterOf(entry: Pick<FileEntry, 'name' | 'kind'>): AssetFilter | null {
+  const kind = previewKind(entry)
+  if (kind === 'folder') return null
+  if (kind === 'blend') return 'model'
+  return kind === 'image' || kind === 'model' || kind === 'video' || kind === 'audio' ? kind : 'other'
 }
 
 export const isMarkdown = (name: string) => EXT_KIND[extOf(name)] === 'markdown'

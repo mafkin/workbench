@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { CONTEXT_FOLDERS, expandHome, type ContextFolder, type ContextStatus, type Profile } from '../shared/config-schema.ts'
+import { CONTEXT_FOLDERS, drawerIndex, drawersOf, expandHome, type ContextFolder, type ContextStatus, type Profile } from '../shared/config-schema.ts'
 import type { ChatContext } from './agents.ts'
 import { frontmatter } from './claude-setup.ts'
 import { StoreError, type ConfigStore } from './config-store.ts'
@@ -237,4 +237,35 @@ export class Context extends EventEmitter {
     this.#emit(id)
     return { path: this.#tilde(file) }
   }
+}
+
+/**
+ * The shared folders a claude chat in a drawer gets: the drawer's own and
+ * those of the drawers it uses, when they exist; null when there are none.
+ */
+export async function drawerContext(profile: Profile, drawer: number, home: string): Promise<ChatContext | null> {
+  const all = drawersOf(profile)
+  const own = all[drawer]
+  if (!own) return null
+  const named = [{ name: own.name, folder: own.folder, mine: true }]
+  for (const use of own.uses ?? []) {
+    const other = all[drawerIndex(profile, use)]
+    if (other && other !== own) named.push({ name: other.name, folder: other.folder, mine: false })
+  }
+  const found: { line: string; dir: string }[] = []
+  for (const d of named) {
+    if (!d.folder) continue
+    const dir = path.resolve(expandHome(d.folder, home))
+    if (!(await fsp.stat(dir).catch(() => null))?.isDirectory() || found.some((f) => f.dir === dir)) continue
+    found.push({ dir, line: `- ${dir}: ${d.mine ? `the ${d.name} drawer's own shared folder` : `shared by the ${d.name} drawer`}` })
+  }
+  if (!found.length) return null
+  const prompt = [`# Shared folders (Workbench, drawer ${own.name})`, ['Material shared between drawers. Read it when relevant:', ...found.map((f) => f.line)].join('\n')].join('\n\n')
+  return { prompt, dirs: found.map((f) => f.dir) }
+}
+
+/** Two contexts as one: claude takes one --append-system-prompt and one --add-dir. */
+export function mergeContext(a: ChatContext | null, b: ChatContext | null): ChatContext | null {
+  if (!a || !b) return a ?? b
+  return { prompt: `${a.prompt}\n\n${b.prompt}`, dirs: [...a.dirs, ...b.dirs.filter((d) => !a.dirs.includes(d))] }
 }

@@ -1,12 +1,18 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { DIR, resetFixture, TRASH, WORK, WORK_FILE } from './fixture.ts'
+import { DIR, profileButton, profileMenu, resetFixture, TRASH, WORK, WORK_FILE } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const switcher = (page: Page) => page.getByRole('dialog', { name: 'Quick switcher' })
-const profileTab = (page: Page, name: string) => page.getByRole('tablist', { name: 'Profile' }).getByRole('tab', { name })
+/** The profiles listed in the profile menu (closed again before returning). */
+async function profileNames(page: Page) {
+  await profileButton(page).click()
+  const names = await page.getByRole('menu').getByRole('menuitemradio').locator('.menu-label').allTextContents()
+  await page.keyboard.press('Escape')
+  return names
+}
 
 async function quick(page: Page, query: string, pick: string | RegExp) {
   await page.keyboard.press('Control+k')
@@ -42,38 +48,42 @@ test('Ctrl+K goes to entries, steps and notes, and runs actions', async ({ page 
   await page.keyboard.press('Escape')
 
   await quick(page, 'switch pers', /Switch to Personal/)
-  await expect(profileTab(page, 'Personal')).toHaveAttribute('aria-selected', 'true')
+  await expect(profileButton(page)).toHaveAttribute('title', /^Profile: Personal/)
 })
 
 test('Profile settings rename the profile and add and remove profiles', async ({ page }) => {
-  await page.getByRole('button', { name: 'Profile settings' }).click()
+  await profileMenu(page, 'Profile settings…')
   const dialog = page.getByRole('dialog', { name: 'Profile settings' })
   await dialog.locator('input[name=name]').fill('Day job')
   await dialog.getByRole('radio', { name: '#b39b72' }).click()
   await dialog.locator('input[name=home]').fill('~/alpha')
   await page.screenshot({ path: 'test-results/polish-profile.png' })
   await dialog.getByRole('button', { name: 'Save' }).click()
-  await expect(profileTab(page, 'Day job')).toBeVisible()
+  await expect(profileButton(page)).toHaveAttribute('title', /^Profile: Day job/)
   const yaml = await fsp.readFile(WORK_FILE, 'utf8')
   expect(yaml).toContain('name: Day job')
   expect(yaml).toContain('accent: "#b39b72"')
   expect(yaml).toContain('home: ~/alpha')
   expect(yaml).toContain('# fixture: work profile')
 
-  await page.getByRole('button', { name: 'Profile settings' }).click()
+  await profileMenu(page, 'Add profile…')
   const form = page.getByRole('form', { name: 'Add profile' })
+  await expect(form.getByLabel('New profile name')).toBeFocused()
   await form.getByLabel('New profile name').fill('Side Projects')
   await expect(form.getByLabel('File name', { exact: true })).toHaveValue('side-projects')
   await form.getByRole('checkbox').check()
   await form.getByRole('button', { name: 'Add profile' }).click()
-  await expect(profileTab(page, 'Side Projects')).toHaveAttribute('aria-selected', 'true')
+  await expect(profileButton(page)).toHaveAttribute('title', /^Profile: Side Projects/)
   await expect(entry(page, 'Alpha')).toBeVisible()
   expect(await fsp.readFile(path.join(DIR, 'profiles/side-projects.yaml'), 'utf8')).toContain('name: Side Projects')
 
-  await page.getByRole('button', { name: 'Profile settings' }).click()
+  await profileMenu(page, 'Profile settings…')
   await page.getByRole('button', { name: 'Remove Side Projects' }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click()
-  await expect(profileTab(page, 'Side Projects')).toHaveCount(0)
+  const dialog2 = page.getByRole('dialog', { name: 'Profile settings' })
+  await expect(dialog2.getByRole('button', { name: 'Remove Side Projects' })).toHaveCount(0)
+  await dialog2.getByRole('button', { name: 'Close' }).click()
+  await expect.poll(() => profileNames(page)).toEqual(['Day job', 'Personal'])
   expect(await fsp.readFile(path.join(TRASH, 'side-projects.yaml'), 'utf8')).toContain('Side Projects')
 })
 

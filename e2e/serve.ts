@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { buildServer } from '../server/main.ts'
-import { DIR, FAKE_CLAUDE, FAKE_SHELL, HOME, MANAGED, PORT, resetFixture, SPAWN_LOG, TRASH, TRASH_DIR } from './fixture.ts'
+import { DIR, FAKE_CLAUDE, FAKE_SHELL, HOME, MANAGED, PORT, resetFixture, SPAWN_LOG, THUMBS, TRASH, TRASH_DIR } from './fixture.ts'
 
 await fsp.rm(DIR, { recursive: true, force: true })
 // Claude's files come from the fake home, never from the machine's own.
@@ -46,5 +46,7 @@ const { app } = await buildServer({
   chatTiming: { quietMs: 400, busyMs: 600 },
   managedDir: MANAGED,
   mcpTimeoutMs: 5000,
+  gitFetchEveryMs: 0,
+  thumbsDir: THUMBS,
 })
 await app.listen({ host: '127.0.0.1', port: PORT })

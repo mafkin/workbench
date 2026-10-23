@@ -3,12 +3,17 @@ import { lazy, Suspense, useRef, useState } from 'react'
 import {
   chatName,
   chatProgram,
+  allSections,
   CONTEXT_LABEL,
+  drawersOf,
+  entryAt,
   entrySlot,
   folderRoots,
   getItem,
   NOTE_EXT,
   projectHost,
+  projectRef,
+  sectionsOf,
   stepsOf,
   type Chat,
   type ItemAddr,
@@ -64,6 +69,8 @@ interface Props {
   openRecent: (r: Recent) => void
   /** The Servers page's checks, so the nav's marks follow it. */
   onServersScan: (scan: ServersScan) => void
+  /** The drawer the nav shows. */
+  drawer: number
 }
 
 const noteName = (path: string) => (path.split('/').pop() ?? path).replace(NOTE_EXT, '')
@@ -74,8 +81,11 @@ export function MainPane(props: Props) {
   const firstHit = useRef<string | null>(null)
   const profile = active.profile
   const entry = selected?.kind === 'entry' ? selected : null
-  const section = entry && profile ? profile.sections[entry.addr.section] : undefined
-  const group = entry && section && entry.addr.group !== undefined ? section.items[entry.addr.group] : undefined
+  // Where the entry lives: a shared entry's original, in its own drawer.
+  const section = entry && profile ? sectionsOf(profile, entry.origin.drawer ?? 0)[entry.origin.section] : undefined
+  const group = entry && section && entry.origin.group !== undefined ? section.items[entry.origin.group] : undefined
+  const drawers = profile ? drawersOf(profile) : []
+  const drawerName = entry && drawers.length > 1 ? drawers[entry.origin.drawer ?? 0]?.name : undefined
   const atHome = !selected && !search.open
   const [stepCrumb, setStepCrumb] = useState<string | null>(null)
 
@@ -96,6 +106,12 @@ export function MainPane(props: Props) {
             </>
           ) : entry ? (
             <>
+              {drawerName && (
+                <>
+                  <span className="sep">/</span>
+                  <span>{drawerName}</span>
+                </>
+              )}
               {section && (
                 <>
                   <span className="sep">/</span>
@@ -188,7 +204,7 @@ export function MainPane(props: Props) {
         ) : entry ? (
           <EntryView
             key={`${active.id}:${entry.item.label}`}
-            addr={entry.addr}
+            addr={entry.origin}
             item={entry.item}
             kicker={section?.title ?? ''}
             pane={props}
@@ -208,10 +224,10 @@ export function MainPane(props: Props) {
           </Suspense>
         ) : selected?.kind === 'setup' ? (
           <Suspense fallback={null}>
-            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} />
+            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} rev={active.rev} toast={props.toast} />
           </Suspense>
         ) : (
-          <Home active={active} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />
+          <Home active={active} drawer={props.drawer} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />
         )}
       </div>
     </main>
@@ -234,12 +250,14 @@ function BrokenProfile({ active }: { active: ProfileState }) {
 /** Home: what you opened last, and today's note. The nav is on the left, so it is not repeated here. */
 function Home({
   active,
+  drawer,
   activate,
   recent,
   openRecent,
   startEditing,
 }: {
   active: ProfileState
+  drawer: number
   activate: Props['activate']
   recent: Recent[]
   openRecent: Props['openRecent']
@@ -247,7 +265,7 @@ function Home({
 }) {
   const profile = active.profile!
 
-  if (profile.sections.length === 0) {
+  if (sectionsOf(profile, drawer).length === 0) {
     return (
       <div className="empty-state">
         <h2 style={{ color: 'var(--text)' }}>No headings yet</h2>
@@ -259,7 +277,7 @@ function Home({
     )
   }
 
-  const dailyAddr = findEntry(profile, 'daily')
+  const dailyAddr = findEntry(profile, 'daily', undefined, drawer)
   const daily = dailyAddr ? getItem(profile, dailyAddr) : undefined
   const rows = recent.flatMap((r) => {
     const row = describeRecent(profile, r)
@@ -308,11 +326,11 @@ function OtherChats({ profile }: { profile: Profile }) {
   const chats = useChats()
   const hosts = new Set<string>()
   const visit = (item: NavItem) => {
-    if (item.type === 'folder') hosts.add(projectHost(item.path))
+    if (item.type === 'folder') hosts.add(projectHost(projectRef(item)))
     if (item.type === 'chat') hosts.add(entrySlot(item))
     if (item.type === 'group') item.items.forEach(visit)
   }
-  for (const s of profile.sections) s.items.forEach(visit)
+  for (const s of allSections(profile)) s.items.forEach(visit)
   const others = chats.list.filter((c) => !hosts.has(c.host))
   if (!others.length) return null
   return (
@@ -371,12 +389,15 @@ function describeRecent(profile: NonNullable<ProfileState['profile']>, r: Recent
   }
   // Older items have no identity: the address must still hold the same label.
   const addr = r.entry ? resolveEntry(profile, r.key, r.entry) : parseKey(r.key)
-  const item = addr ? getItem(profile, addr) : undefined
-  if (!addr || !item || (!r.entry && item.label !== r.label)) return null
-  const section = profile.sections[addr.section]
+  const own = addr ? getItem(profile, addr) : undefined
+  const item = addr ? entryAt(profile, addr)?.item : undefined
+  if (!addr || !own || !item || (!r.entry && own.label !== r.label)) return null
+  const section = sectionsOf(profile, addr.drawer ?? 0)[addr.section]
   const group = addr.group !== undefined ? section?.items[addr.group] : undefined
-  const where = group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
-  const step = r.step && stepsOf(profile, item).some((s) => s.label === r.step) ? r.step : undefined
+  const drawers = drawersOf(profile)
+  const heading = group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
+  const where = drawers.length > 1 ? `${drawers[addr.drawer ?? 0]?.name} › ${heading}` : heading
+  const step = r.step && stepsOf(profile, item, true).some((s) => s.label === r.step) ? r.step : undefined
   return { icon: <EntryIcon type={item.type} icon={item.icon} size={15} />, label: step ? `${item.label} › ${step}` : item.label, where }
 }
 
@@ -465,7 +486,7 @@ function EntryView({
   if (item.type === 'folder') {
     return (
       <ProjectView
-        key={item.path}
+        key={projectRef(item)}
         addr={addr}
         item={item}
         kicker={kicker}
