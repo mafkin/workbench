@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, closeChats, resetFixture, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, closeChats, resetFixture, WORK, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -31,7 +30,7 @@ test.afterEach(() => {
 })
 
 test('servers: a project’s running server shows in the nav, the card and the page; Stop asks first', async ({ page }) => {
-  fs.writeFileSync(WORK_FILE, WORK.replace('        path: ~/beta\n', '        path: ~/beta\n        servers:\n          - { name: api, url: "http://127.0.0.1:1/health" }\n'))
+  await writeWork(WORK.replace('        path: ~/beta\n', '        path: ~/beta\n        servers:\n          - { name: api, url: "http://127.0.0.1:1/health" }\n'))
   const port = await startServer()
   await page.goto('/')
   await expect(entry(page, 'Alpha').locator('.server-mark')).toHaveAttribute('aria-label', '1 server running')

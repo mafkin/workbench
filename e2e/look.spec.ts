@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, DIR, resetFixture, SPAWN_LOG, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, DIR, resetFixture, SPAWN_LOG, WORK, WORK_FILE, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('a link opens from its button; its name is just text', async ({ page }) => {
-  await fsp.writeFile(WORK_FILE, WORK.replace('        args: [hello]\n', '        args: [hello]\n      - { label: Docs, type: link, url: "https://example.com/docs" }\n'))
+  await writeWork(WORK.replace('        args: [hello]\n', '        args: [hello]\n      - { label: Docs, type: link, url: "https://example.com/docs" }\n'))
   await expect(entry(page, 'Docs')).toBeVisible()
   await entry(page, 'Docs').locator('.label').click()
   await page.waitForTimeout(300)

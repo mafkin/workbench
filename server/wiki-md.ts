@@ -173,10 +173,10 @@ export function targetKind(dest: string): { kind: TargetKind; rest: string } {
     const scheme = m[1].toLowerCase()
     if (scheme === 'http' || scheme === 'https') return { kind: 'link', rest: dest }
     if (scheme === 'run' || scheme === 'chat' || scheme === 'daily' || scheme === 'files' || scheme === 'git' || scheme === 'setup') return { kind: scheme, rest: m[2].trim() }
-    if (OVERRIDES.has(scheme)) return { kind: scheme as TargetKind, rest: m[2].trim() }
+    if (OVERRIDES.has(scheme)) return { kind: scheme as TargetKind, rest: decodePath(m[2].trim()) }
     return { kind: 'link', rest: dest }
   }
-  const p = dest.replace(/#.*$/, '')
+  const p = decodePath(dest.replace(/#.*$/, ''))
   if (p.endsWith('/') || p === '~' || p === '.' || p === '..') return { kind: 'folder', rest: p }
   const last = p.slice(p.lastIndexOf('/') + 1)
   if (NOTE_EXT.test(last)) return { kind: 'note', rest: p }
@@ -408,11 +408,33 @@ function pathOf(p: string, ctx: LinkContext): string {
 /** The file a wiki link names when no page matches: `Name` → `Name.md`. */
 export const pageFile = (target: string) => (NOTE_EXT.test(target) ? target : `${target}.md`)
 
-/** A Markdown link; a destination with spaces or parentheses goes in angle brackets, as CommonMark wants. */
-const mdLink = (label: string, dest: string, icon?: string) => `[${label}](${/[\s()<>]/.test(dest) ? `<${dest}>` : dest}${icon ? ` "${icon}"` : ''})`
+/**
+ * A Markdown link. CommonMark allows no spaces in a destination: a path gets
+ * them percent-encoded (`Deploy%20plan.md`), a command line (`run:`, `chat:`,
+ * `daily:`) goes in angle brackets, which keep it readable.
+ */
+const mdLink = (label: string, dest: string, icon?: string) => {
+  let written = dest
+  if (/[\s()<>]/.test(dest)) written = /^(run|chat|daily):/i.test(dest) ? `<${dest}>` : dest.replace(/[\s()<>%]/g, (c) => encodeURIComponent(c))
+  return `[${label}](${written}${icon ? ` "${icon}"` : ''})`
+}
 
-/** A nav entry or step as the link text of its list item. */
-export function linkOf(item: NavItem | StepItem, ctx: Pick<LinkContext, 'wiki' | 'linkTo'>): string {
+/** A path destination as written back to a path (percent-encoding undone); left alone when it does not decode. */
+function decodePath(dest: string): string {
+  try {
+    return decodeURIComponent(dest)
+  } catch {
+    return dest
+  }
+}
+
+/**
+ * A nav entry or step as the link text of its list item. A step's paths are
+ * written as they are (relative to the item's folder); a nav entry's paths
+ * inside the wiki are written relative to it.
+ */
+export function linkOf(item: NavItem | StepItem, ctx: Pick<LinkContext, 'wiki' | 'linkTo'>, step = false): string {
+  const rel = (p: string) => (step ? p : relPath(p, ctx.wiki))
   if ('page' in item && typeof item.page === 'string') {
     const to = ctx.linkTo(item.page)
     const name = to.slice(to.lastIndexOf('/') + 1)
@@ -439,9 +461,9 @@ export function linkOf(item: NavItem | StepItem, ctx: Pick<LinkContext, 'wiki' |
     case 'note':
     case 'report':
     case 'file':
-      return mdLink(item.label, withKind(relPath(item.path, ctx.wiki), item.type), icon)
+      return mdLink(item.label, withKind(rel(item.path), item.type), icon)
     case 'folder': {
-      const p = relPath(item.path ?? '~', ctx.wiki)
+      const p = rel(item.path ?? '~')
       return mdLink(item.label, withKind(p.endsWith('/') || p === '~' || p === '/' ? p : `${p}/`, 'folder'), icon)
     }
   }
@@ -526,7 +548,11 @@ export function replaceLink(text: string, section: number | null, group: number 
   return page.lines.join('\n')
 }
 
-/** Move an item (with its children) within the page: between headings, into or out of groups. */
+/**
+ * Move an item (with its children) within the page: between headings, into or
+ * out of groups. `to.group` names the group as it is before the move; `to.index`
+ * is the place in the target list once the item is out of its old one.
+ */
 export function moveItem(text: string, from: { section: number; group?: number; index: number }, to: { section: number; group?: number; index: number }): string {
   const page = parsePage(text)
   const item = itemAt(page, from.section, from.group, from.index)
@@ -539,13 +565,10 @@ export function moveItem(text: string, from: { section: number; group?: number; 
     const cur = l.length - l.trimStart().length
     return ' '.repeat(Math.max(0, cur - base + want)) + l.trimStart()
   })
-  // After the removal, indexes in the same heading shift by one when the item came from before the target.
-  let { group, index } = to
-  if (from.section === to.section) {
-    if (from.group === undefined && to.group !== undefined && from.index < to.group) group = to.group - 1
-    else if (from.group === to.group && from.index < to.index) index -= 1
-  }
-  return insertBlock(without, to.section, group, index, shifted)
+  // Once the item is out, a group after it in the same heading sits one place earlier.
+  let { group } = to
+  if (from.section === to.section && from.group === undefined && to.group !== undefined && from.index < to.group) group = to.group - 1
+  return insertBlock(without, to.section, group, to.index, shifted)
 }
 
 function insertBlock(text: string, section: number | null, group: number | undefined, index: number, block: string[]): string {

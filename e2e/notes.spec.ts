@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { isoDate } from '../shared/config-schema.ts'
-import { HOME, NOTES, PERSONAL_FILE, pickProfile, resetFixture, WORK_FILE } from './fixture.ts'
+import { HOME, NOTES, pickProfile, resetFixture, WORK_FILE } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -97,9 +97,7 @@ test('New note under a heading creates the file and its entry', async ({ page })
   await expect(entry(page, 'Deploy checklist')).toHaveClass(/selected/)
   await expect(page.locator('.cm-content')).toBeFocused()
   expect(await read(path.join(NOTES, 'Deploy checklist.md'))).toBe('# Deploy checklist\n\n')
-  const yaml = await read(WORK_FILE)
-  expect(yaml).toContain('path: ~/notes/Deploy checklist.md')
-  expect(yaml).toContain('# first entry comment')
+  expect(await read(WORK_FILE)).toContain('- [Deploy checklist](Deploy%20checklist.md)\n')
 
   // The same title again would overwrite: refused.
   await nav(page).locator('.section-head', { hasText: 'Notes' }).click({ button: 'right' })
@@ -139,8 +137,9 @@ test('search finds notes by their text', async ({ page }) => {
   await page.keyboard.press('Control+Shift+F')
   await expect(page.getByLabel('Search notes')).toBeFocused()
   await expect(title(page)).toHaveText('Recent notes')
-  // Ideas, Deploy plan, the daily template, the Runbook entry, and Alpha's README (a note step).
-  await expect(page.locator('.search-results li')).toHaveCount(5)
+  // Ideas, Deploy plan, the daily template, the Runbook entry, Alpha's README (a note step), and the wiki's own
+  // pages: index.md, Workflow.md, projects/Alpha.md and projects/Beta.md.
+  await expect(page.locator('.search-results li')).toHaveCount(9)
   await page.keyboard.type('rollback')
   const hits = page.locator('.search-results li')
   await expect(hits).toHaveCount(1)
@@ -165,14 +164,15 @@ test('Today creates the daily note from the template', async ({ page }) => {
   await expect(markdown(page).locator('h1')).toHaveText(today)
 })
 
-test('a profile without a notes folder offers one', async ({ page }) => {
+test('every profile’s notes live in its wiki; Personal has its own', async ({ page }) => {
   await pickProfile(page, 'Personal')
-  const hint = page.locator('.notes-hint')
-  await expect(hint).toContainText('personal.yaml')
-  await hint.getByRole('button', { name: 'Use ~/notes' }).click()
-  await expect(hint).toHaveCount(0)
-  const yaml = await read(PERSONAL_FILE)
-  expect(yaml).toMatch(/accent: "#8fa58a"\nnotes: ~\/notes\nsections:/)
+  await expect(page.locator('.notes-hint')).toHaveCount(0)
+  await nav(page).locator('.section-head', { hasText: 'Games' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'New note…' }).click()
+  const dialog = page.getByRole('form', { name: 'New note' })
+  await dialog.locator('input[name=title]').fill('Loot tables')
+  await expect(dialog).toContainText('~/pnotes/Loot tables.md')
+  await page.keyboard.press('Escape')
 })
 
 test('properties show from frontmatter, Mentions list the notes linking here, and Rename rewrites their links', async ({ page }) => {

@@ -182,7 +182,7 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
       </form>
       {confirming && current && (
         <ConfirmDialog title={`Delete ${current.name}?`} action="Delete" onCancel={() => setConfirming(false)} onConfirm={() => void remove()}>
-          Its {current.sections.length} {current.sections.length === 1 ? 'heading' : 'headings'} and {entries} {entries === 1 ? 'entry' : 'entries'} go from the file, and so does what other drawers show from it. Folders on disk stay. Undo brings it all back.
+          Its {current.sections.length} {current.sections.length === 1 ? 'heading' : 'headings'} and {entries} {entries === 1 ? 'entry' : 'entries'} leave the switcher; the drawer’s page and the folders on disk stay. Undo brings it back.
         </ConfirmDialog>
       )}
     </div>

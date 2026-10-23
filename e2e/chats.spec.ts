@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, closeChats, resetFixture, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, closeChats, page as wikiPage, resetFixture, WORK, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -23,7 +23,7 @@ async function newChat(page: Page) {
 }
 
 async function withWork(page: Page, from: string, to: string) {
-  await fsp.writeFile(WORK_FILE, WORK.replace(from, to))
+  await writeWork(WORK.replace(from, to))
   await page.reload()
 }
 
@@ -196,5 +196,5 @@ test('the dialog adds a chat step with an agent', async ({ page }) => {
   await dialog.locator('input[name=label]').fill('term')
   await dialog.getByRole('button', { name: 'Add' }).click()
   await expect(tab(page, 'term')).toBeVisible()
-  expect(await fsp.readFile(WORK_FILE, 'utf8')).toContain('- { label: term, type: chat, agent: shell }')
+  expect(await fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')).toContain('- [term](chat:shell)\n')
 })

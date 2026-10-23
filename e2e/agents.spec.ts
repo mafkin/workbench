@@ -1,6 +1,6 @@
 import fsp from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, closeChats, resetFixture, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, closeChats, page as wikiPage, resetFixture, WORK, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -8,7 +8,7 @@ const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workflow' })
 const chatTabs = (page: Page) => tabs(page).locator('.chat-tab')
 const screen = (page: Page) => page.locator('.chat-terminal .xterm-rows')
 const row = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
-const workYaml = () => fsp.readFile(WORK_FILE, 'utf8')
+const wikiText = (rel: string) => fsp.readFile(wikiPage(rel), 'utf8')
 
 const AGENTS = `# How claude starts
 agents:
@@ -18,7 +18,7 @@ agents:
 `
 
 async function withWork(page: Page, text: string) {
-  await fsp.writeFile(WORK_FILE, text)
+  await writeWork(text)
   await page.reload()
   await expect(entry(page, 'Alpha')).toBeVisible()
 }
@@ -39,7 +39,7 @@ test.beforeEach(async ({ page }) => {
 
 test.afterAll(closeChats)
 
-test('the editor adds an agent profile to the YAML, keeping its comments', async ({ page }) => {
+test('the editor adds an agent profile as a page in agents/', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await startMenu(page)
   await page.getByRole('menuitem', { name: 'Agent profiles…' }).click()
@@ -54,10 +54,7 @@ test('the editor adds an agent profile to the YAML, keeping its comments', async
   await expect(dialog.getByRole('option', { name: /Reviewer/ })).toContainText('opus · plan')
   await expect(dialog.getByRole('form', { name: 'Agent profile Reviewer' })).toBeVisible()
 
-  const yaml = await workYaml()
-  expect(yaml).toMatch(/agents:\n {2}Reviewer:\n {4}model: opus\n {4}permission: plan\n {4}instructions: Review only.\n {4}allowedTools:\n {6}- Read\n {6}- Grep\n/)
-  expect(yaml.indexOf('agents:')).toBeLessThan(yaml.indexOf('sections:'))
-  expect(yaml).toContain('# Every project starts with these')
+  expect(await wikiText('agents/Reviewer.md')).toBe('---\nmodel: opus\npermission: plan\nallowedTools:\n  - Read\n  - Grep\n---\nReview only.\n')
   await page.screenshot({ path: 'test-results/agents-editor.png' })
 })
 
@@ -83,7 +80,7 @@ test("the project's agent chip sets what New chat starts", async ({ page }) => {
   await page.getByRole('button', { name: 'Agent for New chat: Claude' }).click()
   await page.getByRole('menuitem', { name: /^Reviewer/ }).click()
   await expect(page.getByRole('button', { name: 'Agent for New chat: Reviewer' })).toBeVisible()
-  expect(await workYaml()).toMatch(/path: ~\/alpha\n\s+agent: Reviewer\n/)
+  expect(await wikiText('projects/Alpha.md')).toContain('agent: Reviewer\n')
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
   await expect(screen(page)).toContainText('"--model","opus"')
   await page.screenshot({ path: 'test-results/agents-chip.png' })
@@ -136,8 +133,6 @@ test('renaming an agent profile renames what uses it; one in use cannot be delet
   await form.locator('input[name=name]').fill('Critic')
   await form.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByRole('form', { name: 'Agent profile Critic' })).toBeVisible()
-  const yaml = await workYaml()
-  expect(yaml).toContain('  Critic:\n')
-  expect(yaml).toMatch(/path: ~\/alpha\n\s+agent: Critic\n/)
-  expect(yaml).toContain('# How claude starts')
+  expect(await wikiText('agents/Critic.md')).toContain('model: opus')
+  expect(await wikiText('projects/Alpha.md')).toContain('agent: Critic\n')
 })

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, resetFixture, SPAWN_LOG, WORK_FILE } from './fixture.ts'
+import { ALPHA, page as wikiPage, resetFixture, SPAWN_LOG } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -11,7 +11,7 @@ const tab = (page: Page, name: string) => tabs(page).getByRole('tab', { name, ex
 // Alpha is a git repository, so it has a Git tab (its count of changed files left out).
 const tabNames = async (page: Page) => (await tabs(page).locator('.step-tab:not(.add)').allInnerTexts()).map((t) => t.split('\n')[0].trim())
 const row = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
-const workYaml = () => fsp.readFile(WORK_FILE, 'utf8')
+const alphaPage = () => fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')
 
 async function stepMenu(page: Page, name: string, item: string) {
   await tabs(page).locator('.step-tab', { hasText: name }).click({ button: 'right' })
@@ -62,7 +62,7 @@ test('a launcher step starts in the project folder and stays on the tab', async 
   await expect(tab(page, 'All files')).toHaveAttribute('aria-selected', 'true')
 })
 
-test('adding a step copies the profile steps into the project, and a missing folder can be made', async ({ page }) => {
+test('adding a step writes the page’s Workflow, and a missing folder can be made', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('button', { name: 'Add step' }).click()
   const dialog = page.getByRole('form', { name: 'Add step' })
@@ -74,14 +74,10 @@ test('adding a step copies the profile steps into the project, and a missing fol
   await expect(dialog).toHaveCount(0)
   expect(await tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme', 'build', 'assets'])
 
-  const yaml = await workYaml()
-  expect(yaml).toMatch(/path: ~\/alpha\n\s+steps:\n/)
-  // The tabs it showed are now its own steps, built-in ones included.
-  expect(yaml).toContain('- { label: All files, type: files }')
-  expect(yaml).toContain('- { label: Git, type: git }')
-  expect(yaml).toContain('- { label: assets, type: folder, path: art/assets }')
-  expect(yaml).toContain('# Every project starts with these')
-  expect(yaml).toContain('# first entry comment')
+  const text = await alphaPage()
+  expect(text).toContain('---\nfolder: ~/alpha\n---\n')
+  expect(text).toContain('## Workflow\n\n- [All files](files:)\n- [Git](git:)\n- [Claude setup](setup:)\n')
+  expect(text).toContain('- [assets](art/assets/)\n')
 
   await tab(page, 'assets').click()
   await page.getByRole('button', { name: 'Create folder' }).click()
@@ -111,7 +107,7 @@ test('steps can be edited, reordered and removed, built-in ones too; Add profile
   await tab(page, 'Claude setup').focus()
   await page.keyboard.press('Delete')
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'build', 'sources'])
-  expect(await workYaml()).not.toContain('type: setup')
+  expect(await alphaPage()).not.toContain('setup:')
 
   await stepMenu(page, 'sources', 'Add profile steps')
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'build', 'sources', 'readme'])
@@ -122,9 +118,9 @@ test('the Git tab can be removed like any step, and comes back as a step', async
   await tabs(page).getByRole('tab', { name: /^Git/ }).click({ button: 'right' })
   await page.getByRole('menuitem', { name: /Remove tab/ }).click()
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
-  const yaml = await workYaml()
-  expect(yaml).not.toContain('type: git')
-  expect(yaml).toContain('- { label: All files, type: files }')
+  const text = await alphaPage()
+  expect(text).not.toContain('git:')
+  expect(text).toContain('- [All files](files:)')
   // The repository itself is untouched.
   expect(fs.existsSync(path.join(ALPHA, '.git'))).toBe(true)
   // It stays gone after a reload, and + brings it back.
@@ -142,11 +138,13 @@ test("one project's steps can become every project's", async ({ page }) => {
   await stepMenu(page, 'build', 'Remove tab')
   await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme'])
   await stepMenu(page, 'readme', 'Save as profile steps')
-  await expect.poll(async () => (await workYaml()).includes('command: make')).toBe(false)
-  // Alpha keeps its own steps; Beta, still on the profile's, follows (no Git: it is not a repository).
-  expect(await workYaml()).toContain('steps:')
+  const workflow = () => fsp.readFile(wikiPage('Workflow.md'), 'utf8')
+  await expect.poll(async () => (await workflow()).includes('run:make')).toBe(false)
+  expect(await workflow()).toContain('- [All files](files:)\n- [Git](git:)\n- [Claude setup](setup:)\n- [sources](src/)\n- [readme](README.md)\n')
+  // Every page keeps its own tabs; the profile steps are what Add profile steps brings.
+  expect(await alphaPage()).toContain('## Workflow')
   await entry(page, 'Beta').click()
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme'])
+  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
 })
 
 test('Home shows recent work and today, not the nav again', async ({ page }) => {

@@ -7,6 +7,7 @@
 #   bin/workbench --uninstall    remove those units again
 #   bin/workbench --print-units  show the units --install would write, changing nothing
 #   bin/workbench --update       what the update unit runs after a pull
+#   bin/workbench --migrate      move profiles still in YAML to wiki pages (part 11)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -71,6 +72,9 @@ EOF
 }
 
 case "${1:-}" in
+  --migrate)
+    exec node "$ROOT/server/migrate-cli.ts"
+    ;;
   --print-units)
     for u in "${UNITS[@]}"; do
       echo "# ==> $UNIT_DIR/$u"

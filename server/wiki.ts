@@ -220,7 +220,11 @@ export class Wiki extends EventEmitter {
       if (!PROFILE_ID.test(id)) throw new StoreError(PROFILE_ID_RULE, 400)
       if (this.#entries.has(id)) throw new StoreError(`There is already a profile "${id}"`, 409)
       const root = absPath(opts.wiki, this.home)
-      for (const e of this.#entries.values()) if (e.root === root) throw new StoreError(`${opts.wiki} is already ${e.id}'s wiki`, 409)
+      for (const e of this.#entries.values()) {
+        if (e.root === root) throw new StoreError(`${opts.wiki} is already ${e.id}'s wiki`, 409)
+        if (root.startsWith(`${e.root}${path.sep}`)) throw new StoreError(`${opts.wiki} is inside ${e.id}'s wiki (${e.wiki}); pick a folder of its own`, 409)
+        if (e.root.startsWith(`${root}${path.sep}`)) throw new StoreError(`${opts.wiki} holds ${e.id}'s wiki (${e.wiki}); pick a folder of its own`, 409)
+      }
       const index = path.join(root, 'index.md')
       await fsp.mkdir(root, { recursive: true })
       if (!(await exists(index))) {
@@ -591,7 +595,11 @@ export class Wiki extends EventEmitter {
             this.#timers.delete('settings')
             this.#serial(async () => {
               if (!(await this.#loadSettings())) return
-              for (const id of Object.keys(this.#settings.profiles)) if (!this.#entries.has(id)) await this.#load(id)
+              // A profile that was just moved to pages is loaded afresh.
+              for (const id of Object.keys(this.#settings.profiles)) {
+                if (this.#entries.get(id)?.legacy) this.#entries.delete(id)
+                if (!this.#entries.has(id)) await this.#load(id)
+              }
               for (const id of [...this.#entries.keys()]) if (!(id in this.#settings.profiles) && !this.#settings.legacy.includes(id)) this.#entries.delete(id)
               this.emit('change')
             }).catch((err) => this.emit('error', err))
@@ -712,7 +720,7 @@ export class Wiki extends EventEmitter {
       if (item.type !== 'folder') throw new OpError('Only pages have a card and tabs; this entry is a link')
       if (item.page) return { item: item as Folder & { page: string }, abs: path.join(root, item.page) }
       const rel = freeRel('projects', item.label)
-      const body = `# ${item.label}\n\n## Workflow\n\n${(item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx)}`).join('\n')}\n`
+      const body = `# ${item.label}\n\n## Workflow\n\n${(item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx, true)}`).join('\n')}\n`
       draft.create(path.join(root, rel), md.setMetas(body, { folder: item.path, icon: item.icon }))
       setNav(at.drawer, (t) => md.replaceLink(t, at.section, at.group, at.index, newLink(rel, item.label)))
       return { item: { ...item, page: rel }, abs: path.join(root, rel) }
@@ -728,7 +736,24 @@ export class Wiki extends EventEmitter {
       }
       return i
     }
-    const stepLink = (input: ItemInput) => md.linkOf(parseStep(input), linkCtx)
+    const stepLink = (input: ItemInput) => md.linkOf(parseStep(input), linkCtx, true)
+    /**
+     * The drawer pages, making the first one when the profile has none yet:
+     * index.md's own nav moves into a page named after the profile, and
+     * index.md lists it under `## Drawers`. Returns each drawer's page.
+     */
+    const ownDrawers = (): string[] => {
+      if (profile.drawers?.length) return view.navFiles
+      const first = freeRel('drawers', profile.name)
+      const indexText = text(index)
+      const page = md.parsePage(indexText)
+      const body = page.lines.slice(page.body).join('\n')
+      const abs = path.join(root, first)
+      draft.create(abs, body.trim() ? body.replace(/\n*$/, '\n') : `## ${profile.name}\n`)
+      draft.put(index, `${page.lines.slice(0, page.body).join('\n')}${page.body ? '\n' : ''}## Drawers\n\n- [[${noExt(first)}]]\n`)
+      view.navFiles = [abs]
+      return view.navFiles
+    }
 
     switch (op.op) {
       case 'addSection':
@@ -844,14 +869,14 @@ export class Wiki extends EventEmitter {
         for (const step of profile.workflow) {
           if (have.has(`${step.type}\n${step.label}`)) continue
           const s = workflowOf(abs)
-          draft.put(abs, md.insertItem(text(abs), s, undefined, undefined, md.linkOf(step, linkCtx)))
+          draft.put(abs, md.insertItem(text(abs), s, undefined, undefined, md.linkOf(step, linkCtx, true)))
         }
         return
       }
       case 'setWorkflow': {
         const { item } = pageOf(op.at)
         const abs = path.join(root, 'Workflow.md')
-        const list = (item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx)}`).join('\n')
+        const list = (item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx, true)}`).join('\n')
         const existing = draft.get(abs)
         if (existing === null) draft.put(abs, `# Workflow\n\nThe steps a new item gets with Add profile steps.\n\n${list}\n`)
         else {
@@ -872,17 +897,10 @@ export class Wiki extends EventEmitter {
         const name = heading(op.name)
         const drawers = drawersOf(profile)
         if (drawers.some((d) => lower(d.name) === lower(name))) throw new OpError(`There is already a drawer called ${name}`)
-        let indexText = text(index)
-        if (!profile.drawers?.length) {
-          // The first drawer: index.md's own nav moves into a page named after the profile.
-          const first = freeRel('drawers', profile.name)
-          const page = md.parsePage(indexText)
-          const body = page.lines.slice(page.body).join('\n')
-          draft.create(path.join(root, first), body.trim() ? `${body.replace(/\n*$/, '\n')}` : `## ${profile.name}\n`)
-          indexText = `${page.lines.slice(0, page.body).join('\n')}${page.body ? '\n' : ''}## Drawers\n\n- [[${noExt(first)}]]\n`
-        }
+        ownDrawers()
         const rel = freeRel('drawers', name)
-        draft.create(path.join(root, rel), `## ${name}\n`)
+        draft.create(path.join(root, rel), `# ${name}\n`)
+        const indexText = text(index)
         const page = md.parsePage(indexText)
         const section = page.sections.findIndex((s) => s.items.some((it) => it.link.kind === 'wiki' && lower(it.link.target).startsWith('drawers/')))
         draft.put(index, md.insertItem(indexText, section < 0 ? null : section, undefined, undefined, `[[${noExt(rel)}]]`))
@@ -890,8 +908,8 @@ export class Wiki extends EventEmitter {
       }
       case 'setDrawer': {
         const d = drawersOf(profile)[op.drawer]
-        if (!d || !profile.drawers?.length) throw new OpError(`Drawer ${op.drawer} does not exist`)
-        const abs = view.navFiles[op.drawer]
+        if (!d) throw new OpError(`Drawer ${op.drawer} does not exist`)
+        const abs = ownDrawers()[op.drawer]
         if (op.field === 'name') {
           const name = heading(String(op.value))
           if (drawersOf(profile).some((x, i) => i !== op.drawer && lower(x.name) === lower(name))) throw new OpError(`There is already a drawer called ${name}`)
@@ -973,7 +991,17 @@ export class Wiki extends EventEmitter {
       draft.put(fileOf(existing), null)
       return
     }
-    const parsed = AgentProfile.safeParse(input)
+    // An empty field from the editor means "not set".
+    const cleaned: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries((input ?? {}) as Record<string, unknown>)) {
+      if (typeof v === 'string') {
+        if (v.trim()) cleaned[k] = v
+      } else if (Array.isArray(v)) {
+        const items = v.filter((x) => typeof x !== 'string' || x.trim())
+        if (items.length) cleaned[k] = items
+      } else if (v !== undefined && v !== null) cleaned[k] = v
+    }
+    const parsed = AgentProfile.safeParse(cleaned)
     if (!parsed.success) throw new OpError(describeIssue(parsed.error))
     const a = parsed.data
     const newName = (rename ?? existing ?? name).trim()
@@ -1014,7 +1042,7 @@ export class Wiki extends EventEmitter {
         const wf = md.sectionNamed(page, 'Workflow')
         if (wf !== null) {
           ;(item.steps ?? []).forEach((s, i) => {
-            if (s.type === 'chat' && same(s.agent)) draft.put(abs, md.replaceLink(draft.get(abs) ?? '', wf, undefined, i, md.linkOf({ ...s, agent: to }, linkCtx)))
+            if (s.type === 'chat' && same(s.agent)) draft.put(abs, md.replaceLink(draft.get(abs) ?? '', wf, undefined, i, md.linkOf({ ...s, agent: to }, linkCtx, true)))
           })
         }
       }
@@ -1028,7 +1056,7 @@ export class Wiki extends EventEmitter {
       profile.workflow.forEach((s, i) => {
         const it = items[i]
         if (!it || s.type !== 'chat' || !same(s.agent)) return
-        lines[it.line] = lines[it.line].slice(0, it.span[0]) + md.linkOf({ ...s, agent: to }, linkCtx) + lines[it.line].slice(it.span[1])
+        lines[it.line] = lines[it.line].slice(0, it.span[0]) + md.linkOf({ ...s, agent: to }, linkCtx, true) + lines[it.line].slice(it.span[1])
       })
       draft.put(wfFile, lines.join('\n'))
     }

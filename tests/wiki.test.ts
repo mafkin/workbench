@@ -305,15 +305,15 @@ describe('drawers are pages in drawers/', () => {
     await run([{ op: 'addDrawer', name: 'Game dev' }])
     expect(await read('index.md')).toBe('---\nname: Work\naccent: "#7d93ab"\n---\n## Drawers\n\n- [[drawers/Work]]\n- [[drawers/Game dev]]\n')
     expect(await read('drawers/Work.md')).toContain('Words about this profile.\n\n## Projects\n<!-- first entry comment -->\n- [[Alpha]]')
-    expect(await read('drawers/Game dev.md')).toBe('## Game dev\n')
+    expect(await read('drawers/Game dev.md')).toBe('# Game dev\n')
     expect(work().drawers?.map((d) => d.name)).toEqual(['Work', 'Game dev'])
     expect(work().drawers?.[0].sections.map((s) => s.title)).toEqual(['Projects', 'Tools', 'Notes'])
 
     await run([{ op: 'setShared', at: { section: 0, index: 1 }, drawer: 1, on: true }])
-    expect(await read('drawers/Game dev.md')).toBe('## Game dev\n\n## Projects\n\n- [[Beta]]\n')
-    expect(work().drawers?.[1].sections[1].items[0]).toMatchObject({ label: 'Beta', page: 'projects/Beta.md' })
-    await run([{ op: 'addSection', drawer: 1, title: 'Tools' }, { op: 'addItem', to: { drawer: 1, section: 2 }, item: { type: 'link', label: 'Godot docs', url: 'https://docs.godotengine.org' } }])
-    expect(work().drawers?.[1].sections[2].items[0].label).toBe('Godot docs')
+    expect(await read('drawers/Game dev.md')).toBe('# Game dev\n\n## Projects\n\n- [[Beta]]\n')
+    expect(work().drawers?.[1].sections[0].items[0]).toMatchObject({ label: 'Beta', page: 'projects/Beta.md' })
+    await run([{ op: 'addSection', drawer: 1, title: 'Tools' }, { op: 'addItem', to: { drawer: 1, section: 1 }, item: { type: 'link', label: 'Godot docs', url: 'https://docs.godotengine.org' } }])
+    expect(work().drawers?.[1].sections[1].items[0].label).toBe('Godot docs')
     await run([{ op: 'setShared', at: { section: 0, index: 1 }, drawer: 1, on: false }])
     expect(await read('drawers/Game dev.md')).not.toContain('Beta')
 
@@ -332,6 +332,13 @@ describe('drawers are pages in drawers/', () => {
     expect(await exists('drawers/Game dev.md')).toBe(true)
     expect(await status(run([{ op: 'deleteDrawer', drawer: 0 }]))).toBe(400)
   })
+
+  it('a drawer setting on a profile without drawers makes the first drawer page', async () => {
+    await run([{ op: 'setDrawer', drawer: 0, field: 'logo', value: 'abc.png' }])
+    expect(await read('drawers/Work.md')).toMatch(/^---\nlogo: abc.png\n---\nWords about this profile.\n\n## Projects\n/)
+    expect(await read('index.md')).toBe('---\nname: Work\naccent: "#7d93ab"\n---\n## Drawers\n\n- [[drawers/Work]]\n')
+    expect(work().drawers?.[0]).toMatchObject({ name: 'Work', logo: 'abc.png' })
+  })
 })
 
 describe('profiles and settings', () => {
@@ -344,6 +351,8 @@ describe('profiles and settings', () => {
     expect(wiki.profile('copy').profile?.sections.map((s) => s.title)).toEqual(['Projects', 'Tools', 'Notes'])
     expect(await fsp.readFile(path.join(home, 'copy/Workflow.md'), 'utf8')).toBe(WORK_WIKI['Workflow.md'])
     expect(await status(wiki.createProfile('again', { name: 'Again', wiki: '~/notes' }))).toBe(409)
+    expect(await status(wiki.createProfile('nested', { name: 'Nested', wiki: '~/notes/sub' }))).toBe(409)
+    expect(await status(wiki.createProfile('outer', { name: 'Outer', wiki: '~' }))).toBe(409)
     expect(await status(wiki.createProfile('Bad Id', { name: 'x', wiki: '~/x' }))).toBe(400)
     await wiki.setActive('side')
     expect(wiki.state().activeProfile).toBe('side')

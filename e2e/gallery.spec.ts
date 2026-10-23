@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { encodePng } from '../server/thumbs.ts'
-import { ALPHA, closeChats, resetFixture, SPAWN_LOG, THUMBS, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, closeChats, resetFixture, SPAWN_LOG, THUMBS, WORK, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -80,10 +80,7 @@ test.beforeEach(async ({ page }) => {
   fs.writeFileSync(path.join(ASSETS, 'game/icon.png'), png(16, 16, [90, 180, 90, 255]))
   fs.writeFileSync(path.join(ASSETS, 'game/main.tscn'), '[gd_scene format=3]\n')
   // Blender and Godot aren't installed here; rules of the profile's own run as written (into the fake spawn's log).
-  fs.writeFileSync(
-    WORK_FILE,
-    WORK.replace('notes: ~/notes\n', 'notes: ~/notes\nopenWith:\n  - { ext: [blend], command: blender }\n  - { ext: [tscn], command: godot, args: [--editor, --path, "{godot}"] }\n'),
-  )
+  await writeWork(WORK.replace('notes: ~/notes\n', 'notes: ~/notes\nopenWith:\n  - { ext: [blend], command: blender }\n  - { ext: [tscn], command: godot, args: [--editor, --path, "{godot}"] }\n'))
   await page.goto('/')
   await expect(entry(page, 'Alpha')).toBeVisible()
   await expect(page.locator('.dot.live')).toBeVisible()

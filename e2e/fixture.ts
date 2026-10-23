@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { migrateProfile } from '../server/migrate.ts'
 import { migrateFixture } from '../tests/fixtures/wiki.ts'
 import type { Page } from '@playwright/test'
 
@@ -179,7 +180,21 @@ export async function resetFixture() {
     await fsp.writeFile(path.join(HOME, rel), text)
   }
   // The YAML above is the fixture's spec; the app reads it as wikis (~/notes and ~/pnotes).
-  await migrateFixture(DIR, HOME, { defaultWiki: () => PNOTES, repo: (folder) => fs.existsSync(path.join(folder, '.git')) })
+  await migrateFixture(DIR, HOME, { defaultWiki: () => '~/pnotes', repo: (folder) => fs.existsSync(path.join(folder, '.git')) })
+}
+
+/** A hand edit of the work profile: the YAML is the fixture's language, written into the wiki as pages (the app picks them up). */
+export async function writeWork(yaml: string, id = 'work') {
+  const { wiki, files } = migrateProfile(yaml, { id, home: HOME, wiki: id === 'work' ? '~/notes' : '~/pnotes', repo: (folder) => fs.existsSync(path.join(folder, '.git')) })
+  const root = path.join(HOME, wiki.slice(2))
+  // index.md last: once it changes, the pages it links must already be there.
+  const { 'index.md': index, ...rest } = files
+  for (const [rel, text] of Object.entries(rest)) {
+    await fsp.mkdir(path.dirname(path.join(root, rel)), { recursive: true })
+    await fsp.writeFile(path.join(root, rel), text)
+  }
+  await fsp.writeFile(path.join(root, 'index.md'), index)
+  return files
 }
 
 /** Secret values in the fake Claude setup; none may reach the page. */

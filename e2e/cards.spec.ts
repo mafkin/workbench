@@ -1,16 +1,16 @@
 import fsp from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
-import { resetFixture, SPAWN_LOG, WORK, WORK_FILE } from './fixture.ts'
+import { page as wikiPage, resetFixture, SPAWN_LOG, WORK, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workflow' })
-const workYaml = () => fsp.readFile(WORK_FILE, 'utf8')
+const alphaPage = () => fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')
 
 /** Write the work profile with extra lines under Alpha (and Beta); the app picks up the hand edit. */
 async function withProjects(alpha: string, beta = '') {
   const text = WORK.replace('        path: ~/alpha\n', `        path: ~/alpha\n${alpha}`).replace('        path: ~/beta\n', `        path: ~/beta\n${beta}`)
-  await fsp.writeFile(WORK_FILE, text)
+  await writeWork(text)
   return text
 }
 
@@ -26,7 +26,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.dot.live')).toBeVisible()
 })
 
-test('the project header is the card: status, category, description and pin write the YAML', async ({ page }) => {
+test('the project header is the card: status, category, description and pin write the page’s frontmatter', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await pick(page, 'Status: Active', 'Paused')
   await expect(page.getByRole('button', { name: 'Status: Paused' })).toBeVisible()
@@ -47,13 +47,11 @@ test('the project header is the card: status, category, description and pin writ
   await expect(entry(page, 'Alpha').locator('.pin-mark')).toBeVisible()
   await page.screenshot({ path: 'test-results/cards-header.png' })
 
-  await expect.poll(workYaml).toContain('pinned: true')
-  const yaml = await workYaml()
-  expect(yaml).toMatch(/path: ~\/alpha\n\s+status: paused\n\s+category: client\n\s+description: The alpha project\n\s+pinned: true\n/)
-  expect(yaml).toContain('# first entry comment')
+  await expect.poll(alphaPage).toContain('pinned: true')
+  expect(await alphaPage()).toMatch(/^---\nfolder: ~\/alpha\nstatus: paused\ncategory: client\ndescription: The alpha project\npinned: true\n---\n# Alpha\n/)
 
   await pick(page, 'Status: Paused', 'Active')
-  await expect.poll(workYaml).not.toContain('status:')
+  await expect.poll(alphaPage).not.toContain('status:')
 })
 
 test('the nav puts pinned projects first and hides archived ones until asked', async ({ page }) => {
@@ -71,13 +69,14 @@ test('the nav puts pinned projects first and hides archived ones until asked', a
 })
 
 test("a project's right-click menu archives it, with Undo", async ({ page }) => {
+  const before = await alphaPage()
   await entry(page, 'Alpha').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Archive' }).click()
   await expect(entry(page, 'Alpha')).toHaveCount(0)
-  await expect.poll(workYaml).toContain('status: archived')
+  await expect.poll(alphaPage).toContain('status: archived')
   await page.locator('.toast').getByRole('button', { name: 'Undo' }).click()
   await expect(entry(page, 'Alpha')).toBeVisible()
-  expect(await workYaml()).toBe(WORK)
+  expect(await alphaPage()).toBe(before)
 })
 
 test('a report tab shows the HTML report with its own stylesheet, sandboxed', async ({ page }) => {

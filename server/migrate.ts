@@ -99,7 +99,7 @@ export function migrateParsed(profile: Profile, opts: MigrateOptions): Migrated 
     if (meta.pinned === false) meta.pinned = undefined
     meta.servers = item.servers
     const steps = item.steps ?? legacySteps(profile, !!item.path && !!opts.repo?.(expandHome(item.path, opts.home)))
-    const body = `# ${item.label}\n${item.description ? `\n${item.description}\n` : ''}${steps.length ? `\n## Workflow\n\n${steps.map((s) => `- ${md.linkOf(s, ctx)}`).join('\n')}\n` : ''}`
+    const body = `# ${item.label}\n${item.description ? `\n${item.description}\n` : ''}${steps.length ? `\n## Workflow\n\n${steps.map((s) => `- ${md.linkOf(s, ctx, true)}`).join('\n')}\n` : ''}`
     files[rel] = metaBlock(meta) + body
   }
 
@@ -138,7 +138,7 @@ export function migrateParsed(profile: Profile, opts: MigrateOptions): Migrated 
     files['index.md'] = metaBlock(indexMeta) + navText(profile.sections)
   }
   if (profile.workflow.length) {
-    files['Workflow.md'] = `# Workflow\n\nThe steps an item gets with Add profile steps; Save as profile steps writes them here.\n\n${profile.workflow.map((s: StepItem) => `- ${md.linkOf(s, ctx)}`).join('\n')}\n`
+    files['Workflow.md'] = `# Workflow\n\nThe steps an item gets with Add profile steps; Save as profile steps writes them here.\n\n${profile.workflow.map((s: StepItem) => `- ${md.linkOf(s, ctx, true)}`).join('\n')}\n`
   }
   for (const [name, a] of Object.entries(profile.agents ?? {})) {
     const meta: Record<string, unknown> = {}

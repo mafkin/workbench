@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, closeChats, NOTES, PORT, resetFixture, TRASH, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, closeChats, NOTES, PORT, resetFixture, TRASH, WORK, WORK_FILE, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -99,7 +99,7 @@ test('files: a huge folder draws only the rows in view', async ({ page }) => {
 })
 
 test('cards: a category’s colour from the card, and the project’s dates', async ({ page }) => {
-  await fsp.writeFile(WORK_FILE, WORK.replace('        path: ~/alpha\n', '        path: ~/alpha\n        category: Games\n'))
+  await writeWork(WORK.replace('        path: ~/alpha\n', '        path: ~/alpha\n        category: Games\n'))
   await page.reload()
   await entry(page, 'Alpha').click()
   await expect(page.locator('.card-dates')).toContainText(/Created .* · Updated/)
@@ -126,7 +126,7 @@ test('nav: a broken file pauses the pencil; chats follow /clear', async ({ page 
     })
     .toBe(cleared)
 
-  await fsp.writeFile(WORK_FILE, 'name: Work\nsections: [oops\n')
+  await fsp.writeFile(WORK_FILE, '---\nname: [oops\n---\n')
   await expect(nav(page).getByRole('alert')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Edit navigation' })).toBeDisabled()
 })

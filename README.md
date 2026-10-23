@@ -39,109 +39,112 @@ Config lives in `~/.config/workbench/`. Set `WORKBENCH_CONFIG_DIR` to use anothe
 
 | File | Holds |
 | --- | --- |
-| `settings.yaml` | active profile and profile order |
-| `profiles/<id>.yaml` | one file per profile; add a file (or use **Profile settings**) to add a profile |
+| `settings.yaml` | the active profile and, in order, each profile's wiki folder |
+| `backgrounds/`, `logos/` | pictures the app copied for backgrounds and drawer logos |
 
-You can edit the files by hand or through the app (the pencil at the top of the nav panel). App edits keep your comments, key order and formatting. Hand edits show up live. If a file stops parsing, the app shows the error and line, keeps showing the last good version, and won't write over your file until it is fixed.
+A profile is a **wiki**: a folder of Markdown pages. The pages are the configuration, and they are notes too, so search, `[[wiki links]]`, Mentions and the editor work on them. Edit them in Workbench or in any editor: hand edits show up live, and app edits touch only the lines they must, so prose around a list stays as you wrote it. A page that will not parse is reported in a banner (with the line) and never written over; a line that cannot be read as an entry shows up as a note that opens the page, so you can fix it.
 
 ```yaml
+# settings.yaml
+activeProfile: work
+profiles:
+  work: ~/Documents/work/notes
+  personal: ~/Documents/notes
+```
+
+Inside a wiki:
+
+| Page | Holds |
+| --- | --- |
+| `index.md` | The profile in its frontmatter (`name`, `accent`, `theme`, `background`, `home`, `categories`, `openWith`, `mcpOff`). Its body is the nav: `##` headings with link lists, one nested list level for groups. With drawers, the body is a `## Drawers` list of drawer pages instead. |
+| `drawers/<Name>.md` | A drawer: frontmatter `logo`, `folder`, `uses`; the body is its nav, as in `index.md`. |
+| `projects/<Name>.md`, or any page linked as `[[Name]]` from the nav | An item. The frontmatter is its card: `folder`, `status` (paused, done, archived), `category`, `pinned`, `agent`, `icon`, `description`, `servers`, and `id` for an item without a folder. `## Workflow` lists its tabs. The rest of the page is yours: the page itself shows when it has no tabs. |
+| `Workflow.md` | The profile steps: the list **Add profile steps** copies into a page and **Save as profile steps** writes here. |
+| `agents/<Name>.md` | An agent profile: frontmatter `model`, `effort`, `permission`, `prompt`, `folders`, `allowedTools`, `disallowedTools`, `mcp` (or `agent` for a Claude Code agent); the body is the instructions. |
+| `templates/page.md`, `templates/daily.md` | Templates for new notes and daily notes; `{{title}}` and `{{date}}` are filled in. |
+| `context/`, `knowledge/`, `processes/`, `inbox/` | The context folders (see Context). |
+
+A list item is a link, and what it opens follows from the target, so there is no type to name:
+
+| Target | Opens as |
+| --- | --- |
+| `[[Page]]`, `[[Page\|shown as]]`, `[[folder/Page]]` | the page, as an item (its card, its tabs; the page itself without tabs). A page that does not exist yet opens as a note to create. |
+| `folder/`, `~/Downloads`, a path without an extension | a folder in the file browser |
+| `x.md` | a note; `x.html` a report in its tab; any other file is shown large |
+| `https://…` | a link, opened in your browser |
+| `run:godot --editor --path .` | a launcher (no shell; `cd <folder> && …` sets its working folder). Spaces put the target in angle brackets: `[Godot](<run:godot --editor>)` |
+| `chat:`, `chat:shell`, `chat:Reviewer`, `chat:shell src/`, `chat:claude ~ -- --model opus` | a chat: the agent (`claude`, `shell` or an agent profile; none means the item's default), a folder, and arguments after `--` |
+| `daily:` | today's note (`daily:journal templates/j.md` picks the folder and template) |
+| `files:`, `git:`, `setup:` | in a `## Workflow` only: the item's folder in the file browser, its Git tab, its Claude setup |
+| `note:plan.txt`, `folder:…`, `report:…`, `file:…` | the kind spelled out, when the target's shape would say otherwise |
+
+A link's title is its icon (`[Docs](https://example.com "book")`, any name from [lucide.dev/icons](https://lucide.dev/icons)); a page carries `icon:` in its frontmatter.
+
+```md
+---
 name: Work
 accent: "#7d93ab"
 theme: fjord                    # slate (default) | fjord | moss | ember | dusk | graphite
 background: theme               # theme (default) | none | a picture in ~/.config/workbench/backgrounds/
 home: ~/Documents/work
-notes: ~/Documents/work/notes   # new notes, daily notes, search and [[wiki links]]
-workflow:                       # profile steps: a template (Add profile steps), and the tabs of older projects without steps:
-  - { label: assets, type: folder, path: assets }                                  # paths are inside the item's folder
-  - { label: modeling, type: launch, command: blender, args: [models/main.blend] }  # runs in the project folder
-  - { label: design, type: note, path: docs/design.md }
-  - { label: agent, type: chat }                                                   # claude in the project folder
-  - { label: shell, type: chat, agent: shell, path: src }                          # your login shell, in src/
+categories: { game: "#8fa58a" } # optional colours for project categories
 openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
-  - { ext: [kra], command: krita }                                       # args default to ["{file}"]
-  - { ext: [tscn, gd], command: godot, args: [--editor, --path, "{godot}"] }  # {file}, {dir}, {godot}: the project folder
-mcpOff: [plugin:productivity:slack, plugin:product-management:gmail]   # MCP servers off by default (names as /mcp writes them)
-categories:                     # optional colours for project categories
-  game: "#8fa58a"
-agents:                         # agent profiles: how claude starts when you pick one
-  Reviewer:
-    model: opus                 # optional, like effort: low | medium | high | xhigh | max
-    permission: plan            # acceptEdits | auto | plan | dontAsk | bypassPermissions
-    instructions: |             # added to claude's system prompt
-      You review code. Don't edit files.
-    prompt: Review the latest changes   # first prompt of a new session
-    folders: [~/Projects/shared-assets] # extra folders (--add-dir)
-    allowedTools: [Read, Grep]
-    disallowedTools: [Bash]
-    mcp: ~/mcp/review.json              # an MCP config file
-  Orchestrator:
-    agent: orchestrator         # a Claude Code agent; it decides model and effort
-sections:
-  - title: Projects
-    collapsed: false
-    items:
-      - { label: IFC Checker, type: folder, path: ~/ifc_checker_project }
-      - label: Ideas board      # a new entry: an item, blank until you add steps
-        type: item
-        id: i3f9c2a1            # an item without a folder gets an id (written by the app)
-        steps:
-          - { label: ideas, type: note, path: ~/notes/ideas.md }
-          - { label: board, type: link, url: "https://example.com/b" }
-      - label: Tuohi
-        type: folder
-        path: ~/Projects/tuohi
-        description: Card game about birch-bark crafts   # the project card
-        status: paused          # active (the default) | paused | done | archived
-        category: game
-        pinned: true
-        agent: Reviewer         # what New chat starts here (default: plain Claude)
-        servers:                # optional: servers to check even when they're not running
-          - { name: web, port: 5173 }
-          - { name: api, url: "http://127.0.0.1:9000/health" }
-        steps:                  # its tabs, in order (without steps: an older project shows All files, Git, Claude setup and the workflow)
-          - { label: All files, type: files }        # the item's folder in the file browser
-          - { label: Git, type: git }                # its repository
-          - { label: Claude setup, type: setup }     # what claude loads there
-          - { label: sprites, type: folder, path: assets/sprites }
-          - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
-          - { label: tests, type: report, path: reports/index.html }   # an HTML page shown in the tab
-          - { label: render, type: file, path: renders/latest.png }    # one file shown large
-          - { label: board, type: link, url: "https://example.com/b" } # opens in your browser
-      - { label: Runbook, type: note, path: ~/deploy-tools/RUNBOOK.md }
-      - { label: Today, type: daily }   # optional: folder (default daily), template (default templates/daily.md)
-      - { label: Docs, type: link, url: "https://example.com" }
-      - { label: Scratch, type: chat, path: "~", args: [--model, opus] }  # a chat outside projects
-      - label: Claude here
-        type: launch
-        command: gnome-terminal
-        args: ["--working-directory=~/ifc_checker_project", "--", "claude"]
-        cwd: ~                  # optional
-      - label: Deploy           # a group: one level of entries inside
-        type: group
-        items: []
+  - { ext: [kra], command: krita }
+mcpOff: [plugin:toolkit:slack]  # MCP servers off by default (see Claude setup)
+---
+## Projects
+- [[Tuohi]]
+- [[IFC Checker|IFC]]
+- [Downloads](~/Downloads)
+
+## Reference
+- [Runbook](~/deploy-tools/RUNBOOK.md)
+- [Docs](https://example.com "book")
+- [Today](daily:)
+- [Scratch](<chat:claude ~>)
+- Deploy
+  - [Claude here](<run:cd ~/ifc_checker_project && gnome-terminal -- claude>)
 ```
 
-Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://lucide.dev/icons). Keys the app doesn't know about are kept.
+```md
+---
+folder: ~/Projects/tuohi
+status: paused
+category: game
+pinned: true
+agent: Reviewer
+servers:
+  - { name: web, port: 5173 }
+---
+# Tuohi
 
-A profile can hold several **drawers**, each a nav of its own. Then `drawers:` takes the place of `sections:` (a file has one or the other):
+Card game about birch-bark crafts.
 
-```yaml
-drawers:
-  - name: Game dev
-    logo: 3fa2c19e04b1.png        # a 64×64 PNG in ~/.config/workbench/logos/ (set from the app)
-    folder: ~/notes/drawers/game-dev   # its shared folder
-    uses: [Research]              # drawers whose shared folders it uses; unknown names are ignored
-    sections:
-      - title: Projects
-        items:
-          - { label: Tower, type: folder, path: ~/dev/tower }
-  - name: Research
-    sections:
-      - title: Projects
-        items:
-          # Tower from Game dev, shown here too: found by drawer, label and path
-          - { label: Tower, type: shared, drawer: Game dev, path: ~/dev/tower }
+## Workflow
+
+- [All files](files:)
+- [Git](git:)
+- [sprites](assets/sprites/)
+- [Godot](<run:godot --editor --path .>)
+- [tests](reports/index.html)
+- [render](renders/latest.png)
+- [design](docs/design.md)
+- [agent](chat:)
+- [board](https://example.com/b)
 ```
+
+```md
+---
+model: opus
+permission: plan
+prompt: Review the latest changes
+folders: [~/Projects/shared-assets]
+allowedTools: [Read, Grep]
+---
+You review code. Don't edit files.
+```
+
+**Moving from the YAML profiles** (before part 11): the nav shows a banner with **Move to pages**, and `bin/workbench --migrate` does the same from a terminal. Each `profiles/<id>.yaml` becomes a wiki in its `notes:` folder (else `<home>/notes`, else `~/notes`); projects become pages under `projects/`, with the tabs they showed as their `## Workflow`; the YAML file is kept as `<id>.yaml.bak`. Comments in the YAML are not carried over. Until then the profile is read-only.
 
 ## Using it
 

@@ -768,8 +768,10 @@ export function App() {
       }
       // Show this entry in the profile's other drawers too.
       const all = p ? drawersOf(p) : []
-      if (p && all.length > 1 && item.type !== 'group') {
-        const shownIn = new Set(sharedRefs(p, addr).map((r) => r.addr.drawer ?? 0))
+      if (p && all.length > 1 && item.type === 'folder' && item.page) {
+        // A page is in a drawer when that drawer's page links it.
+        const pageOf = item.type === 'folder' ? item.page : undefined
+        const shownIn = new Set(all.flatMap((d, i) => (pageOf && d.sections.some((s) => s.items.some((x) => x.type === 'folder' && x.page === pageOf)) ? [i] : [])))
         if (entries.length) entries.push('sep')
         all.forEach((d, i) => {
           if (i === (addr.drawer ?? 0)) return
