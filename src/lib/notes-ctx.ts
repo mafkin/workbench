@@ -12,7 +12,11 @@ export interface NotesApi {
   setRoot: (value: string) => void
   /** Every note the profile can reach, newest first; resolves wiki links. */
   list: NoteSummary[]
+  /** The profile's projects, for `[[Project/path]]` links to files in them. */
+  projects: { label: string; path: string }[]
   open: (path: string) => void
+  /** A folder (or a file's folder) in the file browser, for links to files that are not notes. */
+  openFolder: (path: string) => void
   /** Clicked a [[wiki link]] to a note that does not exist yet. */
   missing: (name: string) => void
   /** A note was created or saved; refreshes the list. */

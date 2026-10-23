@@ -448,3 +448,147 @@ describe('HTTP routes', () => {
     expect((await get('/api/state')).json().home).toBe(home)
   })
 })
+
+describe('frontmatter', () => {
+  it('is parsed into meta; broken YAML is reported without breaking the note', async () => {
+    await write('notes/Tuohi.md', '---\nstatus: paused\ntags: [game, art]\n---\n# Tuohi\n')
+    const file = await notes.read('work', '~/notes/Tuohi.md')
+    expect(file.meta).toEqual({ status: 'paused', tags: ['game', 'art'] })
+    expect(file.metaError).toBeUndefined()
+    expect(file.text.startsWith('---\nstatus')).toBe(true)
+    await write('notes/Bad.md', '---\nstatus: [\n---\nbody\n')
+    const bad = await notes.read('work', '~/notes/Bad.md')
+    expect(bad.meta).toEqual({})
+    expect(bad.metaError).toBeTruthy()
+    expect((await notes.read('work', '~/notes/Ideas.md')).meta).toEqual({})
+  })
+
+  it('comes back with a save', async () => {
+    const { rev } = await notes.read('work', '~/notes/Ideas.md')
+    const saved = await notes.write('work', '~/notes/Ideas.md', rev, '---\ntags: [x]\n---\n# Ideas\n')
+    expect(saved.meta).toEqual({ tags: ['x'] })
+  })
+})
+
+describe('backlinks', () => {
+  it('lists notes linking here by name, path, alias, heading or relative link, with the lines', async () => {
+    await write('notes/A.md', 'See [[Deploy plan]] and [[sub/Deploy plan|the plan]].\n\nAlso [[Deploy plan#Steps]].\n')
+    await write('notes/sub/B.md', 'Relative: [plan](Deploy%20plan.md) and [[Ideas]].\n')
+    await write('notes/C.md', 'Nothing here. [[Other]]\n')
+    const hits = await notes.backlinks('work', '~/notes/sub/Deploy plan.md')
+    expect(hits.map((h) => h.path).sort()).toEqual(['~/notes/A.md', '~/notes/sub/B.md'])
+    const a = hits.find((h) => h.path === '~/notes/A.md')!
+    expect(a.lines.map((l) => l.line)).toEqual([1, 3])
+    expect(a.lines[0].ranges).toEqual([
+      [4, 19],
+      [24, 52],
+    ])
+    expect(a.lines[0].text).toBe('See [[Deploy plan]] and [[sub/Deploy plan|the plan]].')
+    expect(hits.find((h) => h.path === '~/notes/sub/B.md')!.lines[0].ranges).toEqual([[10, 34]])
+  })
+
+  it('does not list the note itself, and reaches note entries outside the notes folder', async () => {
+    await write('notes/sub/Deploy plan.md', '# Deploy plan\n\n[[Deploy plan]] myself.\n[[RUNBOOK]]\n')
+    expect(await notes.backlinks('work', '~/notes/sub/Deploy plan.md')).toEqual([])
+    expect((await notes.backlinks('work', '~/outside/RUNBOOK.md')).map((h) => h.path)).toEqual(['~/notes/sub/Deploy plan.md'])
+  })
+})
+
+describe('rename', () => {
+  const read = (rel: string) => fsp.readFile(path.join(home, rel), 'utf8')
+
+  it('renames the file and rewrites links to it in every form', async () => {
+    await write('notes/A.md', 'See [[Deploy plan]], [[sub/Deploy plan|the plan]] and [[Deploy plan#Steps]].\n')
+    await write('notes/sub/B.md', 'Relative: [plan](Deploy%20plan.md#steps) and [[Ideas]].\n')
+    await write('notes/sub/Deploy plan.md', '# Deploy plan\n\nSee [[Deploy plan]] (myself) and [[Ideas]].\n')
+    const res = await notes.rename('work', '~/notes/sub/Deploy plan.md', 'Release plan')
+    expect(res).toEqual({ path: '~/notes/sub/Release plan.md', files: 3, links: 5 })
+    expect(fs.existsSync(path.join(home, 'notes/sub/Deploy plan.md'))).toBe(false)
+    expect(await read('notes/A.md')).toBe('See [[Release plan]], [[sub/Release plan|the plan]] and [[Release plan#Steps]].\n')
+    expect(await read('notes/sub/B.md')).toBe('Relative: [plan](Release%20plan.md#steps) and [[Ideas]].\n')
+    expect(await read('notes/sub/Release plan.md')).toBe('# Deploy plan\n\nSee [[Release plan]] (myself) and [[Ideas]].\n')
+    // The list follows.
+    expect((await notes.list('work')).map((n) => n.name)).toContain('Release plan')
+  })
+
+  it('leaves links that point elsewhere alone, including another note with the same name', async () => {
+    await write('notes/Deploy plan.md', 'top-level plan\n')
+    await write('notes/A.md', '[[Deploy plan]] is the top-level one; [[sub/Deploy plan]] is the other.\n')
+    await notes.rename('work', '~/notes/sub/Deploy plan.md', 'Release plan')
+    expect(await read('notes/A.md')).toBe('[[Deploy plan]] is the top-level one; [[sub/Release plan]] is the other.\n')
+  })
+
+  it('refuses a taken name, a bad name and notes outside the notes folder; the same name is a no-op', async () => {
+    await write('notes/sub/Taken.md', 'x\n')
+    expect(await status(notes.rename('work', '~/notes/sub/Deploy plan.md', 'Taken'))).toBe(409)
+    expect(await status(notes.rename('work', '~/notes/sub/Deploy plan.md', '...'))).toBe(400)
+    expect(await status(notes.rename('work', '~/outside/RUNBOOK.md', 'Other'))).toBe(422)
+    expect(await notes.rename('work', '~/notes/sub/Deploy plan.md', 'Deploy plan.md')).toEqual({ path: '~/notes/sub/Deploy plan.md', files: 0, links: 0 })
+    expect(fs.existsSync(path.join(home, 'notes/sub/Deploy plan.md'))).toBe(true)
+  })
+
+  it('tells open views, keeps the mode of rewritten notes, and skips a note edited meanwhile', async () => {
+    const a = await write('notes/A.md', '[[Deploy plan]]\n')
+    await fsp.chmod(a, 0o600)
+    await notes.read('work', '~/notes/A.md')
+    await notes.read('work', '~/notes/sub/Deploy plan.md')
+    const events: { path: string; rev: string | null }[] = []
+    notes.on('note', (e) => events.push(e))
+    const res = await notes.rename('work', '~/notes/sub/Deploy plan.md', 'Release plan')
+    expect(res.files).toBe(1)
+    expect((await fsp.stat(a)).mode & 0o777).toBe(0o600)
+    expect(events).toContainEqual({ path: '~/notes/sub/Deploy plan.md', rev: null })
+    expect(events.find((e) => e.path === '~/notes/A.md')?.rev).toBeTruthy()
+  })
+})
+
+describe('templates', () => {
+  it('returns the template when there is one, and refuses odd names', async () => {
+    expect(await notes.template('work', 'page')).toEqual({ text: null })
+    await write('notes/templates/page.md', '# {{title}}\n\n{{date}}\n')
+    expect(await notes.template('work', 'page')).toEqual({ text: '# {{title}}\n\n{{date}}\n' })
+    expect(await status(notes.template('work', '../Ideas'))).toBe(400)
+    expect(await notes.template('bare', 'page')).toEqual({ text: null })
+  })
+})
+
+describe('HTTP routes for the wiki', () => {
+  let server: Awaited<ReturnType<typeof buildServer>>
+  const headers = { host: '127.0.0.1:7420', 'x-workbench': '1' }
+
+  beforeEach(async () => {
+    server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false })
+    await write('notes/A.md', 'See [[Deploy plan]].\n')
+  })
+
+  afterEach(() => server.app.close())
+
+  const q = (p: string) => encodeURIComponent(p)
+
+  it('need the X-Workbench header', async () => {
+    const bare = { host: '127.0.0.1:7420' }
+    expect((await server.app.inject({ method: 'GET', url: `/api/notes/backlinks?profile=work&path=${q('~/notes/sub/Deploy plan.md')}`, headers: bare })).statusCode).toBe(403)
+    expect((await server.app.inject({ method: 'GET', url: '/api/notes/template?profile=work&name=page', headers: bare })).statusCode).toBe(403)
+    expect((await server.app.inject({ method: 'POST', url: '/api/notes/rename', headers: bare, payload: { profile: 'work', path: '~/notes/A.md', name: 'B' } })).statusCode).toBe(403)
+  })
+
+  it('serve backlinks and templates, and rename with the links', async () => {
+    const back = await server.app.inject({ method: 'GET', url: `/api/notes/backlinks?profile=work&path=${q('~/notes/sub/Deploy plan.md')}`, headers })
+    expect(back.json().map((h: { path: string }) => h.path)).toEqual(['~/notes/A.md'])
+    expect((await server.app.inject({ method: 'GET', url: '/api/notes/template?profile=work&name=page', headers })).json()).toEqual({ text: null })
+    const renamed = await server.app.inject({ method: 'POST', url: '/api/notes/rename', headers, payload: { profile: 'work', path: '~/notes/sub/Deploy plan.md', name: 'Release plan' } })
+    expect(renamed.json()).toEqual({ path: '~/notes/sub/Release plan.md', files: 1, links: 1 })
+    expect(await fsp.readFile(path.join(home, 'notes/A.md'), 'utf8')).toBe('See [[Release plan]].\n')
+    expect((await server.app.inject({ method: 'POST', url: '/api/notes/rename', headers, payload: { profile: 'work', path: '~/outside/RUNBOOK.md', name: 'X' } })).statusCode).toBe(422)
+  })
+
+  it('renaming a wiki page in the file browser rewrites links too; other renames are plain', async () => {
+    const op = (p: string, name: string) => server.app.inject({ method: 'POST', url: '/api/files/op', headers, payload: { profile: 'work', op: { op: 'rename', path: p, name } } })
+    const res = await op('~/notes/sub/Deploy plan.md', 'Release plan.md')
+    expect(res.json()).toEqual({ path: '~/notes/sub/Release plan.md' })
+    expect(await fsp.readFile(path.join(home, 'notes/A.md'), 'utf8')).toBe('See [[Release plan]].\n')
+    // To another extension it is no longer a page: a plain rename, links untouched.
+    expect((await op('~/notes/sub/Release plan.md', 'plan.txt')).json()).toEqual({ path: '~/notes/sub/plan.txt' })
+    expect(await fsp.readFile(path.join(home, 'notes/A.md'), 'utf8')).toBe('See [[Release plan]].\n')
+  })
+})

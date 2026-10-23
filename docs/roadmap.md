@@ -45,6 +45,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 8 | Polish, the known gaps, Servers | Done (same branch); merged to `main` with parts 2–7 (PR #1) |
 | 9 | Git per project | Done; merged to `main`; see below |
 | 10 | Assets and media | Done (branch restarted from `main`); merged to `main` with the profile menu, drawers, MCP switches and items (PR #3); see below |
+| 11 | The wiki: pages as configuration | In progress (milestone 1 done); see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -445,6 +446,31 @@ The user asked: launchers in the sidebar started on a single click of their name
   - The one-click shared folder is made by the service from the drawer's name only (`<notes or home>/drawers/<slug>`).
   - Logos are content-named PNGs; nothing prunes unused ones.
 - **Left for later (the user's other two sharing ideas):** a shared shelf heading shown in every drawer of a profile, and dragging entries onto a drawer in the picker (Ctrl to link instead of move). Also: reordering drawers in the app, and pruning unused logos.
+
+### Part 11: the wiki is the configuration (in progress)
+
+The user asked how to simplify the workflow and configuration and make Workbench more wiki-like. The plan is in the session's plan file and summarized here.
+
+- **What's complicated today:** a project is described in three places (nav entry, folder, notes); nav entries and steps are two vocabularies with explicit `type:` fields; `workflow:` forks silently into `steps:`; the nav is the only index; six selection kinds and a fixed Context heading outside the file; notes are a feature rather than the substrate (`[[links]]` only inside the notes folder, no backlinks, no frontmatter, renames break links).
+- **Decisions (2026-10-23):**
+
+  | Question | Answer |
+  | --- | --- |
+  | How far | Everything: projects, nav, workflow, agent profiles and the profile itself become Markdown pages; no profile YAML. `settings.yaml` stays, as a map of profile id to wiki folder |
+  | Project page | `<wiki>/projects/<Name>.md`: frontmatter is the card (`folder`, `status`, `category`, `pinned`, `agent`, `icon`, `servers`), `## Workflow` is the tabs, the body is notes |
+  | Nav | `<wiki>/index.md`: frontmatter is the profile (name, accent, theme, background, home, categories, openWith); headings and link lists are the nav; a nested list is a group |
+  | Default workflow | `<wiki>/Workflow.md`, inherited until a project page has its own `## Workflow` (Customise copies it in, Reset removes it, Use for every project writes `Workflow.md`) |
+  | Link kinds | From the target, no `type:`: `[[Page]]`, `path/` (folder), `x.md`, `x.html` (report), other files, URLs, `run:<command line>`, `chat:[agent] [folder] [-- args]`, `daily:`, and `folder:`/`note:`/`report:`/`file:` overrides |
+  | Chats and the wiki | Every claude chat gets `--add-dir <wiki>` and, in a project, is told its page so it can keep the page's Log |
+  | Claude setup | The project tab stays; the page and its sidebar button go |
+
+- **Milestones:** (1) the wiki substrate, no config change; (2) the wiki store (`wiki-md.ts`, `wiki.ts` replacing the config store with the same `Op`s, `settings.yaml` map, migration, seed, the dialog's target field, New project…, `page:` selection); (3) nav and project page (Context links in `index.md`, the Page tab and Mentions, chats get the wiki, the setup page dropped, `collapsed` to localStorage, `Workflow.md` menu); (4) polish and docs (tags, Pages to write, `templates/project.md`, README/CLAUDE.md).
+- **Milestone 1, built:**
+  - `shared/wikilinks.ts`: the link helpers the UI and the service share (`parseWiki`, `resolveWiki`, `resolveHref`, `linksIn`, `linkPath`, `rewriteLinks`, `relativePath`, `resolveProject`, `blankFrontmatter`, `FRONTMATTER`); `src/lib/wikilinks.ts` keeps the remark plugin and re-exports them.
+  - `server/frontmatter.ts` (moved out of `claude-setup.ts`). `NoteFile` carries `meta` (and `metaError`); the view shows it as a properties strip and blanks the block so task lines keep their numbers.
+  - `Notes.backlinks` (`GET /api/notes/backlinks`): notes linking to a note, with the lines; a **Mentions** section under every note. `Notes.rename` (`POST /api/notes/rename`, and the file browser's rename of a `.md` inside the notes folder): the file is renamed and `[[Old]]`, `[[folder/Old]]` (headings and aliases kept) and relative links are rewritten in every note of the folder; notes elsewhere are named by the config, so they are refused (422). **Rename** / F2 in the note view. `Notes.template` (`GET /api/notes/template`): `templates/page.md` fills `{{title}}` and `{{date}}` for New note… and notes made from wiki links.
+  - `[[Project/path]]` links: a file in a project's folder by the project's label; Markdown opens as a note, anything else opens its folder.
+- **Left for later milestones:** everything above the substrate.
 
 ## Reference
 

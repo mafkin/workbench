@@ -329,6 +329,11 @@ An item's **Git** step shows its folder's repository, with its count of changed 
 - **Task boxes** (`- [ ]`) tick in the formatted view too; the change saves like an edit.
 - **Code blocks** are coloured for JavaScript and TypeScript (with JSX), JSON, CSS, HTML and Markdown; other languages stay plain.
 - Without `notes:` in a profile, the app offers to set it to `<home>/notes` with one click. The folder is created with the first note.
+- **Properties:** YAML frontmatter at the top of a note (`---` … `---`) shows as a row of properties above it instead of as text. Broken frontmatter says so there; the note still opens.
+- **Mentions:** under every note, the notes that link to it, with the lines that do. Click one to open it.
+- **Rename** (or **F2**) renames a note in the notes folder and rewrites the links to it in your other notes: `[[Old]]`, `[[folder/Old]]`, with headings and aliases kept, and relative links like `[x](Old.md)`. Renaming a `.md` in the file browser does the same. Notes outside the notes folder are named by your config, so they are renamed there.
+- `[[Project/docs/design.md]]` links to a file inside a project (a folder entry) by the project's name: Markdown opens as a note, anything else opens its folder.
+- A `<notes>/templates/page.md` is used for new notes (New note…, or created from a wiki link), with `{{title}}` and `{{date}}` filled in.
 
 ### Files
 
@@ -442,4 +447,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 9 | Git per project: changes, hunks, commit with Draft, branches, stash, pull and push, conflicts, history (done) |
 | 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
 | after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
+| 11 | The wiki: pages as configuration (in progress; properties, Mentions, Rename and project links are in) |
 | later | A Tauri window, if wanted |

@@ -11,6 +11,7 @@ import {
   displayPath,
   NOTE_EXT,
   itemBase,
+  noteFileName,
   stepPath,
   stepsOf,
   type NavItem,
@@ -20,7 +21,9 @@ import {
   type SearchHit,
   type SearchLine,
 } from '../shared/config-schema.ts'
+import { dirOf, linkPath, linksIn, rewriteLinks } from '../shared/wikilinks.ts'
 import { StoreError, type ConfigStore } from './config-store.ts'
+import { frontmatter } from './frontmatter.ts'
 import { revOf, writeAtomic } from './fs-util.ts'
 import { absPath, browseRoots, inside, realish } from './paths.ts'
 import { FolderWatcher } from './watch.ts'
@@ -63,6 +66,14 @@ interface Found extends NoteSummary {
 
 const baseName = (file: string) => path.parse(file).name
 
+/** A note's frontmatter for the UI: the data, and the error when it is broken. */
+function meta(text: string): Pick<NoteFile, 'meta' | 'metaError'> {
+  const fm = frontmatter(text)
+  return fm.error ? { meta: fm.data, metaError: fm.error } : { meta: fm.data }
+}
+
+const TEMPLATE_NAME = /^[a-z][a-z0-9-]{0,39}$/
+
 /** Note entries and projects' note steps: files the config names, whatever their extension. */
 function noteEntries(profile: Profile): string[] {
   const out: string[] = []
@@ -79,6 +90,18 @@ function noteEntries(profile: Profile): string[] {
   return out
 }
 
+/** A line cut to a window around its first match when it is long; ranges are moved along. */
+function windowOf(line: string, ranges: [number, number][]): Pick<SearchLine, 'text' | 'ranges'> {
+  if (line.length <= LINE_WINDOW) return { text: line, ranges }
+  const start = Math.max(0, ranges[0][0] - 60)
+  const end = Math.min(line.length, start + LINE_WINDOW)
+  const lead = start > 0 ? '…' : ''
+  return {
+    text: `${lead}${line.slice(start, end)}${end < line.length ? '…' : ''}`,
+    ranges: ranges.filter(([s, e]) => s >= start && e <= end).map(([s, e]) => [s - start + lead.length, e - start + lead.length]),
+  }
+}
+
 /** Matching lines, at most MAX_LINES, long lines cut to a window around the first match. */
 function matchLines(text: string, terms: string[]): SearchLine[] {
   const out: SearchLine[] = []
@@ -86,23 +109,13 @@ function matchLines(text: string, terms: string[]): SearchLine[] {
   for (let i = 0; i < lines.length && out.length < MAX_LINES; i++) {
     const line = lines[i].replace(/\r$/, '')
     const lower = line.toLowerCase()
-    let ranges: [number, number][] = []
+    const ranges: [number, number][] = []
     for (const term of terms) {
       for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) ranges.push([at, at + term.length])
     }
     if (!ranges.length) continue
     ranges.sort((a, b) => a[0] - b[0])
-    let shown = line
-    if (line.length > LINE_WINDOW) {
-      const start = Math.max(0, ranges[0][0] - 60)
-      const end = Math.min(line.length, start + LINE_WINDOW)
-      const lead = start > 0 ? '…' : ''
-      shown = `${lead}${line.slice(start, end)}${end < line.length ? '…' : ''}`
-      ranges = ranges
-        .filter(([s, e]) => s >= start && e <= end)
-        .map(([s, e]) => [s - start + lead.length, e - start + lead.length])
-    }
-    out.push({ line: i + 1, text: shown, ranges })
+    out.push({ line: i + 1, ...windowOf(line, ranges) })
   }
   return out
 }
@@ -149,11 +162,11 @@ export class Notes extends EventEmitter {
     const text = await fsp.readFile(real, 'utf8')
     const rev = revOf(text)
     this.#open.get(real)!.rev = rev
-    return { path: display, text, rev, mtime: stat.mtimeMs }
+    return { path: display, text, rev, mtime: stat.mtimeMs, ...meta(text) }
   }
 
   /** Save `text` if the file is still at `rev`; `rev: null` creates a new file and never overwrites. */
-  async write(id: string, raw: string, rev: string | null, text: string): Promise<{ path: string; rev: string; mtime: number }> {
+  async write(id: string, raw: string, rev: string | null, text: string): Promise<Omit<NoteFile, 'text'>> {
     if (Buffer.byteLength(text) > MAX_NOTE) throw new StoreError('Too large to save as a note (over 2 MB)', 413)
     const { real, display } = await this.#resolve(id, raw, 'note')
     return this.#serial(real, async () => {
@@ -177,7 +190,7 @@ export class Notes extends EventEmitter {
       open.rev = saved
       // The watcher skips a rev it already knows, so report the save here for other windows.
       for (const p of open.paths) this.emit('note', { path: p, rev: saved } satisfies NoteEvent)
-      return { path: display, rev: saved, mtime: (await fsp.stat(real)).mtimeMs }
+      return { path: display, rev: saved, mtime: (await fsp.stat(real)).mtimeMs, ...meta(text) }
     })
   }
 
@@ -194,16 +207,9 @@ export class Notes extends EventEmitter {
     const hits: SearchHit[] = []
     const seen = new Set<string>()
     for (const { real, ...n } of found) {
-      const stat = await fsp.stat(real).catch(() => null)
-      if (!stat || stat.size > MAX_NOTE) continue
+      const text = await this.#textOf(real)
+      if (text === null) continue
       seen.add(real)
-      // Each note's text is kept until its mtime or size changes, so a search reads only what changed.
-      let cached = this.#texts.get(real)
-      if (!cached || cached.mtime !== stat.mtimeMs || cached.size !== stat.size) {
-        cached = { mtime: stat.mtimeMs, size: stat.size, text: await fsp.readFile(real, 'utf8').catch(() => '') }
-        this.#texts.set(real, cached)
-      }
-      const text = cached.text
       const name = n.name.toLowerCase()
       const lower = text.toLowerCase()
       if (!terms.every((t) => name.includes(t) || lower.includes(t))) continue
@@ -214,6 +220,103 @@ export class Notes extends EventEmitter {
     return hits.sort((a, b) => Number(b.title) - Number(a.title)).slice(0, MAX_HITS)
   }
 
+  /** Notes linking to this one, newest first, with the lines that do. */
+  async backlinks(id: string, raw: string): Promise<SearchHit[]> {
+    const { real, display } = await this.#resolve(id, raw, 'note')
+    const found = await this.#collect(id)
+    const notes: NoteSummary[] = found.map(({ real: _real, ...n }) => n)
+    const hits: SearchHit[] = []
+    for (const n of found) {
+      if (n.real === real || hits.length >= MAX_HITS) continue
+      const text = await this.#textOf(n.real)
+      if (text === null) continue
+      const rows = text.split('\n')
+      const lines: SearchLine[] = []
+      for (const link of linksIn(text)) {
+        if (linkPath(link, n.path, notes) !== display) continue
+        const range: [number, number] = [link.start, link.start + link.length]
+        const last = lines[lines.length - 1]
+        if (last?.line === link.line) last.ranges.push(range)
+        else if (lines.length < MAX_LINES) lines.push({ line: link.line, ...windowOf(rows[link.line - 1].replace(/\r$/, ''), [range]) })
+      }
+      const { real: _real, ...summary } = n
+      if (lines.length) hits.push({ ...summary, title: false, lines })
+    }
+    return hits
+  }
+
+  /**
+   * Rename a note in the notes folder and point every link at the new name:
+   * `[[Old]]`, `[[folder/Old]]` (headings and aliases kept) and relative links.
+   * Notes elsewhere are named by the config, so they are not renamed here.
+   */
+  async rename(id: string, raw: string, name: string): Promise<{ path: string; files: number; links: number }> {
+    const { real, display } = await this.#resolve(id, raw, 'note')
+    const found = await this.#collect(id)
+    const old = found.find((n) => n.real === real)
+    if (!old || old.rel === null) throw new StoreError('Only notes in the notes folder can be renamed here', 422)
+    const file = noteFileName(name)
+    if (!file) throw new StoreError('Give the note a name', 400)
+    if (file === path.basename(real)) return { path: display, files: 0, links: 0 }
+    const dest = path.join(path.dirname(real), file)
+    if (await fsp.lstat(dest).then(() => true, () => false)) throw new StoreError(`${file} already exists`, 409)
+    const next = { path: dirOf(old.path) + file, name: baseName(file), rel: dirOf(old.rel) + file }
+    const notes: NoteSummary[] = found.map(({ real: _real, ...n }) => n)
+    const { real: _old, ...oldSummary } = old
+    const edits: { real: string; text: string; out: string; count: number }[] = []
+    for (const n of found) {
+      const text = await this.#textOf(n.real)
+      if (text === null) continue
+      const { text: out, count } = rewriteLinks(text, n.path, notes, oldSummary, next)
+      if (count) edits.push({ real: n.real === real ? dest : n.real, text, out, count })
+    }
+    await fsp.rename(real, dest)
+    // Views of the old name are told it is gone; the app opens the new one.
+    const open = this.#open.get(real)
+    if (open) {
+      this.#open.delete(real)
+      for (const p of open.paths) this.emit('note', { path: p, rev: null } satisfies NoteEvent)
+    }
+    let files = 0
+    let links = 0
+    for (const e of edits) {
+      await this.#serial(e.real, async () => {
+        // Only the text that was read is rewritten; an edit made in between is left alone.
+        const current = await fsp.readFile(e.real, 'utf8').catch(() => null)
+        if (current !== e.text) return
+        await writeAtomic(e.real, e.out, (await fsp.stat(e.real)).mode & 0o7777)
+        files++
+        links += e.count
+        const o = this.#open.get(e.real)
+        if (o) {
+          o.rev = revOf(e.out)
+          for (const p of o.paths) this.emit('note', { path: p, rev: o.rev } satisfies NoteEvent)
+        }
+      })
+    }
+    return { path: next.path, files, links }
+  }
+
+  /** A template from `<notes>/templates/`, for new pages; null when the profile has none. */
+  async template(id: string, name: string): Promise<{ text: string | null }> {
+    if (!TEMPLATE_NAME.test(name)) throw new StoreError('Not a template name', 400)
+    const { root } = await this.#roots(this.#profile(id))
+    if (!root) return { text: null }
+    return { text: await fsp.readFile(path.join(root.real, 'templates', `${name}.md`), 'utf8').catch(() => null) }
+  }
+
+  /** Whether `raw` is Markdown inside the profile's notes folder: a page of its wiki. */
+  async inWiki(id: string, raw: string): Promise<boolean> {
+    try {
+      const { root } = await this.#roots(this.#profile(id))
+      if (!root) return false
+      const real = await realish(absPath(raw, this.home))
+      return NOTE_EXT.test(real) && inside(real, root.real)
+    } catch {
+      return false
+    }
+  }
+
   /** An image in the profile's folders or next to a note entry, for rendering in a note. */
   async asset(id: string, raw: string): Promise<{ real: string; type: string; size: number }> {
     const { real } = await this.#resolve(id, raw, 'image')
@@ -221,6 +324,18 @@ export class Notes extends EventEmitter {
     if (!stat?.isFile()) throw new StoreError('Not found', 404)
     if (stat.size > MAX_IMAGE) throw new StoreError('Image too large', 413)
     return { real, type: IMAGE_TYPES[path.extname(real).toLowerCase()], size: stat.size }
+  }
+
+  /** A note's text, kept until its mtime or size changes, so search and links read only what changed. Null when it is gone or too large. */
+  async #textOf(real: string): Promise<string | null> {
+    const stat = await fsp.stat(real).catch(() => null)
+    if (!stat || stat.size > MAX_NOTE) return null
+    let cached = this.#texts.get(real)
+    if (!cached || cached.mtime !== stat.mtimeMs || cached.size !== stat.size) {
+      cached = { mtime: stat.mtimeMs, size: stat.size, text: await fsp.readFile(real, 'utf8').catch(() => '') }
+      this.#texts.set(real, cached)
+    }
+    return cached.text
   }
 
   #profile(id: string): Profile {

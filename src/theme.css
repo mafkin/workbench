@@ -728,6 +728,89 @@ button {
   padding: 8px 0;
 }
 
+/* Frontmatter, shown as properties above the note. */
+.note-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+
+.note-props .prop {
+  display: inline-flex;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.note-props .k {
+  color: var(--muted);
+}
+
+.note-props.bad {
+  color: var(--warn);
+}
+
+.note-rename {
+  flex: 1;
+  min-width: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+/* Notes linking here. */
+.note-mentions {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.note-mentions ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.note-mentions .mention {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.note-mentions .mention:hover {
+  background: var(--accent-soft);
+}
+
+.note-mentions .mention-name {
+  font-weight: 600;
+}
+
+.note-mentions .hit-line {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.note-mentions mark {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 2px;
+}
+
 .note-surface.editing {
   margin: 0 -18px;
   border: 1px solid var(--border);

@@ -6,7 +6,7 @@ import { useNotes } from '../lib/notes-ctx.ts'
 import { NotesFolderHint } from './NotesFolderHint.tsx'
 
 /** Text with the given [start, end) ranges wrapped in <mark>. */
-function marked(text: string, ranges: [number, number][]): ReactNode[] {
+export function marked(text: string, ranges: [number, number][]): ReactNode[] {
   const out: ReactNode[] = []
   let at = 0
   for (const [s, e] of ranges) {

@@ -72,11 +72,18 @@ export const readNote = (profile: string, path: string) => api<NoteFile>(`/api/n
  * page closes; browsers cap such a request at 64 KB, so a larger note is sent as a normal request.
  */
 export const writeNote = (profile: string, path: string, rev: string | null, text: string, keepalive = false) =>
-  api<{ path: string; rev: string; mtime: number }>('/api/notes/file', {
+  api<Omit<NoteFile, 'text'>>('/api/notes/file', {
     body: { profile, path, rev, text },
     keepalive: keepalive && text.length < 60_000,
   })
 export const listNotes = (profile: string) => api<NoteSummary[]>(`/api/notes/list?${query({ profile })}`)
+/** Notes linking to this one, with the lines that do. */
+export const backlinks = (profile: string, path: string) => api<SearchHit[]>(`/api/notes/backlinks?${query({ profile, path })}`)
+/** Rename a note in the notes folder; links to it are rewritten. */
+export const renameNote = (profile: string, path: string, name: string) =>
+  api<{ path: string; files: number; links: number }>('/api/notes/rename', { body: { profile, path, name } })
+/** `<notes>/templates/<name>.md`, or null. */
+export const noteTemplate = (profile: string, name: string) => api<{ text: string | null }>(`/api/notes/template?${query({ profile, name })}`)
 export const searchNotes = (profile: string, q: string) => api<SearchHit[]>(`/api/notes/search?${query({ profile, q })}`)
 
 export const listFiles = (profile: string, path: string) => api<FileListing>(`/api/files/list?${query({ profile, path })}`)

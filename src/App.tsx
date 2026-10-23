@@ -10,7 +10,9 @@ import {
   entrySlot,
   findShared,
   expandHome,
+  fillTemplate,
   getItem,
+  isoDate,
   itemKey,
   joinNotes,
   noteFileName,
@@ -318,13 +320,26 @@ export function App() {
     notesTimer.current = setTimeout(refreshNotes, 300)
   }, [refreshNotes])
 
+  /** The text of a new page: `templates/page.md` filled in, else a heading. */
+  const newPageText = useCallback(async (id: string, title: string) => {
+    const { text } = await api.noteTemplate(id, 'page').catch(() => ({ text: null }))
+    return text === null ? `# ${title}\n\n` : fillTemplate(text, { date: isoDate(new Date()), title })
+  }, [])
+
+  /** The profile's projects (folder entries, in every drawer), for [[Project/path]] links. */
+  const projects = useMemo(() => {
+    const out: { label: string; path: string }[] = []
+    if (active?.profile) for (const { item } of walkItems(active.profile)) if (item.type === 'folder' && item.path) out.push({ label: item.label, path: item.path })
+    return out
+  }, [active?.profile])
+
   /** Quick-create: the file, then its nav entry, then open it in Edit. Resolves to an error message or null. */
   const createNote = useCallback(
     async (list: ListAddr, title: string, path: string): Promise<string | null> => {
       const a = activeRef.current
       if (!a?.profile) return 'The profile is not loaded'
       try {
-        await api.writeNote(a.id, path, null, `# ${title}\n\n`)
+        await api.writeNote(a.id, path, null, await newPageText(a.id, title))
       } catch (err) {
         if (err instanceof api.ApiError && err.status === 409) return `${path} already exists`
         return err instanceof Error ? err.message : String(err)
@@ -338,7 +353,7 @@ export function App() {
       navigate(itemKey({ ...list, index }))
       return null
     },
-    [run, refreshNotes, navigate],
+    [run, refreshNotes, navigate, newPageText],
   )
 
   /** A [[wiki link]] to a missing note: offer to create it in the notes folder. */
@@ -356,7 +371,7 @@ export function App() {
         if (!file) return
         const path = joinNotes(root, [...parts, file].join('/'))
         try {
-          await api.writeNote(a.id, path, null, `# ${file.replace(/\.md$/, '')}\n\n`)
+          await api.writeNote(a.id, path, null, await newPageText(a.id, file.replace(/\.md$/, '')))
           setFresh(path)
         } catch (err) {
           // Already there (the list was stale): just open it.
@@ -367,7 +382,7 @@ export function App() {
       }
       toasts.push({ message: `No note named "${name}" yet`, action: { label: 'Create', run: () => void create() } })
     },
-    [toasts.push, fail, refreshNotes, openNote],
+    [toasts.push, fail, refreshNotes, openNote, newPageText],
   )
 
   const setRoot = useCallback(
@@ -918,14 +933,16 @@ export function App() {
       suggestedRoot: `${home && home !== '~' ? home.replace(/\/+$/, '') : '~'}/notes`,
       setRoot,
       list: notesList,
+      projects,
       open: openNote,
+      openFolder,
       missing: missingNote,
       changed: notesChanged,
       notify: (message, kind) => toasts.push({ message, kind }),
       fresh,
       clearFresh: () => setFresh(null),
     }
-  }, [active, setRoot, notesList, openNote, missingNote, notesChanged, toasts.push, fresh])
+  }, [active, setRoot, notesList, projects, openNote, openFolder, missingNote, notesChanged, toasts.push, fresh])
 
   const contextApi = useMemo<ContextApi>(
     () => ({

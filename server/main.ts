@@ -18,6 +18,7 @@ import {
   chatName,
   chatProgram,
   displayPath,
+  NOTE_EXT,
   entrySlot,
   expandHome,
   FileOp,
@@ -103,6 +104,8 @@ const NewProfile = z.object({ id: z.string(), name: z.string().trim().min(1, 'A 
 const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr, step: z.int().nonnegative().optional() })
 const PathQuery = z.object({ profile: z.string(), path: z.string() })
 const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string().nullable(), text: z.string() })
+const NoteRename = z.object({ profile: z.string(), path: z.string(), name: z.string() })
+const TemplateQuery = z.object({ profile: z.string(), name: z.string() })
 const ProfileQuery = z.object({ profile: z.string() })
 const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
 const FileOpBody = z.object({ profile: z.string(), op: FileOp })
@@ -367,6 +370,21 @@ export async function buildServer(opts: ServerOptions) {
     return notes.search(profile, q)
   })
 
+  app.get('/api/notes/backlinks', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    return notes.backlinks(profile, p)
+  })
+
+  app.post('/api/notes/rename', async (req) => {
+    const { profile, path: p, name } = parse(NoteRename, req.body)
+    return notes.rename(profile, p, name)
+  })
+
+  app.get('/api/notes/template', async (req) => {
+    const { profile, name } = parse(TemplateQuery, req.query)
+    return notes.template(profile, name)
+  })
+
   app.get('/api/notes/asset', async (req, reply) => {
     const { profile, path: p } = parse(PathQuery, req.query)
     const image = await notes.asset(profile, p)
@@ -397,6 +415,8 @@ export async function buildServer(opts: ServerOptions) {
 
   app.post('/api/files/op', async (req) => {
     const { profile, op } = parse(FileOpBody, req.body)
+    // Renaming a page of the wiki keeps the links to it working.
+    if (op.op === 'rename' && NOTE_EXT.test(op.name) && (await notes.inWiki(profile, op.path))) return { path: (await notes.rename(profile, op.path, op.name)).path }
     return files.op(profile, op)
   })
 

@@ -526,6 +526,10 @@ export interface NoteFile {
   text: string
   rev: string
   mtime: number
+  /** The frontmatter, parsed; `{}` without one, or when it is broken. */
+  meta: Record<string, unknown>
+  /** Why the frontmatter could not be parsed. */
+  metaError?: string
 }
 
 export interface NoteSummary {

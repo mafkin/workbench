@@ -5,7 +5,7 @@ import { NOTE_EXT } from '../../shared/config-schema.ts'
 import { noteImage } from '../lib/api.ts'
 import { cx } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
-import { parseWiki, remarkWikiLinks, resolveHref, resolveWiki, slug, WIKI_HREF } from '../lib/wikilinks.ts'
+import { blankFrontmatter, parseWiki, remarkWikiLinks, resolveHref, resolveProject, resolveWiki, slug, WIKI_HREF } from '../lib/wikilinks.ts'
 
 const plugins = [remarkGfm, remarkWikiLinks]
 
@@ -112,6 +112,9 @@ export function Markdown({ text, notePath, onToggleTask }: { text: string; noteP
     if (heading && root.current) requestAnimationFrame(() => root.current && scrollToHeading(root.current, heading))
   }, [notePath])
 
+  // Frontmatter is shown as properties above the note, not as text; blank lines keep task lines numbered.
+  const shown = useMemo(() => blankFrontmatter(text), [text])
+
   const components = useMemo<Components>(() => {
     const heading =
       (Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') =>
@@ -127,16 +130,20 @@ export function Markdown({ text, notePath, onToggleTask }: { text: string; noteP
         if (href.startsWith(WIKI_HREF)) {
           const link = parseWiki(decodeURIComponent(href.slice(WIKI_HREF.length)))
           const found = resolveWiki(link.target, notes.list, notePath)
+          // [[Project/path]]: a file in a project's folder.
+          const inProject = found ? null : resolveProject(link.target, notes.projects)
           return (
             <a
               href="#"
-              className={cx('wikilink', !found && 'missing')}
-              title={found ? found.path : `No note named "${link.target}" yet`}
+              className={cx('wikilink', !found && !inProject && 'missing')}
+              title={found ? found.path : (inProject?.path ?? `No note named "${link.target}" yet`)}
               onClick={(e) => {
                 e.preventDefault()
                 // [[#heading]] is a heading in this note.
                 if (!link.target && link.heading) scrollToHeading(e.currentTarget, link.heading)
                 else if (found) openAt(() => notes.open(found.path), e.currentTarget, found.path === notePath, link.heading)
+                else if (inProject?.note) openAt(() => notes.open(inProject.path), e.currentTarget, inProject.path === notePath, link.heading)
+                else if (inProject) notes.openFolder(/\/$|\/[^/.]+$/.test(link.target) ? inProject.path : inProject.path.slice(0, inProject.path.lastIndexOf('/')))
                 else notes.missing(link.target)
               }}
             >
@@ -203,7 +210,7 @@ export function Markdown({ text, notePath, onToggleTask }: { text: string; noteP
       <NotePath.Provider value={notePath}>
         <ToggleTask.Provider value={onToggleTask ?? null}>
           <ReactMarkdown remarkPlugins={plugins} components={components}>
-            {text}
+            {shown}
           </ReactMarkdown>
         </ToggleTask.Provider>
       </NotePath.Provider>
