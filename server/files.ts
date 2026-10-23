@@ -24,7 +24,8 @@ import {
   type Profile,
   type RestoreResult,
 } from '../shared/config-schema.ts'
-import { StoreError, type ConfigStore } from './config-store.ts'
+import { StoreError } from './config-store.ts'
+import type { Wiki } from './wiki.ts'
 import { runDetached, runToExit } from './launch.ts'
 import { IMAGE_TYPES } from './notes.ts'
 import { absPath, browseRoots, inside, realish, within } from './paths.ts'
@@ -113,7 +114,7 @@ function gitIgnored(dir: string, entries: FileEntry[]): Promise<Set<string>> {
 
 export class Files extends EventEmitter {
   readonly home: string
-  #store: ConfigStore
+  #store: Wiki
   #spawn: typeof nodeSpawn | undefined
   #now: () => number
   /** A file ticket serves one file; a folder ticket serves an HTML report and the files next to it. */
@@ -127,7 +128,7 @@ export class Files extends EventEmitter {
     dropped: (dir) => this.#listed.delete(dir),
   })
 
-  constructor(store: ConfigStore, home: string, opts: Options = {}) {
+  constructor(store: Wiki, home: string, opts: Options = {}) {
     super()
     this.#store = store
     this.home = home

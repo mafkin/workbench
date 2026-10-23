@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ClaudeSetup, McpCheck } from '../shared/claude-setup.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_MCP = path.resolve('tests/fixtures/fake-mcp.mjs')
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
@@ -45,6 +46,7 @@ beforeEach(async () => {
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   // Home is outside the profile's folders here: only Alpha may be read.
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), `${WORK}home: ~/alpha\n`)
+  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
   server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), managedDir: path.join(dir, 'managed'), mcpTimeoutMs: 5000, chatCommands: { claude: FAKE_CLAUDE, shell: FAKE_SHELL } })
 })
 

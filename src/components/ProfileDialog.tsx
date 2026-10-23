@@ -36,7 +36,8 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
   const [name, setName] = useState(p?.name ?? '')
   const [accent, setAccent] = useState(p?.accent ?? ACCENTS[0])
   const [home, setHome] = useState(p?.home ?? '')
-  const [notes, setNotes] = useState(p?.notes ?? '')
+  const [newWiki, setNewWiki] = useState('')
+  const [wikiEdited, setWikiEdited] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
   const [newId, setNewId] = useState('')
@@ -60,13 +61,11 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
     if (!p) return
     if (!name.trim()) return setError('A name is required')
     if (!HEX.test(accent)) return setError('Accent must be a #rrggbb colour')
-    if (notes.trim() && !/^(~|\/)/.test(notes.trim())) return setError('The notes folder must start with ~ or /')
     const ops: Op[] = []
-    const set = (key: 'name' | 'accent' | 'home' | 'notes', value: string, was: string | undefined) => value.trim() !== (was ?? '') && ops.push({ op: 'setProfileField', key, value: value.trim() })
+    const set = (key: 'name' | 'accent' | 'home', value: string, was: string | undefined) => value.trim() !== (was ?? '') && ops.push({ op: 'setProfileField', key, value: value.trim() })
     set('name', name, p.name)
     set('accent', accent, p.accent)
     set('home', home, p.home)
-    set('notes', notes, p.notes)
     if (ops.length && (await run(ops, 'Profile settings saved'))) onClose()
     else if (!ops.length) onClose()
   }
@@ -77,7 +76,7 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
     if (!newName.trim()) return setError('The new profile needs a name')
     if (!PROFILE_ID.test(id)) return setError(PROFILE_ID_RULE)
     try {
-      await api.createProfile(id, newName.trim(), copy ? active.id : undefined)
+      await api.createProfile(id, newName.trim(), copy ? active.id : undefined, newWiki.trim() || `~/notes/${id}`)
       await onChanged()
       onSwitch(id)
       onClose()
@@ -134,11 +133,11 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
             <input className="mono" name="home" value={home} onChange={(e) => setHome(e.target.value)} placeholder="~/work" disabled={!p} />
             <span className="hint">The file browser may open it and everything inside. Empty: only the notes folder and projects.</span>
           </label>
-          <label className="field">
-            <span>Notes folder</span>
-            <input className="mono" name="notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="~/notes" disabled={!p} />
-            <span className="hint">Notes, daily notes, search, wiki links and context live here.</span>
-          </label>
+          <div className="field">
+            <span>Wiki folder</span>
+            <span className="mono wiki-folder">{p?.notes ?? '—'}</span>
+            <span className="hint">The profile’s pages (index.md, projects, drawers, agents), notes, daily notes and context live here. To move it, move the folder and change its line in settings.yaml.</span>
+          </div>
           <div className="form-actions">
             <button type="submit" className="btn primary" disabled={!p}>
               Save
@@ -154,9 +153,9 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
                 <span className="dot" style={{ background: q.profile?.accent ?? 'var(--muted)' }} />
                 <span className="name">{q.profile?.name ?? q.id}</span>
                 <span className="mono id">
-                  {q.id}.yaml · Ctrl+{i + 1}
+                  {q.wiki ?? q.id} · Ctrl+{i + 1}
                 </span>
-                <button className="icon-btn danger" aria-label={`Remove ${q.profile?.name ?? q.id}`} title="Remove: its file goes to the Trash" disabled={profiles.length <= 1} onClick={() => setRemoving(q)}>
+                <button className="icon-btn danger" aria-label={`Remove ${q.profile?.name ?? q.id}`} title="Remove from the switcher; its wiki folder stays" disabled={profiles.length <= 1} onClick={() => setRemoving(q)}>
                   <Trash2 size={13} />
                 </button>
               </li>
@@ -171,22 +170,37 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
               aria-label="New profile name"
               onChange={(e) => {
                 setNewName(e.target.value)
-                if (!idEdited) setNewId(idFrom(e.target.value))
+                if (!idEdited) {
+                  setNewId(idFrom(e.target.value))
+                  if (!wikiEdited) setNewWiki(`~/notes/${idFrom(e.target.value)}`)
+                }
               }}
             />
             <input
               className="mono"
               name="newId"
               value={newId}
-              placeholder="file-name"
-              aria-label="File name"
+              placeholder="id"
+              aria-label="Profile id"
               onChange={(e) => {
                 setNewId(e.target.value)
                 setIdEdited(true)
+                if (!wikiEdited) setNewWiki(`~/notes/${e.target.value}`)
+              }}
+            />
+            <input
+              className="mono"
+              name="newWiki"
+              value={newWiki}
+              placeholder="~/notes/id"
+              aria-label="Wiki folder"
+              onChange={(e) => {
+                setNewWiki(e.target.value)
+                setWikiEdited(true)
               }}
             />
             <label className="check">
-              <input type="checkbox" checked={copy} onChange={(e) => setCopy(e.target.checked)} /> Copy {p?.name ?? active.id}'s headings and workflow
+              <input type="checkbox" checked={copy} onChange={(e) => setCopy(e.target.checked)} /> Copy {p?.name ?? active.id}'s nav (index.md) and Workflow.md
             </label>
             <button type="submit" className="btn" disabled={!newName.trim() || !newId.trim()}>
               <Plus size={13} /> Add profile

@@ -7,6 +7,7 @@ import { expandHome } from '../shared/config-schema.ts'
 import { makeGuard } from '../server/guard.ts'
 import { launchFor, openItem, runDetached } from '../server/launch.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 interface Call {
   command: string
@@ -127,6 +128,7 @@ sections:
       - { label: Today, type: daily }
 `,
     )
+    await migrateFixture(path.join(dir, 'cfg'), path.join(dir, 'home'), { defaultWiki: (id) => path.join(dir, 'wiki', id) })
     spawn = fakeSpawn()
     server = await buildServer({
       configDir: path.join(dir, 'cfg'),

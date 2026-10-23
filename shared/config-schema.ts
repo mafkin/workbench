@@ -165,6 +165,8 @@ export type ServerDecl = z.output<typeof ServerDecl>
 
 export const FolderItem = z.object({
   ...itemFields,
+  /** The item's page inside the profile's wiki (part 11), e.g. `projects/Tuohi.md`; its frontmatter is the card. */
+  page: z.string().trim().min(1).optional(),
   /** Servers the Servers page checks for this project, besides those it finds running. */
   servers: z.array(ServerDecl).optional(),
   description: z.string().optional(),
@@ -403,11 +405,18 @@ export interface ConfigError {
 
 export interface ProfileState {
   id: string
+  /** The profile's main file: `index.md` of its wiki, or the YAML file of a profile not moved to pages yet. */
   file: string
   rev: string
   /** Last valid content; kept while the file on disk is broken. */
   profile: Profile | null
   error: ConfigError | null
+  /** The wiki folder as written in settings (`~/notes`). */
+  wiki?: string
+  /** Still a YAML profile: read-only until it is moved to pages. */
+  legacy?: boolean
+  /** Lines and pages the wiki could not use as written; the profile still works. */
+  problems?: string[]
 }
 
 export interface AppState {
@@ -415,6 +424,8 @@ export interface AppState {
   profiles: ProfileState[]
   /** The user's home directory, for comparing `~` paths. */
   home: string
+  /** Some profile is still a YAML file; the app offers to move it to pages. */
+  legacy?: boolean
 }
 
 /** Expand a leading `~` and `=~/` (as in `--dir=~/x`) to the home directory. */

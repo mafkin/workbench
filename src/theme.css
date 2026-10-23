@@ -433,6 +433,30 @@ button {
   font-size: 12px;
 }
 
+.banner.soft {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.banner .btn {
+  margin-top: 6px;
+}
+
+.item-page .item-empty-actions {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.item-page .item-empty-actions .hint {
+  color: var(--faint);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
 .banner strong {
   color: var(--warn);
   font-weight: 600;

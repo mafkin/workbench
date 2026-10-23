@@ -3,13 +3,14 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ConfigStore } from '../server/config-store.ts'
+import { Wiki } from '../server/wiki.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 import { buildServer } from '../server/main.ts'
 import { Notes } from '../server/notes.ts'
 
 let dir: string
 let home: string
-let store: ConfigStore
+let store: Wiki
 let notes: Notes
 
 const WORK = `name: Work
@@ -69,7 +70,8 @@ beforeEach(async () => {
   await write('secret.md', 'top secret\n')
   await write('private/hidden.md', 'hidden\n')
   await write('pnotes/Personal.md', 'personal\n')
-  store = new ConfigStore(path.join(dir, 'cfg'))
+  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
+  store = new Wiki(path.join(dir, 'cfg'), home)
   await store.init({ watch: false })
   notes = new Notes(store, home)
 })
@@ -212,6 +214,7 @@ describe('list and search', () => {
     const byPath = Object.fromEntries(list.map((n) => [n.path, n]))
     expect(Object.keys(byPath).sort()).toEqual([
       '~/notes/Ideas.md',
+      '~/notes/index.md',
       '~/notes/sub/Deploy plan.md',
       '~/outside/RUNBOOK.md',
       '~/outside/deep/plan.txt',
@@ -227,15 +230,16 @@ describe('list and search', () => {
     expect(list.at(-1)?.path).toBe('~/notes/Ideas.md')
   })
 
-  it('lists only note entries without a notes folder', async () => {
-    expect(await notes.list('bare')).toEqual([])
+  it('a profile’s wiki is its notes folder: a bare one lists its index page', async () => {
+    expect((await notes.list('bare')).map((n) => n.name)).toEqual(['index'])
   })
 
   it('finds notes containing every word, case-insensitively, title matches first', async () => {
     const hits = await notes.search('work', 'DEPLOY')
-    expect(hits.map((h) => h.path)).toEqual(['~/notes/sub/Deploy plan.md', '~/outside/RUNBOOK.md'])
+    // index.md names the Deploy group, so it is a hit too.
+    expect(hits.map((h) => h.path)).toEqual(['~/notes/sub/Deploy plan.md', '~/notes/index.md', '~/outside/RUNBOOK.md'])
     expect(hits[0].title).toBe(true)
-    const line = hits[1].lines[0]
+    const line = hits[2].lines[0]
     expect(line.text.slice(line.ranges[0][0], line.ranges[0][1])).toBe('Deploy')
     expect((await notes.search('work', 'tag deploy')).map((h) => h.path)).toEqual(['~/notes/sub/Deploy plan.md'])
     expect(await notes.search('work', 'nothing-matches-this')).toEqual([])
@@ -270,7 +274,7 @@ describe('list and search', () => {
 
   it('an empty query lists notes without snippets', async () => {
     const hits = await notes.search('work', '  ')
-    expect(hits).toHaveLength(4)
+    expect(hits).toHaveLength(5)
     expect(hits.every((h) => h.lines.length === 0)).toBe(true)
   })
 })
@@ -343,7 +347,7 @@ sections:
     items:
       - { label: Proj, type: folder, path: ~/proj }
 `
-  let browseStore: ConfigStore
+  let browseStore: Wiki
   let browse: Notes
 
   beforeEach(async () => {
@@ -352,7 +356,8 @@ sections:
     await write('proj/data.txt', 'data\n')
     await write('proj/pic.png', 'PNG')
     await write('workhome/todo.md', '- a\n')
-    browseStore = new ConfigStore(path.join(dir, 'cfg'))
+    await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
+    browseStore = new Wiki(path.join(dir, 'cfg'), home)
     await browseStore.init({ watch: false })
     browse = new Notes(browseStore, home)
   })
@@ -380,8 +385,8 @@ sections:
     expect(await browse.asset('browse', '~/proj/pic.png')).toMatchObject({ type: 'image/png' })
   })
 
-  it('keeps list and search to the notes folder and note entries', async () => {
-    expect(await browse.list('browse')).toEqual([])
+  it('keeps list and search to the wiki and note entries', async () => {
+    expect((await browse.list('browse')).map((n) => n.name).sort()).toEqual(['Proj', 'index'])
   })
 })
 
@@ -490,7 +495,8 @@ describe('backlinks', () => {
   it('does not list the note itself, and reaches note entries outside the notes folder', async () => {
     await write('notes/sub/Deploy plan.md', '# Deploy plan\n\n[[Deploy plan]] myself.\n[[RUNBOOK]]\n')
     expect(await notes.backlinks('work', '~/notes/sub/Deploy plan.md')).toEqual([])
-    expect((await notes.backlinks('work', '~/outside/RUNBOOK.md')).map((h) => h.path)).toEqual(['~/notes/sub/Deploy plan.md'])
+    // index.md links the Runbook entry too.
+    expect((await notes.backlinks('work', '~/outside/RUNBOOK.md')).map((h) => h.path).sort()).toEqual(['~/notes/index.md', '~/notes/sub/Deploy plan.md'])
   })
 })
 

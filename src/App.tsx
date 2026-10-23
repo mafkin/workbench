@@ -288,6 +288,17 @@ export function App() {
   }, [search.open, setSelected, setSelectedIds])
 
   /** Open a note or folder by path; one that is also a nav entry opens as that entry. */
+  /** Profiles still in YAML become wikis (the banner's button). */
+  const migrate = useCallback(async () => {
+    try {
+      const { moved } = await api.migrate()
+      toasts.push({ message: moved.length ? `Moved ${moved.join(', ')} to pages; the YAML is kept as .bak` : 'Nothing to move' })
+      await refresh()
+    } catch (err) {
+      fail(err)
+    }
+  }, [refresh, fail, toasts.push])
+
   const openPath = useCallback(
     (type: 'note' | 'folder', path: string) => {
       const p = activeRef.current?.profile
@@ -1100,6 +1111,7 @@ export function App() {
                 drawer={drawer}
                 onDrawer={pickDrawer}
                 onNewDrawer={() => setDrawerDialog({ index: null })}
+                onMigrate={() => void migrate()}
                 onDrawerSettings={() => setDrawerDialog({ index: drawer })}
                 filesSelected={selection?.kind === 'files' ? selection.path : null}
                 openFiles={(path) => navigate(FILES_KEY + path)}

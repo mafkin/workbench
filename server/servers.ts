@@ -4,7 +4,8 @@
 // answers. Each gets an HTTP check. Stopping one re-checks all of that first.
 import fsp from 'node:fs/promises'
 import { displayPath, itemsWithFolder, type ProjectServers, type ServerHealth, type ServerRow, type ServersScan } from '../shared/config-schema.ts'
-import { StoreError, type ConfigStore } from './config-store.ts'
+import { StoreError } from './config-store.ts'
+import type { Wiki } from './wiki.ts'
 import { absPath, realish, within } from './paths.ts'
 import { Procfs } from './procfs.ts'
 
@@ -38,13 +39,13 @@ const portOf = (url: string) => {
 const projectsOf = itemsWithFolder
 
 export class Servers {
-  #store: ConfigStore
+  #store: Wiki
   #home: string
   #proc: Procfs
   #cacheMs: number
   #cache = new Map<string, { at: number; rev: string; scan: Promise<ServersScan> }>()
 
-  constructor(store: ConfigStore, home: string, opts: ServersOptions = {}) {
+  constructor(store: Wiki, home: string, opts: ServersOptions = {}) {
     this.#store = store
     this.#home = home
     this.#proc = new Procfs(opts.procRoot)

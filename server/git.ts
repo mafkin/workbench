@@ -32,7 +32,8 @@ import type {
   Hunk,
   Stash,
 } from '../shared/git.ts'
-import { StoreError, type ConfigStore } from './config-store.ts'
+import { StoreError } from './config-store.ts'
+import type { Wiki } from './wiki.ts'
 import { runToExit } from './launch.ts'
 import { maskText } from './mask.ts'
 import { absPath, realish } from './paths.ts'
@@ -244,7 +245,7 @@ function parseLog(out: string): Commit[] {
 }
 
 export class Git {
-  #store: ConfigStore
+  #store: Wiki
   #home: string
   #spawn: typeof nodeSpawn | undefined
   #draft: GitOptions['draft']
@@ -254,7 +255,7 @@ export class Git {
   #undos = new Map<string, { at: number; root: string; files: { file: string; blob: string | null; mode: number | null; after: string | null }[]; trashed: string[] }>()
   #timer: ReturnType<typeof setInterval> | null = null
 
-  constructor(store: ConfigStore, home: string, opts: GitOptions = {}) {
+  constructor(store: Wiki, home: string, opts: GitOptions = {}) {
     this.#store = store
     this.#home = home
     this.#spawn = opts.spawn

@@ -9,10 +9,8 @@ import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
 import websocket from '@fastify/websocket'
 import Fastify from 'fastify'
-import { Document, parseDocument } from 'yaml'
 import { z } from 'zod'
 import {
-  ACCENTS,
   AgentProfile,
   CHAT_COLORS,
   chatName,
@@ -52,15 +50,16 @@ import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
 import { claudeJson, frontmatter, projectKey, readSetup } from './claude-setup.ts'
 import type { ClaudeSetup, McpEntry } from '../shared/claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
-import { applyOps, describeIssue } from './config-ops.ts'
-import { ConfigStore, StoreError } from './config-store.ts'
+import { describeIssue } from './config-ops.ts'
+import { StoreError } from './config-store.ts'
+import { Wiki } from './wiki.ts'
 import { Context, drawerContext, mergeContext } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { Git, type Repo } from './git.ts'
 import { openProgram } from './open-with.ts'
 import { Thumbs } from './thumbs.ts'
 import { makeGuard } from './guard.ts'
-import { LaunchError, openItem, runDetached, runToExit } from './launch.ts'
+import { LaunchError, openItem, runDetached } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
 import { McpDefaults, setFoldersOff } from './mcp-switch.ts'
@@ -100,7 +99,7 @@ export interface ServerOptions {
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
 const RevBody = z.object({ rev: z.string() })
 const ActiveBody = z.object({ profile: z.string() })
-const NewProfile = z.object({ id: z.string(), name: z.string().trim().min(1, 'A name is required').max(40), copyFrom: z.string().optional() })
+const NewProfile = z.object({ id: z.string(), name: z.string().trim().min(1, 'A name is required').max(40), wiki: z.string().trim().min(1).optional(), copyFrom: z.string().optional() })
 const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr, step: z.int().nonnegative().optional() })
 const PathQuery = z.object({ profile: z.string(), path: z.string() })
 const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string().nullable(), text: z.string() })
@@ -192,7 +191,7 @@ const sameSecret = (a: string, b: string) => a.length === b.length && timingSafe
 
 export async function buildServer(opts: ServerOptions) {
   const home = opts.home ?? os.homedir()
-  const store = new ConfigStore(opts.configDir)
+  const store = new Wiki(opts.configDir, home)
   await store.init({ watch: opts.watch ?? true })
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
@@ -215,7 +214,7 @@ export async function buildServer(opts: ServerOptions) {
   // A chat's terminal is shell access. Besides the guard, its socket needs this
   // token, new on every start, which only the app can read (through the API).
   const ptyToken = randomBytes(32).toString('hex')
-  const state = () => ({ ...store.state(), home })
+  const state = () => ({ ...store.state(), home, legacy: store.legacy })
 
   const app = Fastify({ logger: false })
   const guard = makeGuard(opts.dev ? [opts.port, DEV_UI_PORT] : [opts.port])
@@ -294,29 +293,21 @@ export async function buildServer(opts: ServerOptions) {
   })
 
   // Profiles: a new file (blank, or a copy of another with a new name), or one moved to the Trash.
+  // A profile is a wiki folder; a new one goes under ~/notes unless the request names a folder.
   app.post('/api/profiles', async (req) => {
     const b = parse(NewProfile, req.body)
-    let text: string
-    if (b.copyFrom) {
-      const src = store.profile(b.copyFrom)
-      if (!src.profile) throw new StoreError('That profile file is broken', 423)
-      const source = store.text(b.copyFrom)
-      const doc = parseDocument(source)
-      applyOps(doc, [{ op: 'setProfileField', key: 'name', value: b.name }], source)
-      text = doc.toString()
-    } else {
-      const used = store.state().profiles.map((p) => p.profile?.accent)
-      const accent = ACCENTS.find((a) => !used.includes(a)) ?? ACCENTS[0]
-      text = new Document({ name: b.name, accent, sections: [] }).toString()
-    }
-    await store.createProfile(b.id, text)
+    await store.createProfile(b.id, { name: b.name, wiki: b.wiki ?? `~/notes/${b.id}`, copyFrom: b.copyFrom })
     return { id: b.id }
   })
 
+  // The profile leaves the switcher; its wiki folder stays.
   app.delete<{ Params: { id: string } }>('/api/profiles/:id', async (req) => {
-    await store.removeProfile(req.params.id, (file) => runToExit({ command: 'gio', args: ['trash', '--', file] }, opts.spawn))
+    await store.removeProfile(req.params.id)
     return { ok: true }
   })
+
+  // Profiles still in YAML become wikis (the YAML is kept as .bak).
+  app.post('/api/migrate', async () => store.migrate())
 
   app.post('/api/active', async (req) => {
     await store.setActive(parse(ActiveBody, req.body).profile)

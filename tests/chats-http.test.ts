@@ -6,6 +6,7 @@ import WebSocket from 'ws'
 import type { Chat } from '../shared/config-schema.ts'
 import { makeGuard } from '../server/guard.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
@@ -54,6 +55,7 @@ beforeEach(async () => {
   await fsp.mkdir(path.join(home, 'elsewhere'), { recursive: true })
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
+  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
   server = await buildServer({
     configDir: path.join(dir, 'cfg'),
     port: 7420,

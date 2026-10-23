@@ -22,7 +22,8 @@ import {
   type SearchLine,
 } from '../shared/config-schema.ts'
 import { dirOf, linkPath, linksIn, rewriteLinks } from '../shared/wikilinks.ts'
-import { StoreError, type ConfigStore } from './config-store.ts'
+import { StoreError } from './config-store.ts'
+import type { Wiki } from './wiki.ts'
 import { frontmatter } from './frontmatter.ts'
 import { revOf, writeAtomic } from './fs-util.ts'
 import { absPath, browseRoots, inside, realish } from './paths.ts'
@@ -122,7 +123,7 @@ function matchLines(text: string, terms: string[]): SearchLine[] {
 
 export class Notes extends EventEmitter {
   readonly home: string
-  #store: ConfigStore
+  #store: Wiki
   #queues = new Map<string, Promise<unknown>>()
   /** Real path of each opened note -> the `~` paths it was opened as, and its last known rev. */
   #open = new Map<string, { paths: Set<string>; rev: string | null }>()
@@ -140,7 +141,7 @@ export class Notes extends EventEmitter {
     },
   })
 
-  constructor(store: ConfigStore, home: string) {
+  constructor(store: Wiki, home: string) {
     super()
     this.#store = store
     this.home = home

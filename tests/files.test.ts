@@ -5,13 +5,14 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ConfigStore } from '../server/config-store.ts'
+import { Wiki } from '../server/wiki.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 import { Files } from '../server/files.ts'
 import { buildServer } from '../server/main.ts'
 
 let dir: string
 let home: string
-let store: ConfigStore
+let store: Wiki
 let files: Files
 let spawned: { command: string; args: string[] }[]
 let gioFails: string | null
@@ -97,7 +98,8 @@ beforeEach(async () => {
   spawned = []
   gioFails = null
   clock = 1_000_000
-  store = new ConfigStore(path.join(dir, 'cfg'))
+  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
+  store = new Wiki(path.join(dir, 'cfg'), home)
   await store.init({ watch: false })
   files = new Files(store, home, { spawn: fakeSpawn as any, now: () => clock })
 })

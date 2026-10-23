@@ -1,7 +1,9 @@
 // Shared by the e2e server and tests: a throwaway config and its contents.
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { migrateFixture } from '../tests/fixtures/wiki.ts'
 import type { Page } from '@playwright/test'
 
 export const PORT = 7431
@@ -10,9 +12,13 @@ export const DIR = path.resolve(import.meta.dirname, '.tmp-config')
 export const THUMBS = path.resolve(import.meta.dirname, '.tmp-thumbs')
 export const HOME = path.join(DIR, 'home')
 export const SPAWN_LOG = path.join(DIR, 'spawned.log')
-export const WORK_FILE = path.join(DIR, 'profiles/work.yaml')
-export const PERSONAL_FILE = path.join(DIR, 'profiles/personal.yaml')
 export const NOTES = path.join(HOME, 'notes')
+export const PNOTES = path.join(HOME, 'pnotes')
+/** The profiles are wikis (part 11): their index.md holds the profile and the nav. */
+export const WORK_FILE = path.join(NOTES, 'index.md')
+export const PERSONAL_FILE = path.join(PNOTES, 'index.md')
+/** A page of the work wiki. */
+export const page = (rel: string) => path.join(NOTES, rel)
 export const ALPHA = path.join(HOME, 'alpha')
 /** The fake home's Trash, where the fake `gio trash` puts files (with .trashinfo, as GNOME does). */
 export const TRASH_DIR = path.join(HOME, '.local/share/Trash')
@@ -165,13 +171,15 @@ export async function resetFixture() {
   }
   execFileSync('git', ['init', '-q'], { cwd: ALPHA })
   await fsp.writeFile(path.join(DIR, 'settings.yaml'), 'activeProfile: work\nprofiles: [work, personal]\n')
-  await fsp.writeFile(WORK_FILE, WORK)
-  await fsp.writeFile(PERSONAL_FILE, PERSONAL)
+  await fsp.writeFile(path.join(DIR, 'profiles/work.yaml'), WORK)
+  await fsp.writeFile(path.join(DIR, 'profiles/personal.yaml'), PERSONAL)
   await fsp.writeFile(SPAWN_LOG, '')
   for (const [rel, text] of Object.entries(NOTE_FILES)) {
     await fsp.mkdir(path.dirname(path.join(HOME, rel)), { recursive: true })
     await fsp.writeFile(path.join(HOME, rel), text)
   }
+  // The YAML above is the fixture's spec; the app reads it as wikis (~/notes and ~/pnotes).
+  await migrateFixture(DIR, HOME, { defaultWiki: () => PNOTES, repo: (folder) => fs.existsSync(path.join(folder, '.git')) })
 }
 
 /** Secret values in the fake Claude setup; none may reach the page. */

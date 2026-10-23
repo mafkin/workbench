@@ -10,7 +10,8 @@ import path from 'node:path'
 import { CONTEXT_FOLDERS, drawerIndex, drawersOf, expandHome, type ContextFolder, type ContextStatus, type Profile } from '../shared/config-schema.ts'
 import type { ChatContext } from './agents.ts'
 import { frontmatter } from './claude-setup.ts'
-import { StoreError, type ConfigStore } from './config-store.ts'
+import { StoreError } from './config-store.ts'
+import type { Wiki } from './wiki.ts'
 import { browseRoots, realish, within } from './paths.ts'
 import { FolderWatcher } from './watch.ts'
 
@@ -87,14 +88,14 @@ async function writeFree(dir: string, name: string, write: (file: string) => Pro
 }
 
 export class Context extends EventEmitter {
-  #store: ConfigStore
+  #store: Wiki
   #home: string
   /** Watched folder → the profiles it belongs to. */
   #watched = new Map<string, Set<string>>()
   #timers = new Map<string, NodeJS.Timeout>()
   #watcher: FolderWatcher
 
-  constructor(store: ConfigStore, home: string) {
+  constructor(store: Wiki, home: string) {
     super()
     this.#store = store
     this.#home = home

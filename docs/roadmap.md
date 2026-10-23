@@ -459,10 +459,14 @@ The user asked how to simplify the workflow and configuration and make Workbench
   | How far | Everything: projects, nav, workflow, agent profiles and the profile itself become Markdown pages; no profile YAML. `settings.yaml` stays, as a map of profile id to wiki folder |
   | Project page | `<wiki>/projects/<Name>.md`: frontmatter is the card (`folder`, `status`, `category`, `pinned`, `agent`, `icon`, `servers`), `## Workflow` is the tabs, the body is notes |
   | Nav | `<wiki>/index.md`: frontmatter is the profile (name, accent, theme, background, home, categories, openWith); headings and link lists are the nav; a nested list is a group |
-  | Default workflow | `<wiki>/Workflow.md`, inherited until a project page has its own `## Workflow` (Customise copies it in, Reset removes it, Use for every project writes `Workflow.md`) |
+  | Default workflow | `<wiki>/Workflow.md`, inherited until a project page has its own `## Workflow` (superseded below: a template) |
   | Link kinds | From the target, no `type:`: `[[Page]]`, `path/` (folder), `x.md`, `x.html` (report), other files, URLs, `run:<command line>`, `chat:[agent] [folder] [-- args]`, `daily:`, and `folder:`/`note:`/`report:`/`file:` overrides |
   | Chats and the wiki | Every claude chat gets `--add-dir <wiki>` and, in a project, is told its page so it can keep the page's Log |
   | Claude setup | The project tab stays; the page and its sidebar button go |
+| Drawers (asked after drawers landed) | A page per drawer: `<wiki>/drawers/<Name>.md` with frontmatter `logo`, `folder`, `uses` and the nav as its body. `index.md` lists the drawers in order (`- [[drawers/Name]]`); without drawer links its body is the one drawer. Show in <drawer> adds the same `[[Page]]` line there, so `type: shared` goes |
+| Nav pages | Every `[[Page]]` linked from the nav is an item: card from its frontmatter, tabs from its `## Workflow` (`files:`, `git:`, `setup:`, `x.md`, `run:`, `chat:`, …); without a Workflow section the page itself fills the view. Note entries and blank items become one thing |
+| Workflow | A template, as items already do: `Workflow.md` is copied in (Add profile steps) or saved to (Save as profile steps); a new item starts blank. No inheritance |
+| Item pages | New item makes `projects/<Name>.md`; any page anywhere can still be linked from the nav |
 
 - **Milestones:** (1) the wiki substrate, no config change; (2) the wiki store (`wiki-md.ts`, `wiki.ts` replacing the config store with the same `Op`s, `settings.yaml` map, migration, seed, the dialog's target field, New project…, `page:` selection); (3) nav and project page (Context links in `index.md`, the Page tab and Mentions, chats get the wiki, the setup page dropped, `collapsed` to localStorage, `Workflow.md` menu); (4) polish and docs (tags, Pages to write, `templates/project.md`, README/CLAUDE.md).
 - **Milestone 1, built:**

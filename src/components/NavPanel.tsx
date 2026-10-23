@@ -69,6 +69,8 @@ interface Props extends NavActions {
   drawer: number
   onDrawer: (index: number) => void
   onNewDrawer: () => void
+  /** Move the profiles still in YAML to pages. */
+  onMigrate: () => void
   onDrawerSettings: () => void
   /** The folder whose page shows (`files:`), for the Shared heading. */
   filesSelected: string | null
@@ -295,10 +297,27 @@ export function NavPanel(props: Props) {
 
       {active.error && (
         <div className="banner" role="alert">
-          <strong>{active.id}.yaml has an error</strong>
+          <strong>{active.legacy ? `${active.id}.yaml` : 'A page'} has an error</strong>
           {active.error.line ? ` on line ${active.error.line}` : ''}. Showing the last good version; editing is paused until
           the file is fixed.
           <span className="mono">{active.error.message}</span>
+        </div>
+      )}
+      {active.legacy && !active.error && (
+        <div className="banner" role="status">
+          <strong>{active.id} is still a YAML profile.</strong> Profiles are now pages in a wiki folder; editing is paused until it
+          is moved. The YAML file is kept as a backup.
+          <button className="btn primary" onClick={props.onMigrate}>
+            Move to pages
+          </button>
+        </div>
+      )}
+      {!!active.problems?.length && (
+        <div className="banner soft" role="status" title={active.problems.join('\n')}>
+          <strong>
+            {active.problems.length} {active.problems.length === 1 ? 'line' : 'lines'} of this wiki could not be read as written.
+          </strong>
+          <span className="mono">{active.problems[0]}</span>
         </div>
       )}
 

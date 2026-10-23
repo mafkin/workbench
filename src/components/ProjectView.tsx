@@ -45,6 +45,7 @@ import {
   FOLDER_STEPS,
   folderRoots,
   itemBase,
+  joinNotes,
   normalizePath,
   projectHost,
   projectRef,
@@ -169,6 +170,25 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const blank = steps.length === 0 && adhoc.length === 0
   /** An older project's first step change writes the tabs it showed as its own. */
   const seeded = <T extends Op>(op: T): T => (own ? op : { ...op, seed: steps })
+  const quickAddButtons = () => (
+    <>
+      <button className="btn" onClick={() => void quickAdd('files')}>
+        <FolderOpen size={14} /> File browser
+      </button>
+      <button className="btn" onClick={() => void quickAdd('note')}>
+        <FileText size={14} /> Note
+      </button>
+      <button className="btn" onClick={() => void quickAdd('git')}>
+        <GitBranch size={14} /> Git
+      </button>
+      <button className="btn" onClick={() => void quickAdd('setup')}>
+        <Blocks size={14} /> Claude setup
+      </button>
+      <button className="btn ghost" onClick={addStep}>
+        <Plus size={14} /> More…
+      </button>
+    </>
+  )
   const [browse, setBrowse] = useState<{ tab: string; top: string } | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
@@ -671,26 +691,21 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
         <ChatPane key={activeChat.id} chat={activeChat} />
       ) : !active ? (
         blank ? (
-          <div className="item-empty" onContextMenu={(e) => (e.preventDefault(), setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() }))}>
-            <p>This item is empty. Add what it needs:</p>
-            <div className="item-empty-actions">
-              <button className="btn" onClick={() => void quickAdd('files')}>
-                <FolderOpen size={14} /> File browser
-              </button>
-              <button className="btn" onClick={() => void quickAdd('note')}>
-                <FileText size={14} /> Note
-              </button>
-              <button className="btn" onClick={() => void quickAdd('git')}>
-                <GitBranch size={14} /> Git
-              </button>
-              <button className="btn" onClick={() => void quickAdd('setup')}>
-                <Blocks size={14} /> Claude setup
-              </button>
-              <button className="btn ghost" onClick={addStep}>
-                <Plus size={14} /> More…
-              </button>
+          item.page && profile.notes ? (
+            // A page without a Workflow: the page itself, with the ways to give it tabs beneath.
+            <div className="item-page" onContextMenu={(e) => (e.preventDefault(), setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() }))}>
+              <NoteView key={item.page} path={joinNotes(profile.notes, item.page)} title={item.label} compact heading="Page" />
+              <div className="item-empty-actions">
+                <span className="hint">Add a tab:</span>
+                {quickAddButtons()}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="item-empty" onContextMenu={(e) => (e.preventDefault(), setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() }))}>
+              <p>This item is empty. Add what it needs:</p>
+              <div className="item-empty-actions">{quickAddButtons()}</div>
+            </div>
+          )
         ) : null
       ) : (active.type === 'setup' || active.type === 'git' || active.type === 'files') && !item.path ? (
         <p className="item-empty">
