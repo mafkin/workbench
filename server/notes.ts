@@ -14,14 +14,16 @@ import {
   noteFileName,
   stepPath,
   stepsOf,
+  walkItems,
   type NavItem,
   type NoteFile,
   type NoteSummary,
+  type NotesOverview,
   type Profile,
   type SearchHit,
   type SearchLine,
 } from '../shared/config-schema.ts'
-import { dirOf, linkPath, linksIn, rewriteLinks } from '../shared/wikilinks.ts'
+import { dirOf, linkPath, linksIn, parseWiki, resolveProject, rewriteLinks, tagsIn } from '../shared/wikilinks.ts'
 import { StoreError } from './config-store.ts'
 import type { Wiki } from './wiki.ts'
 import { frontmatter } from './frontmatter.ts'
@@ -35,6 +37,8 @@ const MAX_FILES = 5000
 const MAX_DEPTH = 8
 const MAX_HITS = 50
 const MAX_LINES = 3
+/** Pages to write listed at most. */
+const MAX_MISSING = 200
 const LINE_WINDOW = 200
 const MAX_WATCHED = 32
 
@@ -129,7 +133,7 @@ export class Notes extends EventEmitter {
   #open = new Map<string, { paths: Set<string>; rev: string | null }>()
   #timers = new Map<string, NodeJS.Timeout>()
   /** Search's copy of each note's text, by real path, with the mtime and size it was read at. */
-  #texts = new Map<string, { mtime: number; size: number; text: string }>()
+  #texts = new Map<string, { mtime: number; size: number; text: string; tags?: string[] }>()
   // The folders of opened notes: editors and our own saves replace the file itself.
   #folders = new FolderWatcher(MAX_WATCHED, {
     change: (dir, name) => this.#changed(path.join(dir, name)),
@@ -200,11 +204,17 @@ export class Notes extends EventEmitter {
     return (await this.#collect(id)).map(({ real: _real, ...n }) => n)
   }
 
-  /** Notes containing every word of `query` (ignoring case), title matches first. An empty query lists notes. */
+  /**
+   * Notes containing every word of `query` (ignoring case), title matches
+   * first. A word starting with `#` is a tag: the note must carry it (in
+   * `tags:` or as `#tag` in its text). An empty query lists notes.
+   */
   async search(id: string, query: string): Promise<SearchHit[]> {
-    const terms = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))]
+    const all = [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))]
+    const tags = all.filter((t) => t.length > 1 && t.startsWith('#')).map((t) => t.slice(1))
+    const terms = all.filter((t) => !(t.length > 1 && t.startsWith('#')))
     const found = await this.#collect(id)
-    if (!terms.length) return found.slice(0, MAX_HITS).map(({ real: _real, ...n }) => ({ ...n, title: false, lines: [] }))
+    if (!terms.length && !tags.length) return found.slice(0, MAX_HITS).map(({ real: _real, ...n }) => ({ ...n, title: false, lines: [] }))
     const hits: SearchHit[] = []
     const seen = new Set<string>()
     for (const { real, ...n } of found) {
@@ -214,11 +224,42 @@ export class Notes extends EventEmitter {
       const name = n.name.toLowerCase()
       const lower = text.toLowerCase()
       if (!terms.every((t) => name.includes(t) || lower.includes(t))) continue
-      hits.push({ ...n, title: terms.every((t) => name.includes(t)), lines: matchLines(text, terms) })
+      if (tags.length && !tags.every((t) => this.#tagsOf(real, text).includes(t))) continue
+      hits.push({ ...n, title: terms.length > 0 && terms.every((t) => name.includes(t)), lines: matchLines(text, [...terms, ...tags.map((t) => `#${t}`)]) })
     }
     for (const key of this.#texts.keys()) if (!seen.has(key)) this.#texts.delete(key)
     // `found` is newest first and the sort is stable.
     return hits.sort((a, b) => Number(b.title) - Number(a.title)).slice(0, MAX_HITS)
+  }
+
+  /** The tags in use, most used first, and the pages that `[[links]]` name but nobody has written. */
+  async overview(id: string): Promise<NotesOverview> {
+    const profile = this.#profile(id)
+    const projects: { label: string; path: string }[] = []
+    for (const { item } of walkItems(profile)) if (item.type === 'folder' && item.path) projects.push({ label: item.label, path: item.path })
+    const found = await this.#collect(id)
+    const notes: NoteSummary[] = found.map(({ real: _real, ...n }) => n)
+    const counts = new Map<string, number>()
+    const missing = new Map<string, { name: string; count: number; from: string }>()
+    for (const n of found) {
+      const text = await this.#textOf(n.real)
+      if (text === null) continue
+      for (const tag of this.#tagsOf(n.real, text)) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+      const names = new Set<string>()
+      for (const link of linksIn(text)) {
+        if (link.kind !== 'wiki') continue
+        const { target } = parseWiki(link.inner)
+        const key = target.trim().replace(/^\/+/, '').replace(NOTE_EXT, '').toLowerCase()
+        if (!key || names.has(key) || linkPath(link, n.path, notes) !== null || resolveProject(target, projects)) continue
+        names.add(key)
+        const had = missing.get(key)
+        // `found` is newest first, so the first note seen is the newest one linking here.
+        if (had) had.count++
+        else missing.set(key, { name: target.trim().replace(/^\/+/, '').replace(NOTE_EXT, ''), count: 1, from: n.path })
+      }
+    }
+    const tags = [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+    return { tags, missing: [...missing.values()].slice(0, MAX_MISSING) }
   }
 
   /** Notes linking to this one, newest first, with the lines that do. */
@@ -337,6 +378,14 @@ export class Notes extends EventEmitter {
       this.#texts.set(real, cached)
     }
     return cached.text
+  }
+
+  /** The tags of a note whose text `#textOf` just returned; kept with the text. */
+  #tagsOf(real: string, text: string): string[] {
+    const cached = this.#texts.get(real)
+    if (!cached || cached.text !== text) return tagsIn(text, frontmatter(text).data as Record<string, unknown>)
+    cached.tags ??= tagsIn(text, frontmatter(text).data as Record<string, unknown>)
+    return cached.tags
   }
 
   #profile(id: string): Profile {

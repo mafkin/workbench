@@ -245,6 +245,20 @@ describe('list and search', () => {
     expect(await notes.search('work', 'nothing-matches-this')).toEqual([])
   })
 
+  it('a #word in the query is a tag: notes carrying it in tags: or their text, not a heading', async () => {
+    await write('notes/Tagged.md', '---\ntags: [deploy]\n---\n# Tagged\n\nNothing else.\n')
+    await write('notes/Inline.md', '# Inline\n\nRemember the #deploy checklist, and #Review it.\n')
+    await write('notes/Heading.md', '# deploy\n\nA heading is not a tag.\n')
+    expect((await notes.search('work', '#deploy')).map((h) => h.path).sort()).toEqual(['~/notes/Inline.md', '~/notes/Tagged.md'])
+    const [inline] = await notes.search('work', '#Deploy checklist')
+    expect(inline.path).toBe('~/notes/Inline.md')
+    expect(inline.lines[0].ranges).toHaveLength(2)
+    expect(await notes.search('work', '#review #deploy')).toHaveLength(1)
+    expect(await notes.search('work', '#nothing')).toEqual([])
+    // A lone # is text, not an empty tag.
+    expect((await notes.search('work', '#')).length).toBeGreaterThan(0)
+  })
+
   it('caps snippets per note and trims long lines around the match', async () => {
     await write('notes/Long.md', `${'x'.repeat(500)} needle ${'y'.repeat(500)}\nneedle\nneedle\nneedle\n`)
     const [hit] = await notes.search('work', 'needle')
@@ -472,6 +486,23 @@ describe('frontmatter', () => {
     const { rev } = await notes.read('work', '~/notes/Ideas.md')
     const saved = await notes.write('work', '~/notes/Ideas.md', rev, '---\ntags: [x]\n---\n# Ideas\n')
     expect(saved.meta).toEqual({ tags: ['x'] })
+  })
+})
+
+describe('overview', () => {
+  it('counts tags and lists the pages that links name but nobody wrote, spelled as the newest linker does', async () => {
+    await write('notes/Tagged.md', '---\ntags: [deploy, game]\n---\n# Tagged\n\nSee [[Release notes]] and [[Ideas]], [[sub/Deploy plan#steps|the plan]], [[Nope.md]].\n')
+    await write('notes/Inline.md', '# Inline\n\n#deploy again; [[release notes]] too, and [[Nope]].\n')
+    const o = await notes.overview('work')
+    expect(o.tags).toEqual([
+      { tag: 'deploy', count: 2 },
+      { tag: 'game', count: 1 },
+    ])
+    expect(o.missing.map((m) => [m.name, m.count])).toEqual([
+      ['release notes', 2],
+      ['Nope', 2],
+    ])
+    expect(['~/notes/Tagged.md', '~/notes/Inline.md']).toContain(o.missing[0].from)
   })
 })
 

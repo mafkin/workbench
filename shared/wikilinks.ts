@@ -176,3 +176,34 @@ export function rewriteLinks(
   }
   return { text: count ? lines.join('\n') : text, count }
 }
+
+const TAG = /(^|[\s(\[>,;])#([\p{L}_][\p{L}\p{N}_/-]*)/gu
+
+/**
+ * A note's tags, lower-cased and in order of first appearance: `tags:` in its
+ * frontmatter (a list, or one string split on commas and spaces), then every
+ * `#tag` in its text outside code (fences and backticks). A tag starts with a
+ * letter, so `#1` and `# Heading` are not tags, and a URL's `#anchor` is not
+ * one either (it follows a `/`, not a space).
+ */
+export function tagsIn(text: string, meta?: Record<string, unknown> | null): string[] {
+  const out: string[] = []
+  const add = (raw: string) => {
+    const tag = raw.replace(/^#+/, '').replace(/[/-]+$/, '').toLowerCase()
+    if (tag && !out.includes(tag)) out.push(tag)
+  }
+  const listed = meta?.tags
+  if (Array.isArray(listed)) for (const t of listed) if (typeof t === 'string' || typeof t === 'number') add(String(t))
+  if (typeof listed === 'string') for (const t of listed.split(/[\s,]+/)) add(t)
+  const body = text.replace(FRONTMATTER, '')
+  let fenced = false
+  for (const line of body.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced
+      continue
+    }
+    if (fenced) continue
+    for (const m of line.replace(/`[^`]*`/g, ' ').matchAll(TAG)) add(m[2])
+  }
+  return out
+}

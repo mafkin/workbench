@@ -203,6 +203,7 @@ You review code. Don't edit files.
   - A **launcher** step starts its program in the item's folder (or home), and a **link** step opens its address in your browser.
 - Steps are yours to name: **+** adds one (relative paths are inside the item's folder, else home). Right-click a tab to edit or remove it, and drag tabs to reorder them.
 - The profile's `Workflow.md` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, **Save as profile steps** makes this item's steps the template, and **Open Workflow.md** opens the template as a note.
+- A `<notes>/templates/project.md`, when you make one, is the start of every new item's page (`{{title}}` and `{{date}}` filled in; its frontmatter is kept under the card's fields, and the steps you picked go under its `## Workflow`, added at the end when the template has none).
 - An older project without `steps:` shows All files, Git (in a repository), Claude setup and the workflow. Its first step change writes those tabs as its own `steps:`.
 - Note steps also count as notes, so they show up in search and wiki links.
 
@@ -337,6 +338,8 @@ An item's **Git** step shows its folder's repository, with its count of changed 
 - **Rename** (or **F2**) renames a note in the notes folder and rewrites the links to it in your other notes: `[[Old]]`, `[[folder/Old]]`, with headings and aliases kept, and relative links like `[x](Old.md)`. Renaming a `.md` in the file browser does the same. Notes outside the notes folder are named by your config, so they are renamed there.
 - `[[Project/docs/design.md]]` links to a file inside a project (a folder entry) by the project's name: Markdown opens as a note, anything else opens its folder.
 - A `<notes>/templates/page.md` is used for new notes (New note…, or created from a wiki link), with `{{title}}` and `{{date}}` filled in.
+- **Tags:** `tags: [game, art]` in a note's frontmatter, or `#game` in its text (outside code; a heading's `#` and a URL's `#anchor` don't count). The properties strip shows them as links, and a `#tag` word in the search box finds the notes carrying the tag (`#game sprites` combines a tag with words).
+- **Before you type a query,** the search page lists the wiki's **Tags** with counts, and **Pages to write**: the `[[names]]` your notes link to that have no note yet, with who links to them. Click one to create it from the page template and open it.
 
 ### Files
 
@@ -450,5 +453,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 9 | Git per project: changes, hunks, commit with Draft, branches, stash, pull and push, conflicts, history (done) |
 | 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
 | after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
-| 11 | The wiki: pages as configuration (in progress; properties, Mentions, Rename and project links are in) |
+| 11 | The wiki: pages as configuration (done) |
 | later | A Tauri window, if wanted |

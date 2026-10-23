@@ -49,6 +49,12 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 type Meta = Pick<NoteFile, 'meta' | 'metaError'>
 
 /** A frontmatter value as a short text. */
+/** `tags:` as a list of plain names: a list, or one string split on commas and spaces. */
+function tagList(v: unknown): string[] {
+  const raw = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(/[\s,]+/) : []
+  return [...new Set(raw.map((t) => t.replace(/^#+/, '').trim().toLowerCase()).filter(Boolean))]
+}
+
 function showValue(v: unknown): string {
   if (typeof v === 'string') return v
   if (Array.isArray(v) && v.every((x) => typeof x !== 'object')) return v.join(', ')
@@ -377,7 +383,17 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
             Object.entries(meta.meta).map(([k, v]) => (
               <span className="prop" key={k}>
                 <span className="k">{k}</span>
-                <span className="v">{showValue(v)}</span>
+                {k === 'tags' ? (
+                  <span className="v tags">
+                    {tagList(v).map((t) => (
+                      <button key={t} className="tag-link" onClick={() => ctx.current.search(`#${t}`)} title={`Notes tagged #${t}`}>
+                        #{t}
+                      </button>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="v">{showValue(v)}</span>
+                )}
               </span>
             ))
           )}

@@ -158,6 +158,21 @@ describe('nav ops write the nav page, touching only its lines', () => {
     expect(work().sections[1].items[0]).toMatchObject({ type: 'group', label: 'Deploy', items: [{ type: 'launch', label: 'Term', cwd: '~/x' }] })
   })
 
+  it('a new item’s page comes from templates/project.md when there is one, its steps under the template’s Workflow', async () => {
+    await fsp.mkdir(path.join(NOTES(), 'templates'), { recursive: true })
+    await fsp.writeFile(path.join(NOTES(), 'templates/project.md'), '---\ntags: [project]\n---\n# {{title}}\n\nStarted {{date}}.\n\n## Log\n')
+    await run([
+      { op: 'addItem', to: { section: 0 }, item: { type: 'item', label: 'Delta', path: '~/delta', steps: [{ type: 'files', label: 'All files' }, { type: 'git', label: 'Git' }] } },
+      { op: 'addItem', to: { section: 0 }, item: { type: 'item', label: 'Loose idea' } },
+    ])
+    const today = new Date().toISOString().slice(0, 10)
+    expect(await read('projects/Delta.md')).toBe(`---\ntags: [ project ]\nfolder: ~/delta\n---\n# Delta\n\nStarted ${today}.\n\n## Log\n\n## Workflow\n\n- [All files](files:)\n- [Git](git:)\n`)
+    expect(await read('projects/Loose idea.md')).toBe(`---\ntags: [ project ]\n---\n# Loose idea\n\nStarted ${today}.\n\n## Log\n`)
+    expect(work().sections[0].items[3]).toMatchObject({ label: 'Delta', page: 'projects/Delta.md', steps: [{ type: 'files' }, { type: 'git' }] })
+    // Workflow.md is a template too, but it is copied in by Add profile steps, not here.
+    expect(work().sections[0].items[4]).toMatchObject({ label: 'Loose idea', steps: [] })
+  })
+
   it('edits a page item (alias, folder, icon), a link, and a group; a page stays a page', async () => {
     await run([{ op: 'updateItem', at: { section: 0, index: 0 }, item: { type: 'item', label: 'Alpha project', path: '~/alpha2', icon: 'rocket' } }])
     expect(await read('index.md')).toContain('- [[Alpha|Alpha project]]\n')

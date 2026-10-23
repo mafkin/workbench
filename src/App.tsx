@@ -377,33 +377,36 @@ export function App() {
     [run, refreshNotes, navigate, newPageText],
   )
 
-  /** A [[wiki link]] to a missing note: offer to create it in the notes folder. */
-  const missingNote = useCallback(
-    (name: string) => {
-      const create = async () => {
-        const a = activeRef.current
-        const root = a?.profile?.notes
-        if (!a || !root) {
-          toasts.push({ message: 'Set a notes folder for this profile first', kind: 'error' })
-          return
-        }
-        const parts = name.split('/').map((s) => s.trim()).filter((s) => s && s !== '.' && s !== '..')
-        const file = noteFileName(parts.pop() ?? '')
-        if (!file) return
-        const path = joinNotes(root, [...parts, file].join('/'))
-        try {
-          await api.writeNote(a.id, path, null, await newPageText(a.id, file.replace(/\.md$/, '')))
-          setFresh(path)
-        } catch (err) {
-          // Already there (the list was stale): just open it.
-          if (!(err instanceof api.ApiError && err.status === 409)) return fail(err)
-        }
-        refreshNotes()
-        openNote(path)
+  /** Create the note a [[wiki link]] names (folders allowed) from the page template, and open it. */
+  const createLinkedNote = useCallback(
+    async (name: string) => {
+      const a = activeRef.current
+      const root = a?.profile?.notes
+      if (!a || !root) {
+        toasts.push({ message: 'Set a notes folder for this profile first', kind: 'error' })
+        return
       }
-      toasts.push({ message: `No note named "${name}" yet`, action: { label: 'Create', run: () => void create() } })
+      const parts = name.split('/').map((s) => s.trim()).filter((s) => s && s !== '.' && s !== '..')
+      const file = noteFileName(parts.pop() ?? '')
+      if (!file) return
+      const path = joinNotes(root, [...parts, file].join('/'))
+      try {
+        await api.writeNote(a.id, path, null, await newPageText(a.id, file.replace(/\.md$/, '')))
+        setFresh(path)
+      } catch (err) {
+        // Already there (the list was stale): just open it.
+        if (!(err instanceof api.ApiError && err.status === 409)) return fail(err)
+      }
+      refreshNotes()
+      openNote(path)
     },
     [toasts.push, fail, refreshNotes, openNote, newPageText],
+  )
+
+  /** A [[wiki link]] to a missing note: offer to create it in the notes folder. */
+  const missingNote = useCallback(
+    (name: string) => toasts.push({ message: `No note named "${name}" yet`, action: { label: 'Create', run: () => void createLinkedNote(name) } }),
+    [toasts.push, createLinkedNote],
   )
 
   const setRoot = useCallback(
@@ -961,12 +964,14 @@ export function App() {
       open: openNote,
       openFolder,
       missing: missingNote,
+      create: createLinkedNote,
+      search: (query) => setSearch({ open: true, query }),
       changed: notesChanged,
       notify: (message, kind) => toasts.push({ message, kind }),
       fresh,
       clearFresh: () => setFresh(null),
     }
-  }, [active, setRoot, notesList, projects, openNote, openFolder, missingNote, notesChanged, toasts.push, fresh])
+  }, [active, setRoot, notesList, projects, openNote, openFolder, missingNote, createLinkedNote, notesChanged, toasts.push, fresh])
 
   const contextApi = useMemo<ContextApi>(
     () => ({

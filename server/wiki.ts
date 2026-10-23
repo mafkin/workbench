@@ -39,6 +39,8 @@ import {
   type ProfileState,
   type Section,
   type StepItem,
+  fillTemplate,
+  isoDate,
 } from '../shared/config-schema.ts'
 import { describeIssue, parseProfile, StoreError } from './config-store.ts'
 import { revOf, writeAtomic } from './fs-util.ts'
@@ -712,6 +714,30 @@ export class Wiki extends EventEmitter {
       view.byName.set(lower(name), [...(view.byName.get(lower(name)) ?? []), { rel, name }])
       return name === label ? `[[${to}]]` : `[[${to}|${label}]]`
     }
+    /**
+     * A new item's page: `templates/project.md` with `{{title}}` and `{{date}}`
+     * filled (its frontmatter is kept under the card's), else a title line;
+     * the steps go under `## Workflow`, made at the end when the template has none.
+     */
+    const projectPage = (label: string, steps: string[], meta: Record<string, unknown>): string => {
+      const template = draft.get(path.join(root, 'templates/project.md'))
+      let body: string
+      if (template === null) body = `# ${label}\n${steps.length ? `\n## Workflow\n\n${steps.join('\n')}\n` : ''}`
+      else {
+        body = fillTemplate(template, { title: label, date: isoDate(new Date()) })
+        if (steps.length) {
+          let page = md.parsePage(body)
+          let i = md.sectionNamed(page, 'Workflow')
+          if (i === null) {
+            body = md.addSection(body, 'Workflow')
+            page = md.parsePage(body)
+            i = md.sectionNamed(page, 'Workflow')!
+          }
+          for (const step of steps) body = md.insertItem(body, i, undefined, undefined, step.replace(/^- /, ''))
+        }
+      }
+      return md.setMetas(body, meta)
+    }
     /** The item at `at` as a page: made in projects/ from a folder link when it has none. */
     const pageOf = (at: ItemAddr): { item: Folder & { page: string }; abs: string } => {
       const item = getItem(profile, at)
@@ -719,8 +745,8 @@ export class Wiki extends EventEmitter {
       if (item.type !== 'folder') throw new OpError('Only pages have a card and tabs; this entry is a link')
       if (item.page) return { item: item as Folder & { page: string }, abs: path.join(root, item.page) }
       const rel = freeRel('projects', item.label)
-      const body = `# ${item.label}\n\n## Workflow\n\n${(item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx, true)}`).join('\n')}\n`
-      draft.create(path.join(root, rel), md.setMetas(body, { folder: item.path, icon: item.icon }))
+      const steps = (item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx, true)}`)
+      draft.create(path.join(root, rel), projectPage(item.label, steps, { folder: item.path, icon: item.icon }))
       setNav(at.drawer, (t) => md.replaceLink(t, at.section, at.group, at.index, newLink(rel, item.label)))
       return { item: { ...item, page: rel }, abs: path.join(root, rel) }
     }
@@ -774,8 +800,7 @@ export class Wiki extends EventEmitter {
           const input = op.item as { label: string; path?: string; icon?: string; steps?: ItemInput[] }
           const rel = freeRel('projects', input.label)
           const steps = (input.steps ?? []).map((s) => `- ${stepLink(s)}`)
-          const body = `# ${input.label}\n${steps.length ? `\n## Workflow\n\n${steps.join('\n')}\n` : ''}`
-          draft.create(path.join(root, rel), md.setMetas(body, { folder: input.path, icon: input.icon }))
+          draft.create(path.join(root, rel), projectPage(input.label, steps, { folder: input.path, icon: input.icon }))
           link = newLink(rel, input.label)
         } else link = md.linkOf(parseNav(op.item), linkCtx)
         setNav(op.to.drawer, (t) => md.insertItem(t, op.to.section, op.to.group, op.index, link))

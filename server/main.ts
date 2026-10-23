@@ -360,6 +360,7 @@ export async function buildServer(opts: ServerOptions) {
     return notes.search(profile, q)
   })
 
+  app.get('/api/notes/overview', async (req) => notes.overview(parse(ProfileQuery, req.query).profile))
   app.get('/api/notes/backlinks', async (req) => {
     const { profile, path: p } = parse(PathQuery, req.query)
     return notes.backlinks(profile, p)

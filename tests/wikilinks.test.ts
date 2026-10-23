@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { describe, expect, it } from 'vitest'
 import { noteFileName, type NoteSummary } from '../shared/config-schema.ts'
-import { blankFrontmatter, linkPath, linksIn, normalizePath, parseWiki, relativePath, remarkWikiLinks, resolveHref, resolveProject, resolveWiki, rewriteLinks, slug, WIKI_HREF } from '../src/lib/wikilinks.ts'
+import { blankFrontmatter, linkPath, linksIn, normalizePath, parseWiki, relativePath, remarkWikiLinks, resolveHref, resolveProject, resolveWiki, rewriteLinks, slug, tagsIn, WIKI_HREF } from '../src/lib/wikilinks.ts'
 
 const render = (md: string) => renderToStaticMarkup(createElement(ReactMarkdown, { remarkPlugins: [remarkGfm, remarkWikiLinks] }, md))
 
@@ -188,5 +188,14 @@ describe('links into projects', () => {
   it('is null for bare names and unknown projects', () => {
     expect(resolveProject('Tuohi', projects)).toBeNull()
     expect(resolveProject('Nope/x.md', projects)).toBeNull()
+  })
+})
+
+describe('tagsIn', () => {
+  it('reads tags: from the frontmatter and #tags from the text, once each, lower-cased', () => {
+    const text = '---\ntags: [Game, art]\n---\n# Heading\n\nAbout #game and #Art/2d, see #wip-idea. Not #1 or https://x.io/#top.\n`#code` is not one, and neither is\n\n```\n#fenced\n```\n\n(#paren) and #end.\n'
+    expect(tagsIn(text, { tags: ['Game', 'art'] })).toEqual(['game', 'art', 'art/2d', 'wip-idea', 'paren', 'end'])
+    expect(tagsIn('tags as a string', { tags: 'one, two #three' })).toEqual(['one', 'two', 'three'])
+    expect(tagsIn('# Title\n\nno tags here\n')).toEqual([])
   })
 })

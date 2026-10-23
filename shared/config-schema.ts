@@ -564,6 +564,13 @@ export interface SearchHit extends NoteSummary {
   lines: SearchLine[]
 }
 
+/** What the search view shows before a query: the wiki's tags and the pages links point at that do not exist yet. */
+export interface NotesOverview {
+  tags: { tag: string; count: number }[]
+  /** `[[name]]` targets no note matches: the name as first written, how many notes link to it, and the newest of them. */
+  missing: { name: string; count: number; from: string }[]
+}
+
 /** File name for a note title: `Deploy plan` -> `Deploy plan.md`. Null when nothing usable is left. */
 export function noteFileName(title: string): string | null {
   const name = title

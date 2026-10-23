@@ -12,6 +12,7 @@ import type {
   ItemAddr,
   NoteFile,
   NoteSummary,
+  NotesOverview,
   Op,
   SearchHit,
   ServersScan,
@@ -80,6 +81,7 @@ export const writeNote = (profile: string, path: string, rev: string | null, tex
   })
 export const listNotes = (profile: string) => api<NoteSummary[]>(`/api/notes/list?${query({ profile })}`)
 /** Notes linking to this one, with the lines that do. */
+export const notesOverview = (profile: string) => api<NotesOverview>(`/api/notes/overview?${query({ profile })}`)
 export const backlinks = (profile: string, path: string) => api<SearchHit[]>(`/api/notes/backlinks?${query({ profile, path })}`)
 /** Rename a note in the notes folder; links to it are rewritten. */
 export const renameNote = (profile: string, path: string, name: string) =>

@@ -1131,6 +1131,78 @@ button {
   flex: none;
 }
 
+/* Before a query: the wiki's tags and the pages its links name. */
+.search-overview {
+  margin: 0 0 16px;
+}
+
+.search-overview .section-label,
+.content .search-results + .section-label {
+  margin-bottom: 8px;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip.tag {
+  cursor: pointer;
+}
+
+.chip.tag svg {
+  color: var(--faint);
+}
+
+.missing-pages {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.missing-pages button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: left;
+}
+
+.missing-pages button:hover {
+  border-color: var(--accent-line);
+}
+
+.missing-pages .icon {
+  color: var(--muted);
+  flex: none;
+}
+
+.note-props .v.tags {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.tag-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tag-link:hover {
+  color: var(--text-strong);
+  text-decoration: underline;
+}
+
 .search-results mark {
   border-radius: 2px;
   background: var(--accent-soft);

@@ -201,7 +201,7 @@ export function MainPane(props: Props) {
         {!profile ? (
           <BrokenProfile active={active} />
         ) : search.open ? (
-          <SearchView query={search.query} onResults={(hits: SearchHit[]) => (firstHit.current = hits[0]?.path ?? null)} />
+          <SearchView query={search.query} onQuery={(query) => setSearch({ open: true, query })} onResults={(hits: SearchHit[]) => (firstHit.current = hits[0]?.path ?? null)} />
         ) : entry ? (
           <EntryView
             key={`${active.id}:${entry.item.label}`}

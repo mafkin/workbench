@@ -45,7 +45,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 8 | Polish, the known gaps, Servers | Done (same branch); merged to `main` with parts 2–7 (PR #1) |
 | 9 | Git per project | Done; merged to `main`; see below |
 | 10 | Assets and media | Done (branch restarted from `main`); merged to `main` with the profile menu, drawers, MCP switches and items (PR #3); see below |
-| 11 | The wiki: pages as configuration | In progress (milestone 1 done); see below |
+| 11 | The wiki: pages as configuration | Done; see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -447,7 +447,7 @@ The user asked: launchers in the sidebar started on a single click of their name
   - Logos are content-named PNGs; nothing prunes unused ones.
 - **Left for later (the user's other two sharing ideas):** a shared shelf heading shown in every drawer of a profile, and dragging entries onto a drawer in the picker (Ctrl to link instead of move). Also: reordering drawers in the app, and pruning unused logos.
 
-### Part 11: the wiki is the configuration (in progress)
+### Part 11: the wiki is the configuration (done)
 
 The user asked how to simplify the workflow and configuration and make Workbench more wiki-like. The plan is in the session's plan file and summarized here.
 
@@ -485,7 +485,11 @@ The user asked how to simplify the workflow and configuration and make Workbench
   - **Chats and the wiki:** `wikiContext(profile, home, page)` in `context.ts`: the wiki root in `--add-dir` and a prompt section naming `index.md`, `projects/*.md`, `Workflow.md` and `agents/*.md`; in a project, "This project's page is …: add a line under a `## Log` heading there when you finish something; leave the frontmatter and `## Workflow` to me". `agentFor` merges context, wiki and drawer folders into the one `--add-dir`/`--append-system-prompt`. The chat bar says `context · wiki`.
   - **Smaller:** **Open Workflow.md** in the tab menu (beside Add profile steps); nav sections carry `role="group"` with their title; `collapsed` is not read from the pages (localStorage only, as planned).
   - **Kept, to decide with the user:** the Claude setup page and its sidebar button. The decision was "project tab only", but the page's Everywhere view is where MCP switches set the profile's `mcpOff:` defaults, which landed after that decision.
-- **Left for milestone 4:** tags, Pages to write, `templates/project.md`, docs and screenshots, the bundle check.
+- **Milestone 4, built (polish):**
+  - **Tags:** `tagsIn(text, meta)` in `shared/wikilinks.ts` (frontmatter `tags:` as a list or a string, and `#tag` tokens outside fences and backticks; a tag starts with a letter, so headings, `#1` and URL anchors are not tags). `Notes` keeps a note's tags with its cached text; a `#word` in a search query is a tag the note must carry (`#tag` occurrences are highlighted). The properties strip shows `tags` as links that search for the tag.
+  - **Overview** (`Notes.overview`, `GET /api/notes/overview`): tag counts, most used first, and the pages to write: `[[targets]]` no note resolves (project links through `resolveProject` excluded), spelled as the newest linker spells them, with how many notes link to them (capped at 200). The search view shows both before a query (`Tags`, `Pages to write`); a missing page is created from `templates/page.md` through `NotesApi.create` (shared with the wiki-link toast) and opened.
+  - **`templates/project.md`:** `projectPage` in `Wiki.#applyOp` starts every new item page from it when it exists (`fillTemplate` with `{{title}}` and `{{date}}`; the card's frontmatter is merged into the template's; the chosen steps go under its `## Workflow`, added at the end when missing). Without a template a page is `# Title` plus the Workflow list, as before.
+  - **Not done:** tags in a note's body are plain text (the strip and the search find them, clicking one in the text does nothing); tags are flat (no `tag:` page; the search is the page); yaml rewrites a template's flow list with spaces (`[ project ]`) when it adds the card's keys; the Claude setup page stays until the user decides (see milestone 3).
 
 ## Reference
 
