@@ -278,7 +278,12 @@ export function FileBrowser({ top, roots, home, onNavigate, toast, chatMenu }: P
   useEffect(() => {
     if (!current || !treeRef.current || gallery) return
     const el = treeRef.current.querySelector(`[data-path="${CSS.escape(current.path)}"]`)
-    if (el) return el.scrollIntoView({ block: 'nearest' })
+    // Not returned: scrollIntoView returns a Promise in Chromium 156, and React
+    // would call it as the effect's cleanup.
+    if (el) {
+      el.scrollIntoView({ block: 'nearest' })
+      return
+    }
     // Not drawn: scroll its place into view, and it will be.
     const i = rows.findIndex((r) => r.kind === 'entry' && r.entry.path === current.path)
     if (i < 0) return

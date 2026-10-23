@@ -115,11 +115,15 @@ export class Procfs {
     const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
     const startTicks = Number(fields[19])
     const boot = Number(/^btime (\d+)/m.exec(sys)?.[1] ?? 0)
+    const command = cmdline.split('\0').filter(Boolean)
+    // comm is the main thread's name ("node-MainThread" on Node 26.11), so the
+    // program comes first; comm only when the process rewrote its command line.
+    const program = command[0] && !/\s/.test(command[0]) ? path.basename(command[0]) : ''
     return {
       pid,
       cwd: cwd.replace(/ \(deleted\)$/, ''),
-      name: comm.trim(),
-      command: cmdline.split('\0').filter(Boolean),
+      name: program || comm.trim(),
+      command,
       started: boot && startTicks ? (boot + startTicks / clockTicks()) * 1000 : 0,
     }
   }

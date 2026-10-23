@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseNetTcp } from '../server/procfs.ts'
+import { parseNetTcp, Procfs } from '../server/procfs.ts'
 import { buildServer } from '../server/main.ts'
 
 const NET_TCP = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
@@ -22,6 +22,30 @@ describe('reading listening sockets', () => {
       { port: 22, address: '0.0.0.0', inode: 1777, uid: 0 },
     ])
     expect(parseNetTcp(NET_TCP6, 6)).toEqual([{ port: 5353, address: '::1', inode: 52000, uid: 1000 }])
+  })
+})
+
+describe('reading a process', () => {
+  // comm is the main thread's name, which Node 26.11 sets to "node-MainThread".
+  async function fakeProc(comm: string, cmdline: string[]) {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'wb-proc-'))
+    await fsp.mkdir(path.join(root, '42'))
+    await fsp.symlink(root, path.join(root, '42', 'cwd'))
+    await fsp.writeFile(path.join(root, '42', 'comm'), `${comm}\n`)
+    await fsp.writeFile(path.join(root, '42', 'cmdline'), cmdline.map((a) => `${a}\0`).join(''))
+    return root
+  }
+
+  it('names it after its program, not its thread name', async () => {
+    const root = await fakeProc('node-MainThread', ['/usr/bin/node', 'server.js'])
+    expect((await new Procfs(root).process(42))?.name).toBe('node')
+    await fsp.rm(root, { recursive: true })
+  })
+
+  it('keeps comm when the program rewrote its command line', async () => {
+    const root = await fakeProc('nginx', ['nginx: master process /usr/sbin/nginx'])
+    expect((await new Procfs(root).process(42))?.name).toBe('nginx')
+    await fsp.rm(root, { recursive: true })
   })
 })
 
@@ -113,6 +137,16 @@ describe('servers running in projects', { timeout: 15_000 }, () => {
     const { body } = await call('GET', '/api/servers?profile=work')
     const alpha = body.projects.find((p: { label: string }) => p.label === 'Alpha')
     expect(alpha.rows).toEqual([expect.objectContaining({ name: 'web', declared: true, port: web.port, pid: web.pid, health: expect.objectContaining({ state: 'up' }) })])
+  })
+
+  it('scans again at once when the profile changed since the last scan', async () => {
+    const before = await call('GET', '/api/servers?profile=work')
+    expect(before.body.projects.map((p: { label: string }) => p.label)).toEqual(['Alpha', 'Beta'])
+    const text = await fsp.readFile(path.join(dir, 'cfg/profiles/work.yaml'), 'utf8')
+    await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), text.replace('label: Beta', 'label: Gamma'))
+    await server.store.init({ watch: false, seed: false })
+    const after = await call('GET', '/api/servers?profile=work')
+    expect(after.body.projects.map((p: { label: string }) => p.label)).toEqual(['Alpha', 'Gamma'])
   })
 
   it('stops only a server it lists, and only with the header', async () => {

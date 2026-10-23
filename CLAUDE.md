@@ -99,7 +99,7 @@ This is a personal Linux workbench for one user. It's a local web app with a Rea
 
 ```sh
 npm install
-npm test           # Vitest: 341 tests (config ops, store, guard, launch, notes, wiki links, files, steps, cards, chats, agent profiles, backgrounds, context, Claude setup, MCP checks, masking, profiles, switcher, servers, git, thumbnails, .blend, open with, HTTP API)
+npm test           # Vitest: 344 tests (config ops, store, guard, launch, notes, wiki links, files, steps, cards, chats, agent profiles, backgrounds, context, Claude setup, MCP checks, masking, profiles, switcher, servers, git, thumbnails, .blend, open with, HTTP API)
 npm run e2e        # Playwright: 97 tests; in a fresh environment run `npx playwright install --with-deps chromium` first
 npm run build      # tsc -p . (TypeScript 7) + vite build
 npm run dev        # service on 7420 (node --watch) + Vite with hot reload on 7421 (proxies /api)
@@ -181,6 +181,8 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 - **The session hook in args:** every claude chat's args end with `--settings <json>` after the session flag (`#hookArgs`), so exact-args assertions end with `"--settings"`; the fake claude reads it and runs the hook on start and on a `clear` command. Tests that measure output skip the `args=` line.
 - **Git in tests:** use real git in temp folders with a bare remote and a second clone as "someone else"; the service runs git with `HOME` = its `home`, so write `~/.gitconfig` (identity, `init.defaultBranch`) in the fake home, and run the test's own git with the same HOME and `GIT_*` variables removed. e2e: the fixture's `~/alpha` is a repo, so Alpha has a Git tab and a git line on its card in every spec (`project.spec.ts`'s `tabNames` drops the tab's count); only `git.spec.ts` commits and adds a remote. Pass `gitFetchEveryMs: 0` to `buildServer` unless a test is about the background fetch.
 - **Servers in tests:** start a real `node -e` HTTP server with `cwd` inside a project and read its port from stdout; kill it in `afterEach`. Never stop anything that isn't the test's own child.
+- **Effects return a cleanup function or nothing.** A returned value is called as a cleanup and crashes the page. DOM methods that used to return `undefined` now return a Promise (`scrollIntoView`, `scrollTo` in Chromium 156), so `if (el) return el.scrollIntoView()` breaks. The cloud's older preinstalled Chromium hides this; the desktop's e2e (Playwright's own Chromium) catches it.
+- **Process names:** `/proc/<pid>/comm` is the main thread's name, which Node 26.11 sets to `node-MainThread`. `Procfs.process` names a process after its program (`argv[0]`) and uses `comm` only when the command line was rewritten into one string.
 - **Bundle size:** the main chunk must stay under 800 kB (about 680 kB now). New views go in lazy chunks (`ServersView`, `GitView`, `ModelPreview` with three.js, `QuickSwitcher`, `ProfileDialog`, Markdown, the highlighter). Import three only from `ModelPreview.tsx` (and dynamically from `src/lib/thumbs.ts`).
 - **Assets in tests:** e2e builds its sample assets in `gallery.spec.ts` (PNGs with `encodePng`, a glTF triangle with a `.bin`, a WAV, a synthetic `.blend`, a Godot project) and uses `openWith:` rules for Blender/Godot, since neither is installed; launches land in the fake spawn's log. The e2e thumbnail cache (`THUMBS`, `e2e/.tmp-thumbs`) must stay outside the config folder, which the service watches. WebGL works in headless Chromium (software rendering). Effects in components must not return a value from a callback (`useEffect(() => fn(x))` returning a number crashes React as a "cleanup").
 - **Claude setup secrets:** anything read from claude's files goes through `server/mask.ts` before it is sent; raw configs stay in the service (`SetupRead.servers`). JSON parse errors are reported without the text they quote. A check is by id only and re-reads the files. In e2e, `writeClaudeSetup()` is called only by `setup.spec.ts`, so other specs see Alpha without `.mcp.json` or `.claude/`.
@@ -193,7 +195,9 @@ Run `npm test`, `npm run e2e` and `npm run build` before you call a part done. I
 
 ## The user's machine (not visible from the cloud)
 
-- **System:** CachyOS (Arch), GNOME on Wayland, Node 26, npm. No Rust or cargo, no tmux.
+- **System:** CachyOS (Arch), GNOME on Wayland, Node 26.11, npm 12. No Rust or cargo, no tmux.
+- **npm 12 blocks dependency install scripts** unless `package.json` `allowScripts` lists them. `node-pty@1.1.0` is approved there (it has no Linux prebuilds and must compile). After upgrading node-pty, run `npm install-scripts approve node-pty`, or `npm ci` on the desktop skips the build and chats break.
+- **Running:** Workbench runs as the systemd user service (`bin/workbench --install`, done 2026-10-23). The checkout is on `claude/inspiring-einstein-vwftq8`; a pull, checkout or commit there rebuilds and restarts the service.
 - **Browsers:** Firefox is the default. GNOME Web 51 is installed, but its web-app mode can't be set up from a script, so `bin/workbench` uses a GNOME Web app if one exists for this address and falls back to the default browser.
 - **Programs installed:** `gnome-terminal`, `alacritty`, `nautilus`, `godot`, `blender`, `claude`, `gcc`/`make` (so node-pty can build), `python3`.
 - **Paths:** the real config is in `~/.config/workbench/`; the launcher is at `~/.local/share/applications/workbench.desktop`; logs and `chats.json` go to `~/.local/state/workbench/`.

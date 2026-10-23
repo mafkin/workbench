@@ -51,7 +51,7 @@ export class Servers {
   #home: string
   #proc: Procfs
   #cacheMs: number
-  #cache = new Map<string, { at: number; scan: Promise<ServersScan> }>()
+  #cache = new Map<string, { at: number; rev: string; scan: Promise<ServersScan> }>()
 
   constructor(store: ConfigStore, home: string, opts: ServersOptions = {}) {
     this.#store = store
@@ -61,10 +61,12 @@ export class Servers {
   }
 
   scan(id: string): Promise<ServersScan> {
+    // A scan of the profile as it was before an edit lists the old projects.
+    const rev = this.#store.profile(id).rev
     const hit = this.#cache.get(id)
-    if (hit && Date.now() - hit.at < this.#cacheMs) return hit.scan
+    if (hit && hit.rev === rev && Date.now() - hit.at < this.#cacheMs) return hit.scan
     const scan = this.#scan(id)
-    this.#cache.set(id, { at: Date.now(), scan })
+    this.#cache.set(id, { at: Date.now(), rev, scan })
     scan.catch(() => this.#cache.delete(id))
     return scan
   }
