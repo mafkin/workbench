@@ -59,7 +59,7 @@ test('a new item is a page in projects/; its first step fills the page, the seco
   await git.locator('input[name=itemFolder]').fill('~/alpha')
   await git.getByRole('button', { name: 'Add' }).click()
   await expect(git).toHaveCount(0)
-  await expect.poll(() => tabNames(page)).toEqual(['ideas', 'Git'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'ideas', 'Git'])
   expect(await wikiText('projects/Board.md')).toBe('---\nfolder: ~/alpha\n---\n# Board\n\n## Workflow\n\n- [ideas](~/notes/Ideas.md)\n- [Git](git:)\n')
   await tabs(page).getByRole('tab', { name: /^Git/ }).click()
   await expect(page.locator('.git-file').first()).toBeVisible()
@@ -81,14 +81,14 @@ test('removing a step removes only the tab: the file stays, Undo brings it back,
   await link.locator('input[name=label]').fill('board')
   await link.locator('input[name=url]').fill('https://example.com/board')
   await link.getByRole('button', { name: 'Add' }).click()
-  await expect.poll(() => tabNames(page)).toEqual(['ideas', 'board'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'ideas', 'board'])
 
   await tabs(page).locator('.step-tab', { hasText: 'ideas' }).click({ button: 'right' })
   await page.getByRole('menuitem', { name: /Remove tab/ }).click()
   await expect(page.locator('.toast')).toContainText('its files stay')
   expect(fs.existsSync(path.join(NOTES, 'Ideas.md'))).toBe(true)
   await page.locator('.toast').getByRole('button', { name: 'Undo' }).click()
-  await expect.poll(() => tabNames(page)).toEqual(['ideas', 'board'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'ideas', 'board'])
 
   for (const name of ['ideas', 'board']) {
     await tabs(page).locator('.step-tab', { hasText: name }).click({ button: 'right' })
@@ -118,5 +118,5 @@ test('an item with a folder adds File browser, Git and Claude setup in one click
   await step.getByRole('radio', { name: 'Claude setup' }).click()
   await expect(step.locator('input[name=itemFolder]')).toHaveCount(0)
   await step.getByRole('button', { name: 'Add' }).click()
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Claude setup'])
 })

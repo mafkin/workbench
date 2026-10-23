@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { CONTEXT_FOLDERS, drawerIndex, drawersOf, expandHome, type ContextFolder, type ContextStatus, type Profile } from '../shared/config-schema.ts'
+import { CONTEXT_FOLDERS, CONTEXT_LABEL, drawerIndex, drawersOf, expandHome, walkItems, type ContextFolder, type ContextStatus, type Op, type Profile } from '../shared/config-schema.ts'
 import type { ChatContext } from './agents.ts'
 import { frontmatter } from './claude-setup.ts'
 import { StoreError } from './config-store.ts'
@@ -162,15 +162,29 @@ export class Context extends EventEmitter {
     return { notes: this.#profile(id).notes ?? null, ready: folders[0].exists, folders, inbox }
   }
 
-  /** Make the folders and starter notes that are missing; nothing is overwritten. */
+  /**
+   * Make the folders and starter notes that are missing (nothing is
+   * overwritten), and list the folders in the nav: a Context heading at the top
+   * of the first drawer's page, unless an entry already opens context/.
+   */
   async setup(id: string): Promise<ContextStatus> {
-    const root = this.#root(this.#profile(id))
+    const profile = this.#profile(id)
+    const root = this.#root(profile)
     if (!root) throw new StoreError('Set a notes folder first (notes: in the profile)', 409)
     for (const name of CONTEXT_FOLDERS) await fsp.mkdir(path.join(root, name), { recursive: true })
     for (const [rel, text] of Object.entries(STARTER)) {
       await fsp.writeFile(path.join(root, rel), text, { flag: 'wx' }).catch((err) => {
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
       })
+    }
+    const linked = walkItems(profile).some((e) => e.item.type === 'folder' && !!e.item.path && path.resolve(expandHome(e.item.path, this.#home)) === path.join(root, 'context'))
+    if (!linked && profile.notes) {
+      const notes = profile.notes
+      const ops: Op[] = [
+        { op: 'addSection', drawer: 0, title: 'Context', index: 0 },
+        ...CONTEXT_FOLDERS.map((name, i): Op => ({ op: 'addItem', to: { drawer: 0, section: 0 }, index: i, item: { type: 'folder', label: CONTEXT_LABEL[name], path: `${notes.replace(/\/+$/, '')}/${name}` } })),
+      ]
+      await this.#store.apply(id, this.#store.profile(id).rev, ops)
     }
     this.#emit(id)
     return this.status(id)
@@ -263,6 +277,30 @@ export async function drawerContext(profile: Profile, drawer: number, home: stri
   if (!found.length) return null
   const prompt = [`# Shared folders (Workbench, drawer ${own.name})`, ['Material shared between drawers. Read it when relevant:', ...found.map((f) => f.line)].join('\n')].join('\n\n')
   return { prompt, dirs: found.map((f) => f.dir) }
+}
+
+/**
+ * The wiki a claude chat gets (part 11): the profile's notes folder, where the
+ * pages that configure Workbench live too, and the project's own page when the
+ * chat belongs to one. Null when the folder does not exist yet.
+ */
+export async function wikiContext(profile: Profile, home: string, page?: string): Promise<ChatContext | null> {
+  if (!profile.notes) return null
+  const root = path.resolve(expandHome(profile.notes, home))
+  if (!(await fsp.stat(root).catch(() => null))?.isDirectory()) return null
+  const parts = [
+    `# My wiki (Workbench, profile ${profile.name})`,
+    [
+      `${root} holds my notes and the pages that configure Workbench: index.md (the nav), projects/*.md (one per project: its frontmatter is the card, its ## Workflow the tabs), Workflow.md and agents/*.md.`,
+      'Markdown there is mine; [[Name]] links name pages. Read them when relevant.',
+    ].join(' '),
+  ]
+  if (page) {
+    parts.push(
+      `This project's page is ${path.join(root, page)}: its frontmatter is the card and its ## Workflow the tabs. When you finish something worth remembering, add a line under a ## Log heading there (make the heading if it is missing); leave the frontmatter and ## Workflow to me unless I ask.`,
+    )
+  }
+  return { prompt: parts.join('\n\n'), dirs: [root] }
 }
 
 /** Two contexts as one: claude takes one --append-system-prompt and one --add-dir. */

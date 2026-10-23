@@ -311,6 +311,16 @@ export function App() {
   )
   const openNote = useCallback((path: string) => openPath('note', path), [openPath])
   const openFolder = useCallback((path: string) => openPath('folder', path), [openPath])
+  /** A context folder: its nav entry when the profile lists one, else its own page. */
+  const openContext = useCallback(
+    (name: ContextFolder) => {
+      const p = activeRef.current?.profile
+      const want = p?.notes ? normalizePath(expandHome(`${p.notes}/${name}`, homeRef.current)) : null
+      const addr = p && want ? findEntry(p, 'folder', (item) => 'path' in item && !!item.path && normalizePath(expandHome(item.path, homeRef.current)) === want) : null
+      navigate(addr ? itemKey(addr) : CONTEXT_KEY + name)
+    },
+    [navigate],
+  )
 
   const refreshNotes = useCallback(() => {
     const id = activeRef.current?.id
@@ -715,7 +725,8 @@ export function App() {
         entries.push({ label: 'Remove from this drawer', icon: <Trash2 size={14} />, danger: true, run: () => void run([{ op: 'deleteItem', at: addr }], `Removed "${item.label}" from this drawer`) })
         return entries
       }
-      if (item.type === 'folder') {
+      // Only a page has a card, tabs and chats; a folder link is just the file browser.
+      if (item.type === 'folder' && item.page) {
         const card = (field: 'pinned' | 'status', value: string | boolean | null, label?: string) =>
           void run([{ op: 'setCard', at: addr, field, value }], label)
         const status = item.status ?? 'active'
@@ -967,22 +978,23 @@ export function App() {
         if (!a.profile.notes && notesApi && !(await run([{ op: 'setProfileField', key: 'notes', value: notesApi.suggestedRoot }], `Notes folder set to ${notesApi.suggestedRoot}`))) return
         try {
           setContextStatus(await api.setupContext(a.id))
-          navigate(CONTEXT_KEY + 'context')
+          await refresh()
+          openContext('context')
         } catch (err) {
           fail(err)
         }
       },
-      open: (name) => navigate(CONTEXT_KEY + name),
+      open: openContext,
       sendToInbox: (path) => {
         const a = activeRef.current
         if (!a) return
         api.sendToInbox(a.id, path).then(
-          (r) => toasts.push({ message: `Copied to the inbox as ${nameOf(r.path)}`, action: { label: 'Open inbox', run: () => navigate(CONTEXT_KEY + 'inbox') } }),
+          (r) => toasts.push({ message: `Copied to the inbox as ${nameOf(r.path)}`, action: { label: 'Open inbox', run: () => openContext('inbox') } }),
           fail,
         )
       },
     }),
-    [contextStatus, notesApi, run, navigate, fail, toasts.push],
+    [contextStatus, notesApi, run, navigate, fail, toasts.push, refresh, openContext],
   )
 
   /** Everything Ctrl+K offers, built when it opens. */

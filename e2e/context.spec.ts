@@ -5,8 +5,9 @@ import { closeChats, NOTES, pickProfile, PNOTES, PORT, resetFixture } from './fi
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
+// Before setup, the fixed block with its button; after it, the Context heading written into index.md.
 const context = (page: Page) => nav(page).getByRole('group', { name: 'Context' })
-const row = (page: Page, name: string) => context(page).getByRole('link', { name: new RegExp(`^${name}`) })
+const row = (page: Page, name: string) => context(page).locator('.item', { hasText: name })
 const screen = (page: Page) => page.locator('.chat-terminal .xterm-rows')
 const fileRow = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
 
@@ -24,7 +25,8 @@ async function setUp(page: Page) {
 async function newChat(page: Page) {
   await entry(page, 'Alpha').click()
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
-  await expect(screen(page)).toContainText('FAKE CLAUDE')
+  // The prompt is long enough to scroll the first line away; the args line ends the start.
+  await expect(screen(page)).toContainText('"--settings"')
 }
 
 test.beforeEach(async ({ page }) => {
@@ -41,7 +43,8 @@ test('Set up context from the nav; its notes open in tabs', async ({ page }) => 
   await page.screenshot({ path: 'test-results/context-setup-row.png' })
   await context(page).getByRole('button', { name: 'Set up context in ~/notes' }).click()
   await expect(page.locator('.page-title')).toHaveText('Context')
-  await expect(row(page, 'Context')).toHaveAttribute('aria-current', 'page')
+  await expect(row(page, 'Context')).toHaveClass(/selected/)
+  expect(await fsp.readFile(path.join(NOTES, 'index.md'), 'utf8')).toContain('## Context\n\n- [Context](context/)\n- [Knowledge](knowledge/)\n- [Processes](processes/)\n- [Inbox](inbox/)\n')
   for (const name of ['Knowledge', 'Processes', 'Inbox']) await expect(row(page, name)).toBeVisible()
   expect(await fsp.readFile(path.join(NOTES, 'context/README.md'), 'utf8')).toContain('context/preferences.md')
 
@@ -67,7 +70,8 @@ test('a new claude chat starts with the context folders and says so', async ({ p
   await setUp(page)
   await newChat(page)
   await expect(screen(page)).toContainText(`"--add-dir","${NOTES}/context"`)
-  await expect(page.locator('.chat-bar .chat-context')).toHaveText('context')
+  await expect(screen(page)).toContainText(`This project's page is ${NOTES}/projects/Alpha.md`)
+  await expect(page.locator('.chat-bar .chat-context')).toHaveText('context · wiki')
 })
 
 test('Send to inbox copies a file; the badge counts it and the inbox lists it', async ({ page }) => {

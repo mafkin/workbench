@@ -79,17 +79,17 @@ describe('drawers in the service', { timeout: 15_000 }, () => {
     const { body: chat } = await start({ section: 0, index: 0 })
     const game = path.join(home, 'shared/game')
     const research = path.join(home, 'shared/research')
-    await sees(chat.id, `"--add-dir","${game}","${research}","--session-id"`)
+    await sees(chat.id, `"--add-dir","${path.join(home, 'notes')}","${game}","${research}","--session-id"`)
     expect(server.chats.text(chat.id)).toContain('# Shared folders (Workbench, drawer Game dev)')
   })
 
   test("a shared entry starts its original's chat, with the original drawer's folders", async () => {
     const { body: chat } = await start({ drawer: 1, section: 0, index: 0 })
     expect(chat).toMatchObject({ host: 'project:~/tower' })
-    await sees(chat.id, `"--add-dir","${path.join(home, 'shared/game')}","${path.join(home, 'shared/research')}"`)
+    await sees(chat.id, `"--add-dir","${path.join(home, 'notes')}","${path.join(home, 'shared/game')}","${path.join(home, 'shared/research')}"`)
     // Research uses nothing: its own project gets only its own folder.
     const { body: lab } = await start({ drawer: 1, section: 0, index: 1 })
-    await sees(lab.id, `"--add-dir","${path.join(home, 'shared/research')}","--session-id"`)
+    await sees(lab.id, `"--add-dir","${path.join(home, 'notes')}","${path.join(home, 'shared/research')}","--session-id"`)
   })
 
   test('the file routes may open drawer folders', async () => {

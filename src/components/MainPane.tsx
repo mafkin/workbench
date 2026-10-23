@@ -1,3 +1,4 @@
+import { expandHome, normalizePath } from '../../shared/config-schema.ts'
 import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search, X } from 'lucide-react'
 import { lazy, Suspense, useRef, useState } from 'react'
 import {
@@ -453,6 +454,27 @@ function EntryView({
   onTab: (label: string | null) => void
 }) {
   const { openExternally } = pane
+  if (item.type === 'folder' && !item.page) {
+    // A folder link (no page): the file browser; the wiki's context/ opens the Context view.
+    const profile = pane.active.profile!
+    const want = item.path ? normalizePath(expandHome(item.path, pane.home)) : ''
+    const isContext = !!profile.notes && want === normalizePath(expandHome(`${profile.notes}/context`, pane.home))
+    if (isContext) return <ContextView key={`${pane.active.id}:context`} name="context" profileId={pane.active.id} profile={profile} home={pane.home} openFolder={pane.openFolder} toast={pane.toast} />
+    return (
+      <Browser
+        key={`${pane.active.id}:${item.path}`}
+        top={item.path ?? '~'}
+        kicker={kicker}
+        heading={
+          <>
+            <EntryIcon type="folder" icon={item.icon} size={22} />
+            {item.label}
+          </>
+        }
+        pane={pane}
+      />
+    )
+  }
   if (item.type === 'note') {
     return (
       <NoteView

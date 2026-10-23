@@ -1,3 +1,4 @@
+import type { ContextStatus } from '../../shared/config-schema.ts'
 import {
   closestCenter,
   DndContext,
@@ -501,6 +502,8 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cx('section', isDragging && 'dragging', hint)}
+      role="group"
+      aria-label={title}
     >
       <div className="section-head" onContextMenu={menu}>
         {editing && (
@@ -560,6 +563,8 @@ function ContextBlock({
   const notes = useNotes()
   const status = ctx?.status
   if (!ctx || !status) return null
+  // Once set up, the folders are entries of the nav (a Context heading in the page); only the offer to set up stays here.
+  if (status.ready) return null
   const open = !isCollapsed('context', false)
   const toggle = () => toggleCollapsed('context', false)
   return (
@@ -766,6 +771,7 @@ function RowActions({ addr, item }: { addr: ItemAddr; item: NavItem }) {
 
 function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
   const ctx = useContext(Ctx)
+  const folders = useContextFolders()
   const { setNodeRef, attributes, listeners, isDragging, hint, style } = useItemSortable(addr, item)
   // A shared entry looks and opens like its original, marked with the drawer it comes from.
   const original = item.type === 'shared' ? (findShared(ctx.profile, item)?.item ?? null) : item
@@ -805,6 +811,11 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       )}
       <EntryIcon type={shown.type} icon={shown.icon} agent={shown.type === 'chat' ? chatProgram(shown.agent) : undefined} />
       <span className="label">{item.label}</span>
+      {inboxCount(shown, folders?.status) > 0 && (
+        <span className="count inbox-count" title="In the inbox">
+          {inboxCount(shown, folders?.status)}
+        </span>
+      )}
       {item.type === 'shared' && (
         <span className="shared-tag" title={`Also in ${item.drawer}`}>
           ⇄ {item.drawer}
@@ -835,6 +846,12 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       <RowActions addr={addr} item={item} />
     </div>
   )
+}
+
+/** What the inbox holds, on the entry that opens it (a folder link to the wiki's inbox/). */
+function inboxCount(item: NavItem, status: ContextStatus | null | undefined): number {
+  if (!status || item.type !== 'folder' || item.page || !item.path) return 0
+  return status.folders.find((f) => f.name === 'inbox')?.path === item.path ? status.inbox : 0
 }
 
 /** A spark on a project or chat entry with running chats (with a count past one); the accent colour when one needs you. */

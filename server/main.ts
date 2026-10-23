@@ -52,7 +52,7 @@ import type { ClaudeSetup, McpEntry } from '../shared/claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
 import { describeIssue, StoreError } from './config-store.ts'
 import { Wiki } from './wiki.ts'
-import { Context, drawerContext, mergeContext } from './context.ts'
+import { Context, drawerContext, mergeContext, wikiContext } from './context.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { Git, type Repo } from './git.ts'
 import { openProgram } from './open-with.ts'
@@ -551,7 +551,7 @@ export async function buildServer(opts: ServerOptions) {
 
   /** What a chat's `agent:` starts: the shell, plain claude, or claude with an agent profile's flags. */
   /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up, and its drawer's shared folders. */
-  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[]) {
+  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[], page?: string) {
     const program = name && isReservedAgent(name) ? chatProgram(name) : 'claude'
     const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
     if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
@@ -559,7 +559,8 @@ export async function buildServer(opts: ServerOptions) {
     // The profile's MCP defaults, the first time a chat starts in this folder.
     await mcpDefaults.apply(profile.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
     const ctx = await context.chatContext(id)
-    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(ctx, await drawerContext(profile, drawer, home)))
+    // The context folders, then the wiki (and the project's page), then the drawer's shared folders: one --add-dir, one --append-system-prompt.
+    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(mergeContext(ctx, await wikiContext(profile, home, page)), await drawerContext(profile, drawer, home)))
     return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
   }
 
@@ -595,11 +596,11 @@ export async function buildServer(opts: ServerOptions) {
       const entry = stepEntry(base, step) as typeof step
       const cwd = await chatFolder(p.profile, entry.path ?? base, false)
       const ref = projectRef(item)
-      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args)) }
+      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args, item.page)) }
     } else if (item.type === 'folder') {
       const cwd = body.path === undefined ? await chatFolder(p.profile, itemBase(p.profile, item), false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [])) }
+      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [], item.page)) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -775,7 +776,7 @@ export async function buildServer(opts: ServerOptions) {
       `This repository has merge conflicts from ${what}. Resolve the conflicts in ${files.join(', ')}` +
       ` (paths from the repository's top folder${s.sub ? `; this chat runs in ${s.sub}` : ''}): keep what both sides meant,` +
       ` remove the conflict markers, and say what you chose. Don't stage, commit or abort; I'll mark the files resolved myself.`
-    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [])) }
+    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [], r.project.page)) }
     return chats.start({ ...spec, prompt, label: 'Conflicts' })
   })
 

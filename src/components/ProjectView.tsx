@@ -67,6 +67,7 @@ import type { GitMark } from '../../shared/git.ts'
 import * as api from '../lib/api.ts'
 import { byPin, carriesPaths, CHAT_TAB, droppedPaths, onProjectTab, pasteInto, PATHS_TYPE, quotePaths, useChats } from '../lib/chats.ts'
 import { nameOf, parentOf, previewKind } from '../lib/files.ts'
+import { useNotes } from '../lib/notes-ctx.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx, type DialogState, type MenuEntry, type MenuState } from '../lib/nav.ts'
 import { ago } from '../lib/recent.ts'
@@ -135,6 +136,8 @@ const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
 const GitView = lazy(() => import('./GitView.tsx'))
 // Saved tabs from before the built-in tabs were steps: its Claude setup and its Git tab.
 const SETUP_TAB = 'setup:'
+/** The item's own page, as a tab beside its steps. */
+const PAGE_TAB = 'page:'
 const GIT_TAB = 'git:'
 
 /** Names for the chat colours, in the order of CHAT_COLORS. */
@@ -143,6 +146,7 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 
 export function ProjectView({ addr, item, kicker, profile, profileId, home, actions, openFolder, toast, onTab }: Props) {
   const gitMark = item.path ? actions.git(item.path) : undefined
+  const notes = useNotes()
   const steps = stepsOf(profile, item, !!gitMark)
   const own = item.steps !== undefined
   // Relative step paths, launchers and chats start in the item's folder, else in home.
@@ -160,14 +164,18 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const waitingForChats = saved.startsWith(CHAT_TAB) && !chats.loaded
   const inTab = steps.filter((s) => !opensOutside(s))
   const ofKind = (type: StepItem['type']) => inTab.find((s) => s.type === type)
-  // The saved step by its label (or a saved Git or Claude setup tab from before), else the first.
-  const active = activeChat
-    ? null
-    : (inTab.find((s) => s.label === saved) ?? (saved === GIT_TAB ? ofKind('git') : saved === SETUP_TAB ? ofKind('setup') : undefined) ?? inTab[0] ?? null)
-  const tabId = activeChat ? saved : (active?.label ?? '')
   // One tab fills the page: the tab row shows from two on (or for a lone launcher or link, which needs its button).
   const showRow = steps.length + adhoc.length >= 2 || steps.some(opensOutside)
   const blank = steps.length === 0 && adhoc.length === 0
+  // With a row of tabs, the item's own page is one of them.
+  const pageTab = !!item.page && !!profile.notes && showRow
+  const onPage = pageTab && saved === PAGE_TAB
+  // The saved step by its label (or a saved Git or Claude setup tab from before), else the first.
+  const active =
+    activeChat || onPage
+      ? null
+      : (inTab.find((s) => s.label === saved) ?? (saved === GIT_TAB ? ofKind('git') : saved === SETUP_TAB ? ofKind('setup') : undefined) ?? inTab[0] ?? null)
+  const tabId = activeChat ? saved : onPage ? PAGE_TAB : (active?.label ?? '')
   /** An older project's first step change writes the tabs it showed as its own. */
   const seeded = <T extends Op>(op: T): T => (own ? op : { ...op, seed: steps })
   const quickAddButtons = () => (
@@ -435,6 +443,8 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     const out: (MenuEntry | 'sep')[] = [{ label: 'Add step…', icon: <Plus size={14} />, run: addStep }]
     if (profile.workflow.length) {
       out.push({ label: 'Add profile steps', icon: <RotateCcw size={14} />, run: () => void actions.run([seeded({ op: 'addWorkflow', at: addr } as Op)], 'Added the profile steps') })
+      // The template is a page: edit it like any other.
+      if (profile.notes) out.push({ label: 'Open Workflow.md', icon: <FileText size={14} />, run: () => notes.open(joinNotes(profile.notes!, 'Workflow.md')) })
     }
     if (steps.length) {
       out.push({
@@ -578,6 +588,12 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() })
         }}
       >
+        {pageTab && (
+          <button role="tab" aria-selected={onPage} className={cx('step-tab', onPage && 'active')} title={item.page} onClick={() => setTabs((t) => ({ ...t, [tabKey]: PAGE_TAB }))}>
+            <FileText size={14} />
+            Page
+          </button>
+        )}
         {steps.map((step, i) => {
           const outside = opensOutside(step)
           const stepChat = step.type === 'chat' ? slotChat(step) : null
@@ -689,6 +705,8 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       {!showRow && !blank && <div className="step-gap" />}
       {waitingForChats ? null : activeChat ? (
         <ChatPane key={activeChat.id} chat={activeChat} />
+      ) : onPage ? (
+        <NoteView key={item.page} path={joinNotes(profile.notes!, item.page!)} title={item.label} compact heading="Page" />
       ) : !active ? (
         blank ? (
           item.page && profile.notes ? (

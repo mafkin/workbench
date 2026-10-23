@@ -118,8 +118,8 @@ export function ChatPane({ chat, start, historyPath }: Props) {
           </span>
         )}
         {chat.context && (
-          <span className="chat-context" title="Started with this profile's context folders: --add-dir and the routing note">
-            context
+          <span className="chat-context" title="Started with this profile's context folders and its wiki (--add-dir), the routing note and, in a project, the name of its page">
+            context · wiki
           </span>
         )}
         <span className="mono chat-where" title={chat.cwd}>

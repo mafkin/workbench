@@ -163,7 +163,7 @@ You review code. Don't edit files.
 
 ### Drawers
 
-- A **drawer** is a nav of its own inside a profile: its own headings, entries, groups and projects, and a small logo. The button under the header row shows the drawer and switches between them; **New drawer…** and **Drawer settings…** are in its menu. Context stays at the top of every drawer.
+- A **drawer** is a nav of its own inside a profile: its own headings, entries, groups and projects, and a small logo. The button under the header row shows the drawer and switches between them; **New drawer…** and **Drawer settings…** are in its menu. The Context links live in the first drawer's page.
 - The first **New drawer…** turns your headings into the first drawer, named after the profile (rename it in Drawer settings). Until then the file keeps `sections:` as it was.
 - The drawer you were in is remembered per profile in this browser. Back, Recent work and Ctrl+K bring an entry's drawer along.
 - **Logo:** **Choose picture…** in Drawer settings, or right-click a picture in the file browser and choose **Use as drawer logo**. Its middle is scaled to 64 × 64 and kept in `~/.config/workbench/logos/`. Without one, the drawer's initials on a tinted square.
@@ -193,7 +193,8 @@ You review code. Don't edit files.
 - **Under the description:** when the folder was created and last updated (the last commit in a git repository, else the newest file), and how many servers are running there.
 - **Categories** get colours from the category menu (**Colour of …**: a palette or any colour), saved in `categories:`.
 - **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, mark it or archive it.
-- Below the card are its steps:
+- Below the card are its tabs. The first is **Page**: the item's own page (`projects/<Name>.md`), with its properties, its text (a log, links, anything) and the pages that mention it, editable in place. An item with one tab shows that tab on the whole page and no row, so the Page tab appears from two on.
+- The steps:
   - **File browser** (`files`), **Git** (`git`) and **Claude setup** (`setup`) show the item's folder, its repository and what claude loads there.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
   - A **note** step shows the note in place, with Edit and autosave.
@@ -201,7 +202,7 @@ You review code. Don't edit files.
   - A **file** step shows one image, PDF, video or text file large.
   - A **launcher** step starts its program in the item's folder (or home), and a **link** step opens its address in your browser.
 - Steps are yours to name: **+** adds one (relative paths are inside the item's folder, else home). Right-click a tab to edit or remove it, and drag tabs to reorder them.
-- The profile's `workflow:` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, and **Save as profile steps** makes this item's steps the template.
+- The profile's `Workflow.md` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, **Save as profile steps** makes this item's steps the template, and **Open Workflow.md** opens the template as a note.
 - An older project without `steps:` shows All files, Git (in a repository), Claude setup and the workflow. Its first step change writes those tabs as its own `steps:`.
 - Note steps also count as notes, so they show up in search and wiki links.
 
@@ -240,15 +241,14 @@ You review code. Don't edit files.
   - `processes/`: workflows you repeat.
   - `inbox/`: handoffs and files to look at later.
 - **Setting it up:**
-  - The **Context** heading at the top of the sidebar starts with **Set up context in ~/notes**. It creates the folders and starter notes, never overwriting a file.
-  - A profile without `notes:` gets `notes: ~/notes` (or `<home>/notes`) at the same time.
-  - After that, the heading lists **Context**, **Knowledge**, **Processes** and **Inbox**.
+  - The **Context** heading at the top of the sidebar starts with **Set up context in ~/notes**. It creates the folders and starter notes, never overwriting a file, and writes a `## Context` heading at the top of `index.md` (or of the first drawer's page) with links to the four folders, unless an entry already opens `context/`.
+  - After that, **Context**, **Knowledge**, **Processes** and **Inbox** are ordinary nav entries: move, rename or delete them like any other; the fixed heading is gone. The Inbox entry shows the count.
 - **Context** opens with tabs for its notes (Identity, Preferences, Goals, **Where things go**), editable in place, beside All files. The other three open their folder in the file browser. They're ordinary notes, so search and `[[wiki links]]` find them.
 - **Every claude chat** (not shells) starts with the context:
-  - `--add-dir` for the four folders, so claude can read and update them.
-  - Appended to its system prompt: where the folders are, the routing note, and the text of identity, preferences and goals (up to 16 KB).
+  - `--add-dir` for the four folders and for the wiki itself, so claude can read and update them.
+  - Appended to its system prompt: where the folders are, the routing note, the text of identity, preferences and goals (up to 16 KB), and what the wiki's pages are. In a project, claude is told its page (`projects/<Name>.md`) and asked to add to its `## Log` when it finishes something, leaving the frontmatter and `## Workflow` alone.
   - Agent profiles keep their own instructions and folders, and the context is added after them.
-  - The chat bar shows **context**.
+  - The chat bar shows **context · wiki**.
   - A chat keeps what it started with; a new chat picks up your edits.
 - **Inbox:**
   - The nav shows how many things are in it.

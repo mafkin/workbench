@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Chat, ContextStatus } from '../shared/config-schema.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
@@ -54,6 +55,8 @@ beforeEach(async () => {
   await fsp.writeFile(path.join(dir, 'cfg/settings.yaml'), 'activeProfile: work\nprofiles: [work, personal]\n')
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
   await fsp.writeFile(path.join(dir, 'cfg/profiles/personal.yaml'), PERSONAL)
+  // Every wiki profile has a notes folder (its wiki), so Personal gets one of its own.
+  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
   server = await buildServer({
     configDir: path.join(dir, 'cfg'),
     port: 7420,
@@ -84,18 +87,20 @@ describe('context folders', { timeout: 15_000 }, () => {
 
     await fsp.mkdir(path.join(notes, 'context'), { recursive: true })
     await fsp.writeFile(path.join(notes, 'context/identity.md'), '# Me\n\nI build tools.\n')
-    status = (await call<ContextStatus>('POST', '/api/context/setup', { profile: 'work' })).body
-    expect(status.ready).toBe(true)
+    const res = await call<ContextStatus>('POST', '/api/context/setup', { profile: 'work' })
+    expect(res.body, JSON.stringify(res.body)).toMatchObject({ ready: true })
+    status = res.body
     expect(status.folders.every((f) => f.exists)).toBe(true)
     expect(await fsp.readFile(path.join(notes, 'context/identity.md'), 'utf8')).toBe('# Me\n\nI build tools.\n')
     expect(await fsp.readFile(path.join(notes, 'context/README.md'), 'utf8')).toContain('context/preferences.md')
     expect(await exists(path.join(notes, 'context/preferences.md'))).toBe(true)
     expect(await exists(path.join(notes, 'context/goals.md'))).toBe(true)
-  })
-
-  it('a profile without a notes folder cannot be set up', async () => {
-    expect((await call<ContextStatus>('GET', '/api/context?profile=personal')).body).toEqual({ notes: null, ready: false, folders: [], inbox: 0 })
-    expect((await call('POST', '/api/context/setup', { profile: 'personal' })).status).toBe(409)
+    // The folders are entries of the nav: a Context heading at the top, once.
+    const index = await fsp.readFile(path.join(notes, 'index.md'), 'utf8')
+    expect(index).toContain('## Context\n\n- [Context](context/)\n- [Knowledge](knowledge/)\n- [Processes](processes/)\n- [Inbox](inbox/)\n')
+    expect(server.store.profile('work').profile?.sections[0]).toMatchObject({ title: 'Context', items: [{ type: 'folder', label: 'Context', path: '~/notes/context' }, {}, {}, { label: 'Inbox', path: '~/notes/inbox' }] })
+    await call('POST', '/api/context/setup', { profile: 'work' })
+    expect((await fsp.readFile(path.join(notes, 'index.md'), 'utf8')).split('## Context').length).toBe(2)
   })
 
   it('chats are told the routing note and identity, preferences and goals, within a cap', async () => {
@@ -116,23 +121,29 @@ describe('context folders', { timeout: 15_000 }, () => {
   it('a new claude chat starts with the context; a shell does not', async () => {
     await call('POST', '/api/context/setup', { profile: 'work' })
     const rev = server.store.profile('work').rev
-    const chat = (await call<Chat>('POST', '/api/chats', { profile: 'work', rev, at: { section: 0, index: 0 } })).body
+    // Setup put the Context heading first; Alpha is now in the second heading.
+    const chat = (await call<Chat>('POST', '/api/chats', { profile: 'work', rev, at: { section: 1, index: 0 } })).body
     expect(chat.context).toBe(true)
     const saved = await until(async () => {
       const list = JSON.parse(await fsp.readFile(path.join(dir, 'state/chats.json'), 'utf8').catch(() => '{}')).chats ?? []
       return list.find((c: { id: string }) => c.id === chat.id)
     }, 'the saved chat')
     const args: string[] = saved.args
-    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('Where things go')
-    expect(args.slice(args.indexOf('--add-dir') + 1)).toEqual(['context', 'knowledge', 'processes', 'inbox'].map((f) => path.join(notes, f)))
-    const shell = (await call<Chat>('POST', '/api/chats', { profile: 'work', rev, at: { section: 0, index: 0 }, agent: 'shell' })).body
+    const prompt = args[args.indexOf('--append-system-prompt') + 1]
+    expect(prompt).toContain('Where things go')
+    // The wiki comes with the context, and the project's page is named.
+    expect(prompt).toContain(`${notes} holds my notes and the pages`)
+    expect(prompt).toContain(`This project's page is ${path.join(notes, 'projects/Alpha.md')}`)
+    expect(args.slice(args.indexOf('--add-dir') + 1)).toEqual([...['context', 'knowledge', 'processes', 'inbox'].map((f) => path.join(notes, f)), notes])
+    const shell = (await call<Chat>('POST', '/api/chats', { profile: 'work', rev, at: { section: 1, index: 0 }, agent: 'shell' })).body
     expect(shell.context).toBe(false)
   })
 
   it('Summarize and continue saves the handoff in the inbox', async () => {
     await call('POST', '/api/context/setup', { profile: 'work' })
     const rev = server.store.profile('work').rev
-    const chat = (await call<Chat>('POST', '/api/chats', { profile: 'work', rev, at: { section: 0, index: 0 } })).body
+    // Setup put the Context heading first; Alpha is now in the second heading.
+    const chat = (await call<Chat>('POST', '/api/chats', { profile: 'work', rev, at: { section: 1, index: 0 } })).body
     await until(() => server.chats.text(chat.id).includes('args='), 'the chat')
     server.chats.write(chat.id, 'fix the parser\r')
     await until(() => server.chats.text(chat.id).includes('you said: fix the parser'), 'an answer')

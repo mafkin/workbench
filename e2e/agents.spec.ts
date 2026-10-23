@@ -65,13 +65,14 @@ test('New chat ▾ starts an agent profile with its flags; the bar says which', 
   await expect(page.getByRole('menuitem', { name: /^Reviewer/ })).toContainText('opus · plan')
   await page.screenshot({ path: 'test-results/agents-menu.png' })
   await page.getByRole('menuitem', { name: /^Reviewer/ }).click()
-  await expect(screen(page)).toContainText('args=["--model","opus","--permission-mode","plan","--session-id"')
+  // The wiki comes with every claude chat (--append-system-prompt and --add-dir), before the session flag.
+  await expect(screen(page)).toContainText('args=["--model","opus","--permission-mode","plan","--append-system-prompt"')
   await expect(page.locator('.chat-bar')).toContainText('Reviewer · opus · plan')
   // Plain Claude from the same menu has no flags.
   await startMenu(page)
   await page.getByRole('menuitem', { name: /^Claude/ }).click()
   await expect(chatTabs(page)).toHaveCount(2)
-  await expect(screen(page)).toContainText('args=["--session-id"')
+  await expect(screen(page)).toContainText('args=["--append-system-prompt"')
 })
 
 test("the project's agent chip sets what New chat starts", async ({ page }) => {

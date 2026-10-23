@@ -9,6 +9,7 @@ const entry = (page: Page, label: string) => nav(page).locator('.item', { hasTex
 const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workflow' })
 const tab = (page: Page, name: string) => tabs(page).getByRole('tab', { name, exact: true })
 // Alpha is a git repository, so it has a Git tab (its count of changed files left out).
+// The item's own page is the first tab.
 const tabNames = async (page: Page) => (await tabs(page).locator('.step-tab:not(.add)').allInnerTexts()).map((t) => t.split('\n')[0].trim())
 const row = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
 const alphaPage = () => fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')
@@ -27,10 +28,16 @@ test.beforeEach(async ({ page }) => {
 
 test('a project shows its workflow steps as tabs, and All files is the project', async ({ page }) => {
   await entry(page, 'Alpha').click()
-  expect(await tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme', 'build'])
+  expect(await tabNames(page)).toEqual(['Page', 'All files', 'Git', 'Claude setup', 'sources', 'readme', 'build'])
   await expect(tab(page, 'All files')).toHaveAttribute('aria-selected', 'true')
   await expect(row(page, 'README.md')).toBeVisible()
   await page.screenshot({ path: 'test-results/project-tabs.png' })
+  // The Page tab is the project's own page: its frontmatter as properties, its text, and who mentions it.
+  await tab(page, 'Page').click()
+  await expect(page.locator('.note-props')).toContainText('folder')
+  await expect(page.locator('.markdown h2')).toHaveText('Workflow')
+  await expect(page.locator('.note-mentions')).toContainText('index')
+  await page.screenshot({ path: 'test-results/project-page-tab.png' })
 })
 
 test('a folder step shows its folder, and the tab is remembered', async ({ page }) => {
@@ -72,7 +79,7 @@ test('adding a step writes the page’s Workflow, and a missing folder can be ma
   await expect(dialog).toContainText('Not found on disk')
   await dialog.getByRole('button', { name: 'Add' }).click()
   await expect(dialog).toHaveCount(0)
-  expect(await tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme', 'build', 'assets'])
+  expect(await tabNames(page)).toEqual(['Page', 'All files', 'Git', 'Claude setup', 'sources', 'readme', 'build', 'assets'])
 
   const text = await alphaPage()
   expect(text).toContain('---\nfolder: ~/alpha\n---\n')
@@ -95,10 +102,10 @@ test('steps can be edited, reordered and removed, built-in ones too; Add profile
   await expect(tab(page, 'intro')).toBeVisible()
 
   await tabs(page).getByRole('button', { name: 'build' }).dragTo(tab(page, 'sources'))
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'build', 'sources', 'intro'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Git', 'Claude setup', 'build', 'sources', 'intro'])
 
   await stepMenu(page, 'intro', 'Remove tab')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'build', 'sources'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Git', 'Claude setup', 'build', 'sources'])
   await expect(page.locator('.toast')).toContainText('its files stay')
   // The note itself is still there.
   expect(fs.existsSync(path.join(ALPHA, 'README.md'))).toBe(true)
@@ -106,18 +113,18 @@ test('steps can be edited, reordered and removed, built-in ones too; Add profile
   // A built-in tab goes the same way: Delete on the focused tab.
   await tab(page, 'Claude setup').focus()
   await page.keyboard.press('Delete')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'build', 'sources'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Git', 'build', 'sources'])
   expect(await alphaPage()).not.toContain('setup:')
 
   await stepMenu(page, 'sources', 'Add profile steps')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'build', 'sources', 'readme'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Git', 'build', 'sources', 'readme'])
 })
 
 test('the Git tab can be removed like any step, and comes back as a step', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('tab', { name: /^Git/ }).click({ button: 'right' })
   await page.getByRole('menuitem', { name: /Remove tab/ }).click()
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Claude setup', 'sources', 'readme', 'build'])
   const text = await alphaPage()
   expect(text).not.toContain('git:')
   expect(text).toContain('- [All files](files:)')
@@ -125,18 +132,18 @@ test('the Git tab can be removed like any step, and comes back as a step', async
   expect(fs.existsSync(path.join(ALPHA, '.git'))).toBe(true)
   // It stays gone after a reload, and + brings it back.
   await page.reload()
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Claude setup', 'sources', 'readme', 'build'])
   await tabs(page).getByRole('button', { name: 'Add step' }).click()
   const dialog = page.getByRole('form', { name: 'Add step' })
   await dialog.getByRole('radio', { name: 'Git' }).click()
   await dialog.getByRole('button', { name: 'Add' }).click()
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build', 'Git'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Claude setup', 'sources', 'readme', 'build', 'Git'])
 })
 
 test("one project's steps can become every project's", async ({ page }) => {
   await entry(page, 'Alpha').click()
   await stepMenu(page, 'build', 'Remove tab')
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Git', 'Claude setup', 'sources', 'readme'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Git', 'Claude setup', 'sources', 'readme'])
   await stepMenu(page, 'readme', 'Save as profile steps')
   const workflow = () => fsp.readFile(wikiPage('Workflow.md'), 'utf8')
   await expect.poll(async () => (await workflow()).includes('run:make')).toBe(false)
@@ -144,7 +151,7 @@ test("one project's steps can become every project's", async ({ page }) => {
   // Every page keeps its own tabs; the profile steps are what Add profile steps brings.
   expect(await alphaPage()).toContain('## Workflow')
   await entry(page, 'Beta').click()
-  await expect.poll(() => tabNames(page)).toEqual(['All files', 'Claude setup', 'sources', 'readme', 'build'])
+  await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'Claude setup', 'sources', 'readme', 'build'])
 })
 
 test('Home shows recent work and today, not the nav again', async ({ page }) => {
