@@ -2,11 +2,8 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseDocument } from 'yaml'
 import { projectKey } from '../server/claude-setup.ts'
-import { applyOps } from '../server/config-ops.ts'
 import { McpDefaults, setFoldersOff } from '../server/mcp-switch.ts'
-import { Profile, type Op } from '../shared/config-schema.ts'
 
 let dir: string
 let file: string
@@ -76,32 +73,5 @@ describe('profile defaults', () => {
     await setFoldersOff(file, ['/game'], ['slack'], false)
     await defaults.forget(['slack'])
     expect(await defaults.apply(['slack'], '/game')).toEqual(['slack'])
-  })
-})
-
-describe('mcpOff in the profile', () => {
-  const SOURCE = `name: Work
-# Servers chats don't need
-mcpOff: [plugin:data:hex]
-sections: []
-`
-  const run = (ops: Op[], source = SOURCE) => {
-    const doc = parseDocument(source)
-    applyOps(doc, ops, source)
-    return { text: doc.toString(), profile: Profile.parse(doc.toJS()) }
-  }
-
-  it('adds names once and keeps comments', () => {
-    const { text, profile } = run([{ op: 'setMcpOff', names: ['plugin:p:slack', 'plugin:data:hex'], off: true }])
-    expect(profile.mcpOff).toEqual(['plugin:data:hex', 'plugin:p:slack'])
-    expect(text).toContain("# Servers chats don't need")
-  })
-
-  it('removes names; the last one removes the key', () => {
-    expect(run([{ op: 'setMcpOff', names: ['plugin:data:hex'], off: false }]).text).not.toContain('mcpOff')
-  })
-
-  it('makes the list when there is none', () => {
-    expect(run([{ op: 'setMcpOff', names: ['slack'], off: true }], 'name: Work\nsections: []\n').profile.mcpOff).toEqual(['slack'])
   })
 })

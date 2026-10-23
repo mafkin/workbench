@@ -2,10 +2,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseDocument } from 'yaml'
-import { applyOps } from '../server/config-ops.ts'
 import { buildServer } from '../server/main.ts'
-import { Profile } from '../shared/config-schema.ts'
 
 // A 1×1 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
@@ -47,22 +44,6 @@ afterEach(async () => {
   await server.app.close()
   await fsp.rm(dir, { recursive: true, force: true })
 })
-
-describe('theme and background in the profile', () => {
-  const run = (source: string, key: 'theme' | 'background', value: string) => {
-    const doc = parseDocument(source)
-    applyOps(doc, [{ op: 'setProfileField', key, value }], source)
-    return doc.toString()
-  }
-
-  it('are set after the accent, keep comments, and are removed by an empty value', () => {
-    const text = run(run(WORK, 'theme', 'fjord'), 'background', 'lake.png')
-    expect(text).toContain('# The look\naccent: "#7d93ab"\ntheme: fjord\nbackground: lake.png\nsections:')
-    expect(run(text, 'theme', '')).not.toContain('theme:')
-    expect(Profile.parse(parseDocument(text).toJS())).toMatchObject({ theme: 'fjord', background: 'lake.png' })
-  })
-})
-
 describe('background pictures', () => {
   it('copies a picture from the profile’s folders, under a safe and unique name', async () => {
     const first = await call('POST', '/api/backgrounds', { profile: 'work', path: '~/stuff/pics/Lake view.png' })

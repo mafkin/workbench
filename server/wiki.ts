@@ -40,8 +40,7 @@ import {
   type Section,
   type StepItem,
 } from '../shared/config-schema.ts'
-import { describeIssue } from './config-ops.ts'
-import { parseProfile, StoreError } from './config-store.ts'
+import { describeIssue, parseProfile, StoreError } from './config-store.ts'
 import { revOf, writeAtomic } from './fs-util.ts'
 import { defaultWiki, migrateProfile } from './migrate.ts'
 import { absPath, realish } from './paths.ts'

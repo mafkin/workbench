@@ -12,11 +12,6 @@ const HEADER = `# Edit this file by hand or in Workbench (pencil at the top of t
 # notes: is the folder for new notes, daily notes, search and [[wiki links]].
 `
 
-const SETTINGS = `# Workbench settings. Each file in profiles/ is a profile; this sets their order.
-activeProfile: work
-profiles: [work, personal]
-`
-
 const WORK = `${HEADER}name: Work
 accent: "#7d93ab"
 home: ~/Documents/work
@@ -109,21 +104,6 @@ sections:
       - label: Today
         type: daily
 `
-
-export async function seedConfig(dir: string): Promise<void> {
-  await fsp.mkdir(path.join(dir, 'profiles'), { recursive: true })
-  const files: [string, string][] = [
-    ['settings.yaml', SETTINGS],
-    ['profiles/work.yaml', WORK],
-    ['profiles/personal.yaml', PERSONAL],
-  ]
-  for (const [name, text] of files) {
-    // 'wx' never overwrites a file the user already has.
-    await fsp.writeFile(path.join(dir, name), text, { flag: 'wx' }).catch((err) => {
-      if (err.code !== 'EEXIST') throw err
-    })
-  }
-}
 
 /** The first-run wikis: settings.yaml naming them, and the pages of each (never over existing files). */
 export async function seedWiki(dir: string, home: string): Promise<void> {

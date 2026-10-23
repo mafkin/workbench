@@ -4,8 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseDocument } from 'yaml'
 import { agentArgs, claudeAgents } from '../server/agents.ts'
-import { applyOps, OpError } from '../server/config-ops.ts'
-import { agentSummary, AgentProfile, chatProgram, findAgent, NavItem, Profile, type Op } from '../shared/config-schema.ts'
+import { agentSummary, AgentProfile, chatProgram, findAgent, NavItem, Profile } from '../shared/config-schema.ts'
 
 const SOURCE = `# Work
 name: Work
@@ -26,20 +25,6 @@ sections:
         agent: Reviewer
       - { label: Notes, type: chat, agent: reviewer }
 `
-
-const SOURCE_NO_AGENTS = `name: Work
-sections:
-  - title: Projects
-    items:
-      - { label: Alpha, type: folder, path: ~/alpha }
-`
-
-function run(ops: Op[], source = SOURCE) {
-  const doc = parseDocument(source)
-  applyOps(doc, ops, source)
-  const text = doc.toString()
-  return { text, profile: Profile.parse(doc.toJS()) }
-}
 
 const ALL = AgentProfile.parse({})
 
@@ -128,55 +113,6 @@ describe('agent profile flags', () => {
   it('a Claude agent decides the model and effort', () => {
     const p = AgentProfile.parse({ agent: 'orchestrator', model: 'opus', effort: 'max', permission: 'bypassPermissions' })
     expect(agentArgs(p, home, cwd)).toEqual({ args: ['--agent', 'orchestrator', '--permission-mode', 'bypassPermissions'], prompt: undefined, bypass: true })
-  })
-})
-
-describe('setAgent', () => {
-  it('adds a profile before sections, creating agents: and keeping comments', () => {
-    const { text, profile } = run([{ op: 'setAgent', name: 'Reviewer', agent: { model: 'opus', permission: 'plan', instructions: 'Line one\nLine two' } }], SOURCE_NO_AGENTS)
-    expect(profile.agents?.Reviewer).toMatchObject({ model: 'opus', permission: 'plan', instructions: 'Line one\nLine two' })
-    expect(text.indexOf('agents:')).toBeLessThan(text.indexOf('sections:'))
-  })
-
-  it('edits fields in place, dropping empty ones and keeping comments and unknown keys', () => {
-    const source = SOURCE.replace('    permission: plan\n', '    permission: plan\n    colour: teal\n')
-    const { text, profile } = run([{ op: 'setAgent', name: 'Reviewer', agent: { model: '', effort: 'high', permission: 'plan', allowedTools: ['Read'] } }], source)
-    expect(profile.agents?.Reviewer).toMatchObject({ effort: 'high', permission: 'plan', allowedTools: ['Read'] })
-    expect(profile.agents?.Reviewer.model).toBeUndefined()
-    expect(text).toContain('Reviewer: # reads, never writes')
-    expect(text).toContain('# How each agent works')
-    expect(text).toContain('colour: teal')
-  })
-
-  it('renames a profile in place and everything that names it', () => {
-    const { text, profile } = run([{ op: 'setAgent', name: 'Reviewer', rename: 'Critic', agent: { model: 'opus', permission: 'plan' } }])
-    expect(Object.keys(profile.agents ?? {})).toEqual(['Critic', 'Scratch'])
-    expect(text).toContain('Critic: # reads, never writes')
-    expect(profile.workflow[0]).toMatchObject({ agent: 'Critic' })
-    expect(profile.sections[0].items[0]).toMatchObject({ agent: 'Critic' })
-    expect(profile.sections[0].items[1]).toMatchObject({ agent: 'Critic' })
-  })
-
-  it('refuses a name that is taken or reserved', () => {
-    expect(() => run([{ op: 'setAgent', name: 'Scratch', rename: 'reviewer', agent: {} }])).toThrow(/already/)
-    expect(() => run([{ op: 'setAgent', name: 'New', agent: {} }, { op: 'setAgent', name: 'claude', agent: {} }])).toThrow(/built in/)
-  })
-
-  it('refuses to delete a profile still in use, and says where', () => {
-    expect(() => run([{ op: 'setAgent', name: 'Reviewer', agent: null }])).toThrow(OpError)
-    expect(() => run([{ op: 'setAgent', name: 'Reviewer', agent: null }])).toThrow(/workflow › review, Alpha, Notes/)
-  })
-
-  it('deletes an unused profile; the last one takes agents: with it', () => {
-    const { profile } = run([{ op: 'setAgent', name: 'Scratch', agent: null }])
-    expect(Object.keys(profile.agents ?? {})).toEqual(['Reviewer'])
-    const { text } = run([{ op: 'setAgent', name: 'Reviewer', agent: null }], SOURCE_NO_AGENTS.replace('sections:', 'agents:\n  Reviewer: {}\nsections:'))
-    expect(text).not.toContain('agents')
-  })
-
-  it('a project default is a card field', () => {
-    const { profile } = run([{ op: 'setCard', at: { section: 0, index: 0 }, field: 'agent', value: 'Scratch' }])
-    expect(profile.sections[0].items[0]).toMatchObject({ agent: 'Scratch' })
   })
 })
 
