@@ -29,7 +29,7 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; empty: string 
 ]
 
 const STATE_LABEL: Record<McpState, string> = { on: 'On', off: 'Off', pending: 'Not approved', blocked: 'Blocked', overridden: 'Overridden', broken: 'Broken' }
-const SCOPE_RANK: Record<SetupScope, number> = { project: 0, local: 1, user: 2, managed: 3, plugin: 4 }
+const SCOPE_RANK: Record<SetupScope, number> = { project: 0, local: 1, user: 2, managed: 3, plugin: 4, wiki: 5 }
 /** What a switch shows: on unless turned off (a server waiting for approval is not off). */
 const switchedOn = (m: McpEntry) => m.state === 'on' || m.state === 'pending'
 
@@ -125,9 +125,11 @@ interface Props {
   /** The profile's rev, for switching a drawer's defaults. */
   rev?: string
   toast?: (t: ToastInput) => void
+  /** Where Pin writes (part 12): the drawer's page (the rail) or this item's page (its tab); `set` replaces the list. */
+  pins?: { scope: 'drawer' | 'page'; label: string; set: (names: string[]) => void }
 }
 
-export default function ClaudeSetupView({ profileId, profile, folder: fixed, drawer, kinds, rev, toast }: Props) {
+export default function ClaudeSetupView({ profileId, profile, folder: fixed, drawer, kinds, rev, toast, pins }: Props) {
   const folder = fixed ?? null
   const shown = useMemo(() => SECTIONS.filter((s) => !kinds || kinds.includes(s.id)), [kinds])
   const [savedSection, setSection] = useLocal<SectionId>('setupSection', 'skills')
@@ -159,7 +161,8 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, dra
     return () => {
       live = false
     }
-  }, [profileId, folder, drawer, tick])
+    // The profile changes after a Pin (and any other op): the pinned lists come from it.
+  }, [profileId, folder, drawer, tick, profile])
 
   const all = useMemo(() => (setup ? rowsOf(setup, section) : []), [setup, section])
   const matching = useMemo(() => {
@@ -174,6 +177,14 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, dra
   const current = rows.find((r) => r.id === selected) ?? rows[0] ?? null
   const checkKey = (id: string) => `${profileId}|${folder ?? ''}|${id}`
   const meta = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]
+
+  /** Pin / Unpin for a skill row, on the list `pins` names; nothing for other docs or without a writer. */
+  const pinFor = (doc: SetupDoc): PinAction | undefined => {
+    if (!pins || !setup?.pinned || doc.kind !== 'skill') return undefined
+    const list = pins.scope === 'drawer' ? setup.pinned.drawer : setup.pinned.page
+    const on = list.some((n) => n.toLowerCase() === doc.name.toLowerCase())
+    return { on, label: pins.label, toggle: () => pins.set(on ? list.filter((n) => n.toLowerCase() !== doc.name.toLowerCase()) : [...list, doc.name]) }
+  }
 
   const showSection = (id: SectionId, plugin: string | null = null) => {
     if (!shown.some((s) => s.id === id)) return
@@ -261,6 +272,7 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, dra
           <TriangleAlert size={14} /> {error}
         </div>
       )}
+      {section === 'skills' && setup?.pinned && <PinnedStrip pinned={setup.pinned} drawerName={drawerName} pins={pins} />}
       {setup && setup.problems.length > 0 && (
         <details className="setup-problems">
           <summary>
@@ -353,7 +365,7 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, dra
         </div>
         <div className="setup-detail" aria-label="Details">
           {current?.item.kind === 'doc' ? (
-            <DocDetail key={current.id} doc={current.item.v} profileId={profileId} folder={folder} />
+            <DocDetail key={current.id} doc={current.item.v} profileId={profileId} folder={folder} pin={pinFor(current.item.v)} />
           ) : current?.item.kind === 'mcp' ? (
             <McpDetail entry={current.item.v} result={checks.get(checkKey(current.id))} onCheck={check} busy={switching} onSwitch={(m, on) => void switchMcp([m], on)} />
           ) : current?.item.kind === 'hook' ? (
@@ -449,7 +461,48 @@ const MD: Components = {
   img: ({ alt }) => <span className="img-missing">{alt || 'Image'}</span>,
 }
 
-function DocDetail({ doc, profileId, folder }: { doc: SetupDoc; profileId: string; folder: string | null }) {
+interface PinAction {
+  on: boolean
+  label: string
+  toggle: () => void
+}
+
+/** The skills pinned for chats here: the profile's, the drawer's and the page's, with the ones nothing resolves. */
+function PinnedStrip({ pinned, drawerName, pins }: { pinned: NonNullable<ClaudeSetup['pinned']>; drawerName: string; pins?: Props['pins'] }) {
+  const missing = new Set(pinned.missing.map((n) => n.toLowerCase()))
+  const rows: { key: string; label: string; names: string[]; remove?: (name: string) => void }[] = [
+    { key: 'profile', label: 'Profile', names: pinned.profile },
+    { key: 'drawer', label: drawerName, names: pinned.drawer, remove: pins?.scope === 'drawer' ? (n) => pins.set(pinned.drawer.filter((x) => x !== n)) : undefined },
+  ]
+  if (pins?.scope === 'page' || pinned.page.length) rows.push({ key: 'page', label: pins?.scope === 'page' ? pins.label : 'This page', names: pinned.page, remove: pins?.scope === 'page' ? (n) => pins.set(pinned.page.filter((x) => x !== n)) : undefined })
+  const any = rows.some((r) => r.names.length)
+  return (
+    <div className="pinned-strip" aria-label="Pinned skills">
+      <span className="section-label">Pinned</span>
+      {!any && <span className="pinned-empty">Nothing pinned yet{pins ? `: pick a skill and Pin it to ${pins.label}` : ''}.</span>}
+      {rows
+        .filter((r) => r.names.length || (pins && r.key === pins.scope))
+        .map((r) => (
+          <span className="pinned-row" key={r.key}>
+            <span className="pinned-who">{r.label}</span>
+            {r.names.length === 0 && <span className="pinned-empty">none</span>}
+            {r.names.map((n) => (
+              <span className={cx('chip pin', missing.has(n.toLowerCase()) && 'missing')} key={n} title={missing.has(n.toLowerCase()) ? `No skill named ${n} here or in the wiki's skills/` : `/${n}`}>
+                {n}
+                {r.remove && (
+                  <button className="chip-x" onClick={() => r.remove!(n)} aria-label={`Unpin ${n} from ${r.label}`}>
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+          </span>
+        ))}
+    </div>
+  )
+}
+
+function DocDetail({ doc, profileId, folder, pin }: { doc: SetupDoc; profileId: string; folder: string | null; pin?: PinAction }) {
   const [body, setBody] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -474,6 +527,14 @@ function DocDetail({ doc, profileId, folder }: { doc: SetupDoc; profileId: strin
       </div>
       {doc.description && <p className="setup-desc">{doc.description}</p>}
       {doc.overriddenBy && <p className="setup-note">Overridden: claude uses {doc.overriddenBy} instead.</p>}
+      {pin && (
+        <p className="setup-pin">
+          <button className={cx('btn', pin.on && 'on')} onClick={pin.toggle}>
+            {pin.on ? `Unpin from ${pin.label}` : `Pin to ${pin.label}`}
+          </button>
+          <span className="hint">{doc.scope === 'wiki' ? 'A wiki skill loads only in chats where it is pinned (as /wiki:name).' : 'Pinned skills are named in each chat’s instructions here.'}</span>
+        </p>
+      )}
       <dl className="setup-meta">
         <dt>File</dt>
         <dd className="mono">{doc.path}</dd>

@@ -373,6 +373,27 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
 
   const setCard = (field: CardField, value: string | boolean | null, undoLabel?: string) =>
     void actions.run([{ op: 'setCard', at: addr, field, value }], undoLabel)
+  const setSkills = (names: string[]) => void actions.run([{ op: 'setSkills', at: addr, names }], `Skills pinned on ${item.label} changed`)
+
+  /** The card's skills chip: every skill claude loads here and the wiki's, ticked when pinned on this page. */
+  async function skillsMenu(e: React.MouseEvent) {
+    const pinned = item.skills ?? []
+    const r = e.currentTarget.getBoundingClientRect()
+    const at = { x: r.left, y: r.bottom + 4 }
+    try {
+      const setup = await api.claudeSetup(profileId, item.path ?? null, addr.drawer)
+      const has = (n: string) => pinned.some((p) => p.toLowerCase() === n.toLowerCase())
+      const toggle = (n: string) => setSkills(has(n) ? pinned.filter((p) => p.toLowerCase() !== n.toLowerCase()) : [...pinned, n])
+      const docs = setup.skills.filter((s) => !s.overriddenBy)
+      const entries: (MenuEntry | 'sep')[] = docs.map((s) => ({ label: `/${s.name}`, detail: s.scope === 'wiki' ? 'wiki' : s.plugin ?? s.scope, kind: 'checkbox', checked: has(s.name), run: () => toggle(s.name) }))
+      const unknown = pinned.filter((p) => !docs.some((s) => s.name.toLowerCase() === p.toLowerCase()))
+      for (const n of unknown) entries.push({ label: `/${n}`, detail: 'not found', kind: 'checkbox', checked: true, run: () => toggle(n) })
+      if (!entries.length) entries.push({ label: 'No skills to pin: add one in ~/.claude/skills or <wiki>/skills', disabled: true, run: () => {} })
+      setMenu({ ...at, entries })
+    } catch (err) {
+      toast({ message: err instanceof Error ? err.message : String(err), kind: 'error' })
+    }
+  }
 
   const openDefault = (path: string) =>
     api.openFile(profileId, path).then(
@@ -537,6 +558,12 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           >
             <Sparkles size={11} />
             {item.agent ?? 'Claude'}
+          </button>
+        )}
+        {item.page && (
+          <button className={cx('agent-chip skills-chip', !item.skills?.length && 'empty')} onClick={(e) => void skillsMenu(e)} title="Skills pinned on this page: chats started here are told to use them" aria-label={`Skills for chats here: ${item.skills?.length ? item.skills.join(', ') : 'none'}`}>
+            <Pin size={11} />
+            {item.skills?.length ? item.skills.join(', ') : 'Skills'}
           </button>
         )}
       </div>
@@ -731,7 +758,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
         </p>
       ) : active.type === 'setup' ? (
         <Suspense fallback={null}>
-          <ClaudeSetupView profileId={profileId} profile={profile} folder={item.path} toast={toast} />
+          <ClaudeSetupView profileId={profileId} profile={profile} folder={item.path} drawer={addr.drawer} toast={toast} pins={{ scope: 'page', label: item.label, set: setSkills }} />
         </Suspense>
       ) : active.type === 'git' ? (
         gitMark ? (

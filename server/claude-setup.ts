@@ -22,6 +22,8 @@ export interface SetupOptions {
   managedDir?: string
   /** The folder whose project and local items count; none for everywhere. */
   folder?: string | null
+  /** The profile's wiki: its `skills/` folder lists as scope `wiki` (loaded only in chats that pin them). */
+  wiki?: string | null
 }
 
 export interface RawServer {
@@ -500,8 +502,10 @@ export async function readSetup(opts: SetupOptions): Promise<SetupRead> {
       else first.set(d.name, d)
     }
   }
-  const scopeWord: Record<SetupScope, string> = { managed: 'the managed', user: 'your', project: 'the project', local: 'the local', plugin: 'the plugin' }
+  const scopeWord: Record<SetupScope, string> = { managed: 'the managed', user: 'your', project: 'the project', local: 'the local', plugin: 'the plugin', wiki: 'the wiki' }
   shadow(skills, (w) => `${scopeWord[w.scope]} skill ${w.name}`)
+  // The wiki's skills load only in chats that pin them (as /wiki:<name>), so they override nothing.
+  if (opts.wiki) skills.push(...(await r.skills(path.join(opts.wiki, 'skills'), 'wiki')))
   shadow(agents, (w) => `${scopeWord[w.scope]} agent ${w.name}`)
   shadow(commands, (w) => `${scopeWord[w.scope]} command ${w.name}`)
   const skillNames = new Set(skills.filter((s) => !s.overriddenBy).map((s) => s.name))

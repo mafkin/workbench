@@ -3135,6 +3135,95 @@ button {
   color: var(--text);
 }
 
+/* Pinned skills (part 12): the profile's, the drawer's and the page's lists above the skill rows. */
+.pinned-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.pinned-strip .section-label {
+  margin: 0;
+}
+
+.pinned-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.pinned-who {
+  margin-right: 2px;
+  color: var(--muted);
+}
+
+.pinned-empty {
+  color: var(--faint);
+}
+
+.chip.pin {
+  height: 22px;
+  padding-right: 4px;
+  color: var(--text);
+}
+
+.chip.pin.missing {
+  border-style: dashed;
+  color: var(--warn);
+}
+
+.chip-x {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.chip-x:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.setup-pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+}
+
+.setup-pin .hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.setup-pin .btn.on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.skills-chip {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .setup-problems {
   margin: 0 0 14px;
   padding: 8px 12px;
@@ -3449,6 +3538,12 @@ button {
 
 .scope-badge.scope-plugin {
   border-style: dashed;
+}
+
+.scope-badge.scope-wiki {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .check-dot {

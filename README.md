@@ -91,6 +91,7 @@ categories: { game: "#8fa58a" } # optional colours for project categories
 openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
   - { ext: [kra], command: krita }
 mcpOff: [plugin:toolkit:slack]  # MCP servers off by default (see Claude setup); with drawers, on each drawer's page
+skills: [review]                 # skills pinned for every chat (see Claude setup); drawer and item pages take their own
 ---
 ## Projects
 - [[Tuohi]]
@@ -285,6 +286,9 @@ You review code. Don't edit files.
   - A server that wants a sign-in says so; signing in is done in claude (`/mcp`).
   - A project server that claude hasn't approved asks before it runs.
 - **Plugins** show their marketplace, version, where they're turned on, and what they bring; click a count to see those items.
+- **Pinned skills** (part 12): `skills:` in the frontmatter of `index.md` (every chat), a drawer's page (its chats) or an item's page (chats started there) names the skills to use. A chat gets the three lists merged, and its instructions name each one with its description, so claude reaches for them.
+  - Skills of your own for this wiki go in `<wiki>/skills/<name>/SKILL.md`. They show in Skills with a **Wiki** badge and load **only** in chats where they are pinned (claude gets them as a session plugin, `--plugin-dir`, so they are `/wiki:<name>` there).
+  - Pinning: in the rail's **Skills**, pick a skill and **Pin to <drawer>** (the strip at the top shows the profile's, the drawer's and, on a project's tab, the page's lists; × unpins). On an item's card, the **Skills** chip ticks skills on or off for that page. A name nothing resolves is marked *not found*.
 - **Secret values are hidden everywhere:** env values, headers, passwords and keys in URLs, values after flags like `--token`, and known token shapes. `${VAR}` references stay readable.
 - To change anything, use claude (`claude mcp`, `/plugin`, `/mcp`) or edit its files, then **Refresh**.
 

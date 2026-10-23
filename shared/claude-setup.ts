@@ -4,9 +4,9 @@
 // service masks every secret value before it sends any of this to the browser.
 
 /** Where something comes from. Plugin items also name their plugin. */
-export type SetupScope = 'managed' | 'user' | 'project' | 'local' | 'plugin'
+export type SetupScope = 'managed' | 'user' | 'project' | 'local' | 'plugin' | 'wiki'
 
-export const SCOPES: SetupScope[] = ['project', 'local', 'user', 'managed', 'plugin']
+export const SCOPES: SetupScope[] = ['project', 'local', 'user', 'managed', 'plugin', 'wiki']
 
 export const SCOPE_LABEL: Record<SetupScope, string> = {
   project: 'Project',
@@ -14,6 +14,7 @@ export const SCOPE_LABEL: Record<SetupScope, string> = {
   user: 'Yours',
   managed: 'Managed',
   plugin: 'Plugin',
+  wiki: 'Wiki',
 }
 
 export type DocKind = 'skill' | 'agent' | 'command'
@@ -127,6 +128,8 @@ export interface ClaudeSetup {
   hooks: HookEntry[]
   plugins: PluginEntry[]
   problems: SetupProblem[]
+  /** The skills pinned for chats here (part 12): by the profile, the drawer, the page; `missing` names nothing resolves. */
+  pinned?: { profile: string[]; drawer: string[]; page: string[]; missing: string[] }
 }
 
 export interface McpTool {

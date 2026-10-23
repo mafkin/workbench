@@ -46,7 +46,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 9 | Git per project | Done; merged to `main`; see below |
 | 10 | Assets and media | Done (branch restarted from `main`); merged to `main` with the profile menu, drawers, MCP switches and items (PR #3); see below |
 | 11 | The wiki: pages as configuration | Done; see below |
-| 12 | Workspaces: drawer rail, pinned skills, chats dock | In progress (milestone 1 done); see below |
+| 12 | Workspaces: drawer rail, pinned skills, chats dock | In progress (milestones 1 and 2 done); see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -512,6 +512,13 @@ The user showed a reference: a *Chats* window with topic tabs beside a *Workspac
   - **MCP defaults per drawer:** `Drawer.mcpOff` from the drawer page's frontmatter; `setMcpOff` takes a `drawer` and writes that page (index.md for a profile without drawers, whose one drawer carries `profile.mcpOff`); the first drawer op moves index.md's key into the first drawer's page; a key left on index.md by hand is read as the first drawer's and reported. `agentFor` applies the chat's drawer's list; `POST /api/claude/mcp` without a path takes `drawer` (and the rev) and switches every project of the drawer plus its own folder; `GET /api/claude/setup` takes `drawer` too (`withDefaults`, `drawerFor`).
   - **Chapters:** pages added in a drawer that has a page (Add entry, a folder link that needs a card) go under `drawers/<Name>/` (`pageDir` in the wiki store); a profile without drawers keeps `projects/`.
   - Tests: `wiki.test.ts` (drawer `mcpOff`, moved key, stray key, `drawers/<Name>/` pages), `drawers-http.test.ts` (git on a drawer folder), `claude-setup-http.test.ts` (defaults per drawer); e2e `setup.spec.ts` moved to the rail and the project tab, new `rail.spec.ts` (Settings gives the folder; Files, Git, Ctrl+K, the selection survives a reload).
+
+- **Milestone 2, built (pinned skills):**
+  - **The chain:** `skills:` on index.md (`Profile.skills`), a drawer page (`Drawer.skills`; a profile without drawers reads the profile's as its one drawer's) and an item page (`FolderItem.skills`, through `PAGE_FIELDS`). `pinnedSkills(profile, drawer, item)` in `server/skills.ts` merges them, de-duplicated. The `setSkills` op (`at` = a page, `drawer` = its page, neither = index.md) replaces a list; empty removes the key.
+  - **Resolution:** `resolveSkills(names, installedSkills, wikiRoot)`: `<wiki>/skills/<name>/SKILL.md` first (case ignored; the folder's spelling wins), else an installed skill of that name (not overridden), else *missing*. `readSetup({wiki})` lists the wiki's skills with scope `wiki` after the override pass, so they shadow nothing.
+  - **Reaching claude:** `agentFor` names the found skills in the prompt (`skillsPrompt`: `/name: description`, `/wiki:name` for the wiki's) and, for wiki skills, adds `--plugin-dir <state>/skills/<sha1 of the set>/wiki` (`SkillBundles`: `skills/<name>` symlinks to the skill folders, a minimal `plugin.json`; bundles are keyed by their set, so chats with the same pins share one, and `prune` on start drops those no saved chat's args name). Checked against the Claude Code docs: `--plugin-dir` loads a plugin for the session, skills as `/<dir>:<name>`; there is no per-session allowlist, so installed skills are only named.
+  - **UI:** `GET /api/claude/setup` returns `pinned {profile, drawer, page, missing}` (`setupView`); the setup view shows a **Pinned** strip above the skill rows (× unpins where it may write) and **Pin to <drawer>** / **Unpin** in a skill's details (the rail writes the drawer's list, a project's tab its page's); the card's **Skills** chip (`skillsMenu`) ticks every skill claude loads there plus the wiki's for the page. Scope badge **Wiki**.
+  - Tests: `skills.test.ts` (chain, resolution, prompt, bundles, prune), `wiki.test.ts` (`setSkills` at the three levels), `claude-setup.test.ts` (wiki scope), `chats-http.test.ts` (prompt text, `--plugin-dir`, the symlink, nothing for a shell); e2e `skills.spec.ts` (rail Pin, the chip, a chat's args).
 
 ## Reference
 

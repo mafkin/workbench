@@ -450,7 +450,17 @@ function RailView({ tool, pane }: { tool: RailTool; pane: Props }) {
       <div className="page-kicker">{d.name}</div>
       <h1 className="page-title">{RAIL_LABEL[tool]}</h1>
       <Suspense fallback={null}>
-        <ClaudeSetupView key={`${active.id}:${drawer}:${tool}`} profileId={active.id} profile={profile} folder={folder ?? undefined} drawer={drawer} kinds={[tool]} rev={active.rev} toast={pane.toast} />
+        <ClaudeSetupView
+          key={`${active.id}:${drawer}:${tool}`}
+          profileId={active.id}
+          profile={profile}
+          folder={folder ?? undefined}
+          drawer={drawer}
+          kinds={[tool]}
+          rev={active.rev}
+          toast={pane.toast}
+          pins={tool === 'skills' ? { scope: 'drawer', label: d.name, set: (names) => void pane.actions.run([{ op: 'setSkills', drawer, names }], `Skills pinned on ${d.name} changed`) } : undefined}
+        />
       </Suspense>
     </div>
   )

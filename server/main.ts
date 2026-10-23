@@ -54,6 +54,7 @@ import { sessionsIn } from './claude-sessions.ts'
 import { describeIssue, StoreError } from './config-store.ts'
 import { Wiki } from './wiki.ts'
 import { Context, drawerContext, mergeContext, wikiContext } from './context.ts'
+import type { ChatContext } from './agents.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { Git, type Repo } from './git.ts'
 import { openProgram } from './open-with.ts'
@@ -63,6 +64,7 @@ import { LaunchError, openItem, runDetached } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
 import { McpDefaults, setFoldersOff } from './mcp-switch.ts'
+import { pinnedSkills, pluginDirsIn, resolveSkills, SkillBundles, skillsPrompt } from './skills.ts'
 import { projectDates } from './project-dates.ts'
 import { Servers } from './servers.ts'
 import { Notes, type NoteEvent } from './notes.ts'
@@ -205,6 +207,15 @@ export async function buildServer(opts: ServerOptions) {
   const stateDir = opts.stateDir ?? path.join(opts.configDir, 'state')
   const chats = new Chats({ stateDir, home, commands: opts.chatCommands, ...opts.chatTiming })
   const mcpDefaults = new McpDefaults({ stateDir, claudeJson: claudeJson(home) })
+  // The pinned wiki skills reach claude as per-session plugins; bundles no saved chat names are dropped.
+  const bundles = new SkillBundles(path.join(stateDir, 'skills'))
+  await fs.promises
+    .readFile(path.join(stateDir, 'chats.json'), 'utf8')
+    .then((t) => (JSON.parse(t).chats ?? []) as { args?: string[] }[], () => [])
+    .then((saved) => bundles.prune(saved.flatMap((c) => pluginDirsIn(c.args ?? []))))
+    .catch((err) => console.error('[skills]', err))
+  /** The profile's wiki root (absolute), where its skills/ folder lives. */
+  const wikiRootOf = (profile: Profile) => (profile.notes ? absPath(profile.notes, home) : null)
   await chats.init()
   const git = new Git(store, home, {
     spawn: opts.spawn,
@@ -265,7 +276,7 @@ export async function buildServer(opts: ServerOptions) {
     // An older project without `steps:` gets the tabs it showed as its own on its first step change.
     if (before) {
       for (const op of ops) {
-        if (!('at' in op) || !STEP_OPS.has(op.op) || 'seed' in op) continue
+        if (!('at' in op) || !op.at || !STEP_OPS.has(op.op) || 'seed' in op) continue
         const item = getItem(before, op.at)
         if (item?.type === 'folder' && !item.steps) Object.assign(op, { seed: await stepsFor(req.params.id, before, item) })
       }
@@ -554,7 +565,7 @@ export async function buildServer(opts: ServerOptions) {
 
   /** What a chat's `agent:` starts: the shell, plain claude, or claude with an agent profile's flags. */
   /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up, and its drawer's shared folders. */
-  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[], page?: string) {
+  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[], item?: NavItem) {
     const program = name && isReservedAgent(name) ? chatProgram(name) : 'claude'
     const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
     if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
@@ -562,9 +573,24 @@ export async function buildServer(opts: ServerOptions) {
     // The drawer's MCP defaults, the first time a chat starts in this folder.
     await mcpDefaults.apply(drawersOf(profile)[drawer]?.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
     const ctx = await context.chatContext(id)
-    // The context folders, then the wiki (and the project's page), then the drawer's shared folders: one --add-dir, one --append-system-prompt.
-    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(mergeContext(ctx, await wikiContext(profile, home, page)), await drawerContext(profile, drawer, home)))
-    return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
+    const page = item?.type === 'folder' ? item.page : undefined
+    // The skills pinned by the profile, the drawer and the page: named in the prompt; the wiki's own loaded as a plugin.
+    const pinned = pinnedSkills(profile, drawer, item)
+    let skillsCtx: ChatContext | null = null
+    const extra: string[] = []
+    if (pinned.all.length) {
+      const wiki = wikiRootOf(profile)
+      const read = await readSetup({ home, managedDir: opts.managedDir, folder: cwd, wiki })
+      const r = await resolveSkills(pinned.all, read.setup.skills, wiki)
+      const prompt = skillsPrompt(r.found)
+      if (prompt) skillsCtx = { prompt, dirs: [] }
+      const plugin = await bundles.bundle(r.found)
+      if (plugin) extra.push('--plugin-dir', plugin)
+    }
+    // The context folders, then the wiki (and the project's page), the pinned skills, then the drawer's shared folders: one --add-dir, one --append-system-prompt.
+    const merged = mergeContext(mergeContext(mergeContext(ctx, await wikiContext(profile, home, page)), skillsCtx), await drawerContext(profile, drawer, home))
+    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, merged)
+    return { agent: 'claude' as const, args: [...args, ...extra, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
   }
 
   /** The drawer holding a project (its folder entry), for its chats' shared folders. */
@@ -599,11 +625,11 @@ export async function buildServer(opts: ServerOptions) {
       const entry = stepEntry(base, step) as typeof step
       const cwd = await chatFolder(p.profile, entry.path ?? base, false)
       const ref = projectRef(item)
-      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args, item.page)) }
+      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args, item)) }
     } else if (item.type === 'folder') {
       const cwd = body.path === undefined ? await chatFolder(p.profile, itemBase(p.profile, item), false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [], item.page)) }
+      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [], item)) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -779,7 +805,7 @@ export async function buildServer(opts: ServerOptions) {
       `This repository has merge conflicts from ${what}. Resolve the conflicts in ${files.join(', ')}` +
       ` (paths from the repository's top folder${s.sub ? `; this chat runs in ${s.sub}` : ''}): keep what both sides meant,` +
       ` remove the conflict markers, and say what you chose. Don't stage, commit or abort; I'll mark the files resolved myself.`
-    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [], r.project.page)) }
+    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [], r.project)) }
     return chats.start({ ...spec, prompt, label: 'Conflicts' })
   })
 
@@ -798,7 +824,17 @@ export async function buildServer(opts: ServerOptions) {
     const p = store.profile(id)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
     const folder = raw ? await chatFolder(p.profile, raw, true) : null
-    return { folder, profile: p.profile, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
+    return { folder, profile: p.profile, read: await readSetup({ home, managedDir: opts.managedDir, folder, wiki: wikiRootOf(p.profile) }) }
+  }
+
+  /** The setup as the views show it: the drawer's defaults on the switches, and the skills pinned here. */
+  async function setupView(id: string, raw: string | undefined, drawer: number | undefined): Promise<ClaudeSetup> {
+    const { folder, read, profile } = await setupFor(id, raw)
+    const d = drawerFor(profile, raw, drawer)
+    const item = raw ? walkItems(profile).find((e) => e.item.type === 'folder' && e.item.path === raw)?.item : undefined
+    const pinned = pinnedSkills(profile, d, item)
+    const { missing } = await resolveSkills(pinned.all, read.setup.skills, wikiRootOf(profile))
+    return { ...withDefaults(read.setup, profile, folder, d), pinned: { profile: pinned.profile, drawer: pinned.drawer, page: pinned.page, missing } }
   }
 
   /** The setup as the rail shows it: without a folder, the drawer's defaults are what the switches show. */
@@ -824,8 +860,7 @@ export async function buildServer(opts: ServerOptions) {
 
   app.get('/api/claude/setup', async (req) => {
     const q = parse(SetupQuery, req.query)
-    const { folder, read, profile } = await setupFor(q.profile, q.path)
-    return withDefaults(read.setup, profile, folder, drawerFor(profile, q.path, q.drawer))
+    return setupView(q.profile, q.path, q.drawer)
   })
 
   // Switch MCP servers off or on the way /mcp does, in one folder; or, with no
@@ -860,8 +895,7 @@ export async function buildServer(opts: ServerOptions) {
       if (b.on) await mcpDefaults.forget(b.keys)
       else await mcpDefaults.noteApplied([...keys], b.keys)
     }
-    const fresh = await setupFor(b.profile, b.path)
-    return { setup: withDefaults(fresh.read.setup, fresh.profile, fresh.folder, drawerFor(fresh.profile, b.path, b.drawer)), ...(rev ? { rev } : {}) }
+    return { setup: await setupView(b.profile, b.path, b.drawer), ...(rev ? { rev } : {}) }
   })
 
   app.get('/api/claude/doc', async (req) => {

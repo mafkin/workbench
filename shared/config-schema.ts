@@ -174,6 +174,8 @@ export const FolderItem = z.object({
   category: z.string().trim().min(1).optional(),
   pinned: z.boolean().optional(),
   agent: z.string().trim().min(1).optional(),
+  /** Skills pinned on this page (part 12): chats started here are told to use them, with the drawer's and the profile's. */
+  skills: z.array(z.string().trim().min(1)).optional(),
   steps: z
     .array(StepItem)
     .nullable()
@@ -231,6 +233,8 @@ export const Drawer = z.object({
   uses: z.array(z.string().trim().min(1)).optional(),
   /** MCP servers (by their /mcp names) turned off in every project of this drawer before its first chat (part 12; was the profile's). */
   mcpOff: z.array(z.string().trim().min(1)).optional(),
+  /** Skills pinned for every chat in this drawer (part 12). */
+  skills: z.array(z.string().trim().min(1)).optional(),
   sections: list(Section),
 })
 
@@ -264,6 +268,8 @@ export const Profile = z.object({
   categories: z.record(z.string(), z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb')).optional(),
   /** Agent profiles for chats, by name. */
   agents: Agents.optional(),
+  /** Skills pinned for every chat of the profile (part 12). */
+  skills: z.array(z.string().trim().min(1)).optional(),
   /** Programs for "Open with", before the built-in ones (Blender, Godot). */
   openWith: z.array(OpenRule).optional(),
   /** MCP servers off by default (as /mcp names them: `plugin:<plugin>:<name>`, else the name), turned off in a folder before its first chat. */
@@ -366,6 +372,8 @@ export const Op = z.discriminatedUnion('op', [
   /** Add MCP servers to `mcpOff:` (off) or take them out. */
   /** A drawer's MCP defaults (index.md's for a profile without drawers). */
   z.object({ op: z.literal('setMcpOff'), drawer: index.optional(), names: z.array(z.string().trim().min(1)).min(1), off: z.boolean() }),
+  /** The skills pinned on a page (`at`), a drawer page (`drawer`), or the profile (neither); an empty list removes the key. */
+  z.object({ op: z.literal('setSkills'), at: ItemAddr.optional(), drawer: index.optional(), names: z.array(z.string().trim().min(1)) }),
   // Steps of the item at `at`. The first change to an item without `steps:`
   // writes `seed` (the tabs it showed, which the service works out) as its own.
   // A step on the item's own folder (files, git, setup) needs one: `folder`
@@ -452,7 +460,7 @@ export function itemKey(a: ItemAddr): string {
 /** The profile's drawers; without `drawers:`, one named after the profile holding its `sections:`. */
 export function drawersOf(profile: Profile): Drawer[] {
   if (profile.drawers?.length) return profile.drawers
-  return [{ name: profile.name, sections: profile.sections, ...(profile.mcpOff ? { mcpOff: profile.mcpOff } : {}) }]
+  return [{ name: profile.name, sections: profile.sections, ...(profile.mcpOff ? { mcpOff: profile.mcpOff } : {}), ...(profile.skills ? { skills: profile.skills } : {}) }]
 }
 
 /** A drawer's name as a folder name: "Game dev" → game-dev. */

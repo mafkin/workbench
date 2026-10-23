@@ -95,6 +95,46 @@ describe('chat routes', { timeout: 15_000 }, () => {
     expect(list.body.map((c) => c.id)).toEqual([adhoc.body.id, step.body.id, shell.body.id, entry.body.id])
   })
 
+  test('a chat gets the pinned skills: named in the prompt, the wiki’s own through --plugin-dir; a shell gets none', async () => {
+    const wiki = path.join(dir, 'wiki/work')
+    await fsp.mkdir(path.join(wiki, 'skills/concept-art'), { recursive: true })
+    await fsp.writeFile(path.join(wiki, 'skills/concept-art/SKILL.md'), '---\ndescription: Prompts for concept art\n---\n# Concept art\n')
+    await fsp.mkdir(path.join(home, '.claude/skills/deploy'), { recursive: true })
+    await fsp.writeFile(path.join(home, '.claude/skills/deploy/SKILL.md'), '---\nname: deploy\ndescription: Ships it\n---\n')
+    await server.store.apply('work', rev(), [
+      { op: 'setSkills', names: ['deploy', 'nope'] },
+      { op: 'setSkills', at: { section: 0, index: 0 }, names: ['concept-art'] },
+    ])
+    const setup = await call('GET', '/api/claude/setup?profile=work&path=~/alpha')
+    expect(setup.body.pinned).toEqual({ profile: ['deploy', 'nope'], drawer: ['deploy', 'nope'], page: ['concept-art'], missing: ['nope'] })
+    expect(setup.body.skills.find((s: { scope: string; name: string }) => s.scope === 'wiki' && s.name === 'concept-art')).toBeTruthy()
+
+    const chat = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
+    expect(chat.status, JSON.stringify(chat.body)).toBe(200)
+    const saved = await until(async () => {
+      const list = JSON.parse(await fsp.readFile(path.join(dir, 'state/chats.json'), 'utf8').catch(() => '{}')).chats ?? []
+      return list.find((c: { id: string }) => c.id === chat.body.id)
+    }, 'the saved chat')
+    const args: string[] = saved.args
+    const prompt = args[args.indexOf('--append-system-prompt') + 1]
+    expect(prompt).toContain('# Pinned skills (Workbench)')
+    expect(prompt).toContain('- /deploy: Ships it')
+    expect(prompt).toContain('- /wiki:concept-art: Prompts for concept art')
+    expect(prompt).not.toContain('nope')
+    const plugin = args[args.indexOf('--plugin-dir') + 1]
+    expect(plugin).toMatch(new RegExp(`^${path.join(dir, 'state/skills')}/[0-9a-f]{16}/wiki$`))
+    expect(await fsp.readlink(path.join(plugin, 'skills/concept-art'))).toBe(path.join(wiki, 'skills/concept-art'))
+    // The plugin flag comes before the list flags, which the session id ends.
+    expect(args.indexOf('--plugin-dir')).toBeLessThan(args.indexOf('--add-dir'))
+
+    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, agent: 'shell' })
+    const shellSaved = await until(async () => {
+      const list = JSON.parse(await fsp.readFile(path.join(dir, 'state/chats.json'), 'utf8').catch(() => '{}')).chats ?? []
+      return list.find((c: { id: string }) => c.id === shell.body.id)
+    }, 'the saved shell')
+    expect(shellSaved.args).not.toContain('--plugin-dir')
+  })
+
   test('an item without a folder: its chats run in home, keyed by its id; marks and servers skip it', async () => {
     const loose = { section: 0, index: 3 }
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose })

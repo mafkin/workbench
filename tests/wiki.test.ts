@@ -266,6 +266,30 @@ describe('cards and steps live on the page', () => {
   })
 })
 
+describe('pinned skills live in frontmatter', () => {
+  it('setSkills writes the profile’s, a drawer’s or a page’s list; an empty list removes the key', async () => {
+    await run([
+      { op: 'setSkills', names: ['review', 'deploy'] },
+      { op: 'setSkills', at: { section: 0, index: 0 }, names: ['concept-art'] },
+    ])
+    expect(await read('index.md')).toContain('---\nname: Work\naccent: "#7d93ab"\nskills:\n  - review\n  - deploy\n---\n')
+    expect(await read('projects/Alpha.md')).toContain('---\nfolder: ~/alpha\nskills:\n  - concept-art\n---\n')
+    expect(work().skills).toEqual(['review', 'deploy'])
+    expect(work().sections[0].items[0]).toMatchObject({ label: 'Alpha', skills: ['concept-art'] })
+    // Without drawers the one drawer is the profile: the same key.
+    await run([{ op: 'setSkills', drawer: 0, names: ['review'] }])
+    expect(work().skills).toEqual(['review'])
+    expect(work().drawers).toBeUndefined()
+    await run([{ op: 'addDrawer', name: 'Game dev' }, { op: 'setSkills', drawer: 1, names: ['godot-scenes', 'godot-scenes'] }])
+    expect(await read('drawers/Game dev.md')).toBe('---\nskills:\n  - godot-scenes\n---\n# Game dev\n')
+    expect(work().drawers?.map((d) => d.skills)).toEqual([undefined, ['godot-scenes']])
+    await run([{ op: 'setSkills', names: [] }, { op: 'setSkills', at: { section: 0, index: 0 }, names: [] }])
+    expect(await read('index.md')).not.toContain('skills')
+    expect(await read('projects/Alpha.md')).toBe('---\nfolder: ~/alpha\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [sources](src/)\n- [readme](README.md)\n- [build](<run:make all>)\n')
+    expect(await status(run([{ op: 'setSkills', drawer: 5, names: ['x'] }]))).toBe(400)
+  })
+})
+
 describe('the profile’s own fields', () => {
   it('setProfileField, setCategory and setMcpOff edit index.md’s frontmatter', async () => {
     await run([

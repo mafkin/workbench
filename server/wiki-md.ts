@@ -296,7 +296,7 @@ export interface LinkContext {
 }
 
 /** The card and step fields a page's frontmatter may carry. */
-const PAGE_FIELDS = ['description', 'status', 'category', 'pinned', 'agent', 'servers', 'icon'] as const
+const PAGE_FIELDS = ['description', 'status', 'category', 'pinned', 'agent', 'servers', 'icon', 'skills'] as const
 
 export const pageLabel = (link: Extract<ParsedLink, { kind: 'wiki' }>, page: PageRef | null) => link.alias ?? page?.name ?? link.target.slice(link.target.lastIndexOf('/') + 1)
 

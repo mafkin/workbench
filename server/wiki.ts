@@ -463,6 +463,7 @@ export class Wiki extends EventEmitter {
           ...(typeof m.folder === 'string' ? { folder: m.folder } : {}),
           ...(Array.isArray(m.uses) ? { uses: m.uses.map(String) } : {}),
           ...(Array.isArray(m.mcpOff) ? { mcpOff: m.mcpOff.map(String) } : {}),
+          ...(Array.isArray(m.skills) ? { skills: m.skills.map(String) } : {}),
           sections: await sectionsOf(page, d.rel),
         })
         navFiles.push(path.join(e.root, d.rel))
@@ -516,7 +517,7 @@ export class Wiki extends EventEmitter {
     const data: Record<string, unknown> = { notes: e.wiki, workflow, sections, ...(drawers ? { drawers } : {}) }
     for (const key of INDEX_META) if (meta[key] !== undefined && meta[key] !== null) data[key] = meta[key]
     if (data.name === undefined) data.name = e.id
-    for (const key of ['categories', 'openWith', 'mcpOff'] as const) if (meta[key] !== undefined && meta[key] !== null && !(key === 'mcpOff' && drawers)) data[key] = meta[key]
+    for (const key of ['categories', 'openWith', 'mcpOff', 'skills'] as const) if (meta[key] !== undefined && meta[key] !== null && !(key === 'mcpOff' && drawers)) data[key] = meta[key]
     if (Object.keys(agents).length) data.agents = agents
     const parsed = Profile.safeParse(data)
     if (!parsed.success) return { ...fail(`index.md: ${describeIssue(parsed.error)}`), navFiles, pages, byName, refs, known }
@@ -873,6 +874,18 @@ export class Wiki extends EventEmitter {
         for (const n of op.names) op.off ? set.add(n) : set.delete(n)
         const file = profile.drawers?.length ? nav(d) : index
         draft.put(file, md.setMeta(text(file), 'mcpOff', set.size ? [...set] : null))
+        return
+      }
+      case 'setSkills': {
+        // On the item's page, the drawer's page (index.md without drawers), or index.md for the profile.
+        const names = [...new Set(op.names.map((n) => n.trim()).filter(Boolean))]
+        let file: string
+        if (op.at) file = pageOf(op.at).abs
+        else if (op.drawer !== undefined) {
+          if (!drawersOf(profile)[op.drawer]) throw new OpError(`Drawer ${op.drawer} does not exist`)
+          file = profile.drawers?.length ? nav(op.drawer) : index
+        } else file = index
+        draft.put(file, md.setMeta(text(file), 'skills', names.length ? names : null))
         return
       }
       case 'setCard': {
