@@ -72,7 +72,11 @@ sessionStart(resume ? 'resume' : 'startup')
 process.stdout.write('\x1b]0;✳ Fake Claude\x07')
 process.stdout.write(`FAKE CLAUDE cwd=${cwd}\r\n`)
 process.stdout.write(`session=${session} resumed=${!!resume}\r\n`)
-process.stdout.write(`args=${JSON.stringify(argv.filter((a) => !positional.includes(a)))}\r\n`)
+const args = argv.filter((a) => !positional.includes(a))
+process.stdout.write(`args=${JSON.stringify(args)}\r\n`)
+// The prompt makes the args line long enough to scroll the banner away in a narrow terminal:
+// say the essentials again, with long values shortened, so a screen read finds them.
+process.stdout.write(`FAKE CLAUDE cwd=${cwd} resumed=${!!resume} short=${JSON.stringify(args.map((a) => (a.length > 80 ? `<${a.length} chars>` : a)))}\r\n`)
 if (positional.length) {
   process.stdout.write(`prompt=${positional.join(' ').replace(/\n/g, ' | ')}\r\n`)
   record(positional.join(' '))

@@ -70,7 +70,6 @@ test('a new claude chat starts with the context folders and says so', async ({ p
   await setUp(page)
   await newChat(page)
   await expect(screen(page)).toContainText(`"--add-dir","${NOTES}/context"`)
-  await expect(screen(page)).toContainText(`This project's page is ${NOTES}/projects/Alpha.md`)
   await expect(page.locator('.chat-bar .chat-context')).toHaveText('context · wiki')
 })
 

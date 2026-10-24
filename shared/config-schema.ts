@@ -877,6 +877,8 @@ export interface Chat {
   createdAt: number
   /** Started with the profile's context folders (--add-dir and appended instructions). */
   context: boolean
+  /** The wiki page it was started from (part 12), relative to the wiki; its text went into the instructions. */
+  page?: string
 }
 
 /** A profile's context folders, inside its notes folder; set up once `context/` exists. */

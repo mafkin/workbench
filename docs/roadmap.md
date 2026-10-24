@@ -46,7 +46,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 9 | Git per project | Done; merged to `main`; see below |
 | 10 | Assets and media | Done (branch restarted from `main`); merged to `main` with the profile menu, drawers, MCP switches and items (PR #3); see below |
 | 11 | The wiki: pages as configuration | Done; see below |
-| 12 | Workspaces: drawer rail, pinned skills, chats dock | In progress (milestones 1 and 2 done); see below |
+| 12 | Workspaces: drawer rail, pinned skills, chats dock | In progress (milestones 1 to 3 done); see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -519,6 +519,12 @@ The user showed a reference: a *Chats* window with topic tabs beside a *Workspac
   - **Reaching claude:** `agentFor` names the found skills in the prompt (`skillsPrompt`: `/name: description`, `/wiki:name` for the wiki's) and, for wiki skills, adds `--plugin-dir <state>/skills/<sha1 of the set>/wiki` (`SkillBundles`: `skills/<name>` symlinks to the skill folders, a minimal `plugin.json`; bundles are keyed by their set, so chats with the same pins share one, and `prune` on start drops those no saved chat's args name). Checked against the Claude Code docs: `--plugin-dir` loads a plugin for the session, skills as `/<dir>:<name>`; there is no per-session allowlist, so installed skills are only named.
   - **UI:** `GET /api/claude/setup` returns `pinned {profile, drawer, page, missing}` (`setupView`); the setup view shows a **Pinned** strip above the skill rows (× unpins where it may write) and **Pin to <drawer>** / **Unpin** in a skill's details (the rail writes the drawer's list, a project's tab its page's); the card's **Skills** chip (`skillsMenu`) ticks every skill claude loads there plus the wiki's for the page. Scope badge **Wiki**.
   - Tests: `skills.test.ts` (chain, resolution, prompt, bundles, prune), `wiki.test.ts` (`setSkills` at the three levels), `claude-setup.test.ts` (wiki scope), `chats-http.test.ts` (prompt text, `--plugin-dir`, the symlink, nothing for a shell); e2e `skills.spec.ts` (rail Pin, the chip, a chat's args).
+
+- **Milestone 3, built (the chats dock):**
+  - `src/components/ChatsDock.tsx`: a column between the page and the rail with every chat of the profile (pinned first, then the newest; a step's or entry's chat under its step's name), the active one's `ChatPane` beneath, New chat ▾ (the agent menu), History and a fold button; folded, a strip with the count and the needs-you dot. Ctrl+J folds and unfolds. `dock` (open) and `dockActive` (the chat per profile) in localStorage. The tab menu (Rename, Colour, Pin, Summarize and continue, Close) and the drop of paths moved here from `ProjectView`, which lost its chat tabs, New chat and History (`showRow` counts steps only; a chat step still shows in its tab). `App.openChat` sends a chat without a slot to the dock; a step's or entry's chat goes to its tab or page as before; New chat from the nav menu also shows the project.
+  - **Where New chat starts** (`DockContext`): the item shown (`at` its address; its folder, or for a page without one its drawer's folder, now the server's rule too), else the drawer (`POST /api/chats` with `drawer` and no `at`: host `drawer:<name>`, cwd the drawer's folder or home). History lists the sessions there.
+  - **The page as context:** `ChatSpec.page`/`Chat.page` (saved in `chats.json`); `wikiContext` appends the page's text (frontmatter stripped, 16 KB cap) under "The page I am looking at".
+  - The fake claude prints a second `FAKE CLAUDE cwd=… resumed=… short=[…]` line after its args (long values shortened), because the page text makes the args line scroll the banner away in a narrow terminal; the e2e specs read flags from it. Tests: `chats-http.test.ts` (page text and `page`, a drawer's chat, a page without a folder); e2e `chats.spec.ts` and `agents.spec.ts` against the dock (needs-you with the dock folded, Ctrl+J).
 
 ## Reference
 

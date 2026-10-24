@@ -71,8 +71,158 @@ button {
 
 .app {
   display: grid;
-  grid-template-columns: var(--nav-w, 280px) 1fr auto;
+  grid-template-columns: var(--nav-w, 280px) 1fr auto auto;
   height: 100%;
+}
+
+/* ── The chats dock (part 12) ───────────────────────── */
+
+.dock {
+  display: flex;
+  flex-direction: column;
+  width: clamp(300px, 28vw, 400px);
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.dock.collapsed {
+  width: 36px;
+}
+
+.dock-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+}
+
+.dock-strip:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.dock-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.dock-count.live {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dock-strip .attention,
+.dock-tab .attention {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 8px 4px 12px;
+}
+
+.dock-head .tab-action {
+  margin-bottom: 0;
+}
+
+.dock-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dock-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 40%;
+  padding: 4px 6px 8px;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.dock-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dock-tab:hover {
+  background: var(--hover);
+}
+
+.dock-tab.active {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.dock-tab .chat-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-tab.colored {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--chat) 70%, transparent);
+}
+
+.dock-tab.colored.active {
+  box-shadow: inset 2px 0 0 var(--chat);
+}
+
+.dock-tab .tab-close {
+  opacity: 0;
+}
+
+.dock-tab:hover .tab-close,
+.dock-tab.active .tab-close {
+  opacity: 1;
+}
+
+.dock-empty {
+  margin: 10px 12px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.dock-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 8px;
+}
+
+.dock-body .chat-pane {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 /* ── The right rail: the drawer's tools (part 12) ──── */
@@ -526,6 +676,8 @@ button {
 /* ── Main pane ──────────────────────────────────────── */
 
 .main {
+  /* Pages size their columns to the pane (the dock and rail take room from it). */
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1359,6 +1511,13 @@ button {
   grid-template-columns: minmax(0, 1fr) minmax(300px, 38%);
   gap: 16px;
   align-items: start;
+}
+
+/* In a narrow pane (the dock open), the preview goes under the tree. */
+@container (max-width: 760px) {
+  .files-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .file-tree {
@@ -2871,6 +3030,7 @@ button {
 
 .app.backdrop .nav,
 .app.backdrop .main,
+.app.backdrop .dock,
 .app.backdrop .rail {
   border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
   border-radius: 10px;
@@ -2879,6 +3039,7 @@ button {
 }
 
 .app.backdrop .nav,
+.app.backdrop .dock,
 .app.backdrop .rail {
   background: color-mix(in srgb, var(--panel) 66%, transparent);
 }

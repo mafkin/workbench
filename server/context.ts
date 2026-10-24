@@ -284,6 +284,9 @@ export async function drawerContext(profile: Profile, drawer: number, home: stri
  * pages that configure Workbench live too, and the project's own page when the
  * chat belongs to one. Null when the folder does not exist yet.
  */
+/** How much of a page's text a chat gets in its instructions. */
+const PAGE_CAP = 16 * 1024
+
 export async function wikiContext(profile: Profile, home: string, page?: string): Promise<ChatContext | null> {
   if (!profile.notes) return null
   const root = path.resolve(expandHome(profile.notes, home))
@@ -299,6 +302,10 @@ export async function wikiContext(profile: Profile, home: string, page?: string)
     parts.push(
       `This project's page is ${path.join(root, page)}: its frontmatter is the card and its ## Workflow the tabs. When you finish something worth remembering, add a line under a ## Log heading there (make the heading if it is missing); leave the frontmatter and ## Workflow to me unless I ask.`,
     )
+    // The page's own text, so the chat starts with what it says (the frontmatter is the card, not prose).
+    const text = await fsp.readFile(path.join(root, page), 'utf8').catch(() => '')
+    const body = frontmatter(text).body.trim()
+    if (body) parts.push(`## The page I am looking at\n\n${body.length > PAGE_CAP ? `${body.slice(0, PAGE_CAP)}\n\n[cut here: the page is longer; read the file for the rest]` : body}`)
   }
   return { prompt: parts.join('\n\n'), dirs: [root] }
 }

@@ -5,8 +5,10 @@ import { ALPHA, closeChats, page as wikiPage, resetFixture, WORK, writeWork } fr
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workflow' })
-const chatTabs = (page: Page) => tabs(page).locator('.chat-tab')
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Chats' })
+const chatTabs = (page: Page) => dock(page).getByRole('tab')
 const screen = (page: Page) => page.locator('.chat-terminal .xterm-rows')
+const dockScreen = (page: Page) => dock(page).locator('.chat-terminal .xterm-rows')
 const row = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
 const wikiText = (rel: string) => fsp.readFile(wikiPage(rel), 'utf8')
 
@@ -66,13 +68,13 @@ test('New chat ▾ starts an agent profile with its flags; the bar says which', 
   await page.screenshot({ path: 'test-results/agents-menu.png' })
   await page.getByRole('menuitem', { name: /^Reviewer/ }).click()
   // The wiki comes with every claude chat (--append-system-prompt and --add-dir), before the session flag.
-  await expect(screen(page)).toContainText('args=["--model","opus","--permission-mode","plan","--append-system-prompt"')
+  await expect(screen(page)).toContainText('short=["--model","opus","--permission-mode","plan","--append-system-prompt"')
   await expect(page.locator('.chat-bar')).toContainText('Reviewer · opus · plan')
   // Plain Claude from the same menu has no flags.
   await startMenu(page)
   await page.getByRole('menuitem', { name: /^Claude/ }).click()
   await expect(chatTabs(page)).toHaveCount(2)
-  await expect(screen(page)).toContainText('args=["--append-system-prompt"')
+  await expect(screen(page)).toContainText('short=["--append-system-prompt"')
 })
 
 test("the project's agent chip sets what New chat starts", async ({ page }) => {
@@ -97,8 +99,8 @@ test('a chat step and Chat here as… start agent profiles', async ({ page }) =>
   await row(page, 'src').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Chat here as…' }).click()
   await page.getByRole('menuitem', { name: /^Reviewer/ }).click()
-  await expect(screen(page)).toContainText(`FAKE CLAUDE cwd=${ALPHA}/src`)
-  await expect(screen(page)).toContainText('"--model","opus"')
+  await expect(dockScreen(page)).toContainText(`FAKE CLAUDE cwd=${ALPHA}/src`)
+  await expect(dockScreen(page)).toContainText('"--model","opus"')
 })
 
 test('bypassing permissions warns in the editor and marks its chats', async ({ page }) => {
@@ -116,7 +118,7 @@ test('bypassing permissions warns in the editor and marks its chats', async ({ p
 
   await startMenu(page)
   await page.getByRole('menuitem', { name: /^Wild/ }).click()
-  await expect(screen(page)).toContainText('args=["--agent","orchestrator","--permission-mode","bypassPermissions"')
+  await expect(screen(page)).toContainText('short=["--agent","orchestrator","--permission-mode","bypassPermissions"')
   await expect(chatTabs(page).first().locator('.bypass-mark')).toBeVisible()
   await expect(page.locator('.chat-bar .bypass-note')).toBeVisible()
   await page.screenshot({ path: 'test-results/agents-bypass.png' })

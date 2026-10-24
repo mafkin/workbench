@@ -52,9 +52,8 @@ test('the rail pins a skill to the drawer; the card pins one to the page; a chat
 
   // A chat from the page is told both, and loads the wiki skill as a plugin.
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
+  // The prompt's text is checked in the unit tests; the screen shows the flags.
   await expect(screen(page)).toContainText('"--plugin-dir"')
-  await expect(screen(page)).toContainText('/wiki:concept-art: Prompts for concept art')
-  await expect(screen(page)).toContainText('/review: Reviews a change before it ships')
 
   // Unpin from the chip's menu: the key goes.
   await chip(page).click()

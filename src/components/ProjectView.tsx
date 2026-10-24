@@ -10,18 +10,13 @@
 // single tab there is no tab row: the step fills the page.
 import {
   Blocks,
-  ChevronDown,
   ExternalLink,
-  FastForward,
   FileText,
   FolderOpen,
   GitBranch,
-  History,
-  MessageSquarePlus,
   Palette,
   Pencil,
   Pin,
-  PinOff,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -38,8 +33,6 @@ import {
   CATEGORY_PALETTE,
   categoriesOf,
   categoryColor,
-  CHAT_COLORS,
-  chatName,
   chatProgram,
   expandHome,
   FOLDER_STEPS,
@@ -47,7 +40,6 @@ import {
   itemBase,
   joinNotes,
   normalizePath,
-  projectHost,
   projectRef,
   STATUSES,
   STEP_LABEL,
@@ -55,7 +47,6 @@ import {
   stepSlot,
   stepsOf,
   type CARD_FIELDS,
-  type Chat,
   type ItemAddr,
   type NavItem,
   type Op,
@@ -65,7 +56,7 @@ import {
 } from '../../shared/config-schema.ts'
 import type { GitMark } from '../../shared/git.ts'
 import * as api from '../lib/api.ts'
-import { byPin, carriesPaths, CHAT_TAB, droppedPaths, onProjectTab, pasteInto, PATHS_TYPE, quotePaths, useChats } from '../lib/chats.ts'
+import { COLOR_NAMES, onProjectTab, PATHS_TYPE, useChats } from '../lib/chats.ts'
 import { nameOf, parentOf, previewKind } from '../lib/files.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { useLocal } from '../lib/local.ts'
@@ -74,7 +65,7 @@ import { ago } from '../lib/recent.ts'
 import { agentEntries } from './AgentMenu.tsx'
 import { ChatPane } from './ChatPane.tsx'
 import { ContextMenu } from './ContextMenu.tsx'
-import { agentIcon, EntryIcon } from './EntryIcon.tsx'
+import { EntryIcon } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
 import { MediaPreview, TextPreview } from './FilePreview.tsx'
 import { NoteView } from './NoteView.tsx'
@@ -141,7 +132,6 @@ const PAGE_TAB = 'page:'
 const GIT_TAB = 'git:'
 
 /** Names for the chat colours, in the order of CHAT_COLORS. */
-const COLOR_NAMES = ['Slate', 'Sage', 'Sand', 'Heather', 'Teal', 'Clay', 'Grey']
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export function ProjectView({ addr, item, kicker, profile, profileId, home, actions, openFolder, toast, onTab }: Props) {
@@ -155,27 +145,20 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const [tabs, setTabs] = useLocal<Record<string, string>>('projectTab', {})
   const tabKey = `${profileId}|${ref}`
   const chats = useChats()
-  const host = projectHost(ref)
-  const adhoc = chats.list.filter((c) => c.host === host && !c.slot).sort(byPin)
   const slotChat = (s: StepItem) => chats.list.find((c) => c.slot === stepSlot(ref, s.label)) ?? null
   const saved = tabs[tabKey] ?? ''
-  const activeChat = saved.startsWith(CHAT_TAB) ? (adhoc.find((c) => CHAT_TAB + c.id === saved) ?? null) : null
-  // Until the list arrives, a chat tab cannot be told from a closed one.
-  const waitingForChats = saved.startsWith(CHAT_TAB) && !chats.loaded
   const inTab = steps.filter((s) => !opensOutside(s))
   const ofKind = (type: StepItem['type']) => inTab.find((s) => s.type === type)
   // One tab fills the page: the tab row shows from two on (or for a lone launcher or link, which needs its button).
-  const showRow = steps.length + adhoc.length >= 2 || steps.some(opensOutside)
-  const blank = steps.length === 0 && adhoc.length === 0
+  // Chats started with New chat live in the dock (part 12), not in this row.
+  const showRow = steps.length >= 2 || steps.some(opensOutside)
+  const blank = steps.length === 0
   // With a row of tabs, the item's own page is one of them.
   const pageTab = !!item.page && !!profile.notes && showRow
   const onPage = pageTab && saved === PAGE_TAB
   // The saved step by its label (or a saved Git or Claude setup tab from before), else the first.
-  const active =
-    activeChat || onPage
-      ? null
-      : (inTab.find((s) => s.label === saved) ?? (saved === GIT_TAB ? ofKind('git') : saved === SETUP_TAB ? ofKind('setup') : undefined) ?? inTab[0] ?? null)
-  const tabId = activeChat ? saved : onPage ? PAGE_TAB : (active?.label ?? '')
+  const active = onPage ? null : (inTab.find((s) => s.label === saved) ?? (saved === GIT_TAB ? ofKind('git') : saved === SETUP_TAB ? ofKind('setup') : undefined) ?? inTab[0] ?? null)
+  const tabId = onPage ? PAGE_TAB : (active?.label ?? '')
   /** An older project's first step change writes the tabs it showed as its own. */
   const seeded = <T extends Op>(op: T): T => (own ? op : { ...op, seed: steps })
   const quickAddButtons = () => (
@@ -201,8 +184,6 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
   const [editing, setEditing] = useState<'description' | 'category' | null>(null)
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [dropChat, setDropChat] = useState<string | null>(null)
   const dragging = useRef<number | null>(null)
   // The browser's colour picker, for "Other colour…" on a category.
   const colourInput = useRef<HTMLInputElement>(null)
@@ -210,7 +191,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
   const lastPoint = useRef({ x: 0, y: 0 })
   const hasAgents = Object.keys(profile.agents ?? {}).length > 0
   const status = item.status ?? 'active'
-  const crumb = activeChat ? chatName(activeChat) : (active?.label ?? null)
+  const crumb = active?.label ?? null
 
   useEffect(() => onTab(crumb), [crumb])
   // A chat opened from elsewhere (the nav menu, a notification) picks its tab here.
@@ -233,23 +214,15 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     if (git) select(git)
   }
 
-  const selectChat = (chat: Chat) => {
-    setTabs((t) => ({ ...t, [tabKey]: CHAT_TAB + chat.id }))
-    setBrowse(null)
-  }
-
   /**
    * New chat in the project, or with `path` in a folder inside it (Chat here).
-   * `agent` comes from a menu; without one the project's default starts.
+   * `agent` comes from a menu; without one the project's default starts. The
+   * chat shows in the dock (part 12).
    */
   const newChat = async (agent?: string, path?: string) => {
     const chat = await chats.start({ at: addr, agent, path })
-    if (chat) selectChat(chat)
+    if (chat) chats.open(chat)
   }
-
-  /** The agent menu for New chat ▾: Claude, the agent profiles (the default marked), Shell. */
-  const startMenu = (e: React.MouseEvent) =>
-    menuBelow(e, agentEntries(profile.agents, { current: item.agent, shell: true, run: (a) => void newChat(a), edit: () => chats.editAgents(base) }))
 
   /** The agent New chat starts in this project; Claude is the default and written by leaving the field out. */
   const defaultAgentMenu = (e: React.MouseEvent) =>
@@ -277,74 +250,6 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       : []),
     { label: 'Shell here', icon: <SquareTerminal size={14} />, run: () => void newChat('shell', dir) },
   ]
-
-  const handoff = async (chat: Chat) => {
-    const next = await chats.handoff(chat)
-    if (next) selectChat(next)
-  }
-
-  // Earlier Claude sessions in the project folder and below; one already open is shown, not started twice.
-  const historyMenu = async (e: React.MouseEvent) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    const sessions = await chats.history(base)
-    const open = new Map(chats.list.filter((c) => c.session).map((c) => [c.session, c]))
-    const entries: MenuEntry[] = sessions.slice(0, 15).map((s) => ({
-      label: s.title,
-      detail: `${normalizePath(s.cwd) === normalizePath(base) ? '' : `${s.cwd} · `}${open.has(s.id) ? 'open' : ago(s.mtime)}`,
-      icon: <Sparkles size={14} />,
-      run: () => {
-        const chat = open.get(s.id)
-        if (chat) return chats.open(chat)
-        void chats.start({ at: addr, resume: s.id, path: s.cwd }).then((c) => c && selectChat(c))
-      },
-    }))
-    setMenu({ x: r.left, y: r.bottom + 4, entries: entries.length ? entries : [{ label: 'No Claude sessions in this folder yet', disabled: true, run() {} }] })
-  }
-
-  function chatMenu(e: React.MouseEvent, chat: Chat) {
-    e.preventDefault()
-    e.stopPropagation()
-    const at = { x: e.clientX, y: e.clientY }
-    const colours: (MenuEntry | 'sep')[] = [
-      ...CHAT_COLORS.map((c, i) => ({
-        label: COLOR_NAMES[i] ?? c,
-        icon: <span className="category-dot" style={{ background: c }} />,
-        run: () => void chats.update(chat, { color: c }),
-      })),
-      ...(chat.color ? (['sep', { label: 'No colour', icon: <X size={14} />, run: () => void chats.update(chat, { color: null }) }] as const) : []),
-    ]
-    setMenu({
-      ...at,
-      entries: [
-        { label: 'Rename…', icon: <Pencil size={14} />, run: () => setRenaming(chat.id) },
-        { label: 'Colour…', icon: <Palette size={14} />, run: () => setMenu({ ...at, entries: colours }) },
-        chat.pinned
-          ? { label: 'Unpin', icon: <PinOff size={14} />, run: () => void chats.update(chat, { pinned: false }) }
-          : { label: 'Pin', icon: <Pin size={14} />, run: () => void chats.update(chat, { pinned: true }) },
-        ...(chat.agent === 'claude' && chat.session ? [{ label: 'Summarize and continue', icon: <FastForward size={14} />, run: () => void handoff(chat) }] : []),
-        'sep',
-        { label: 'Close', icon: <X size={14} />, danger: true, run: () => chats.close(chat) },
-      ],
-    })
-  }
-
-  /** Paths dropped on a chat's tab are typed into its prompt. */
-  const chatDrop = (chat: Chat) => ({
-    onDragOver: (e: React.DragEvent) => {
-      if (!carriesPaths(e)) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'copy'
-      setDropChat(chat.id)
-    },
-    onDragLeave: () => setDropChat((d) => (d === chat.id ? null : d)),
-    onDrop: (e: React.DragEvent) => {
-      setDropChat(null)
-      if (!carriesPaths(e)) return
-      e.preventDefault()
-      pasteInto(chat.id, quotePaths(droppedPaths(e)))
-      selectChat(chat)
-    },
-  })
 
   const folderTop = active?.type === 'folder' ? stepPath(base, active.path) : base
   const top = browse?.tab === tabId ? browse.top : folderTop
@@ -502,27 +407,13 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     })
   }
 
-  /** Add step, New chat ▾ and History: in the tab row, or by the title when there is none. */
-  const chatActions = (inHead: boolean) => (
-    <>
-      {inHead && !blank && (
-        <button className="tab-action" onClick={addStep} title="Add step" aria-label="Add step">
-          <Plus size={14} />
-        </button>
-      )}
-      <button className="tab-action" onClick={() => void newChat()} title={`Start ${item.agent ?? 'Claude'} in ${item.path ? 'the item’s folder' : 'your home folder'}`}>
-        <MessageSquarePlus size={14} />
-        New chat
+  /** Add step by the title when there is no tab row. */
+  const chatActions = (inHead: boolean) =>
+    inHead && !blank ? (
+      <button className="tab-action" onClick={addStep} title="Add step" aria-label="Add step">
+        <Plus size={14} />
       </button>
-      <button className="tab-action more" aria-label="More kinds of chat" onClick={startMenu}>
-        <ChevronDown size={13} />
-      </button>
-      <button className="tab-action" onClick={(e) => void historyMenu(e)} title="Earlier Claude sessions in this folder">
-        <History size={14} />
-        History
-      </button>
-    </>
-  )
+    ) : null
 
   return (
     <div className="page wide project-page" onContextMenuCapture={(e) => (lastPoint.current = { x: e.clientX, y: e.clientY })}>
@@ -675,64 +566,10 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
         <button className="step-tab add" onClick={addStep} title="Add step" aria-label="Add step">
           <Plus size={14} />
         </button>
-        {adhoc.map((chat) => {
-          const on = activeChat?.id === chat.id
-          const Icon = agentIcon(chat.agent)
-          return (
-            <div
-              key={chat.id}
-              role="tab"
-              tabIndex={0}
-              aria-selected={on}
-              className={cx('step-tab chat-tab', on && 'active', chat.color && 'colored', dropChat === chat.id && 'dropping', chat.state !== 'running' && 'idle')}
-              style={chat.color ? ({ '--chat': chat.color } as React.CSSProperties) : undefined}
-              title={[chatName(chat), chat.agentProfile, chat.cwd].filter(Boolean).join(' · ')}
-              onClick={() => selectChat(chat)}
-              onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && selectChat(chat)}
-              onContextMenu={(e) => chatMenu(e, chat)}
-              {...chatDrop(chat)}
-            >
-              <Icon size={14} className="icon" />
-              {renaming === chat.id ? (
-                <InlineField
-                  initial={chat.label ?? chatName(chat)}
-                  label="Chat name"
-                  onDone={(v) => {
-                    setRenaming(null)
-                    if (v !== null) void chats.update(chat, { label: v || null })
-                  }}
-                />
-              ) : (
-                <span className="chat-name">{chatName(chat)}</span>
-              )}
-              {chat.bypass && <ShieldAlert size={12} className="bypass-mark" aria-label="Permissions bypassed" />}
-              {chat.attention && !on && <span className="attention" aria-label="Needs you" />}
-              {chat.pinned ? (
-                <Pin size={11} className="pin-mark" aria-label="Pinned" />
-              ) : (
-                <button
-                  className="tab-close"
-                  aria-label={`Close ${chatName(chat)}`}
-                  title="Close"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    chats.close(chat)
-                  }}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-          )
-        })}
-        <span className="tab-spacer" />
-        {chatActions(false)}
       </div>}
 
       {!showRow && !blank && <div className="step-gap" />}
-      {waitingForChats ? null : activeChat ? (
-        <ChatPane key={activeChat.id} chat={activeChat} />
-      ) : onPage ? (
+      {onPage ? (
         <NoteView key={item.page} path={joinNotes(profile.notes!, item.page!)} title={item.label} compact heading="Page" />
       ) : !active ? (
         blank ? (
@@ -1016,7 +853,7 @@ function FileTab({ path, onOpenDefault }: { path: string; onOpenDefault: (p: str
 }
 
 /** A small inline editor: Enter (without Shift) or leaving saves, Esc cancels. */
-function InlineField({ initial, label, multiline, onDone }: { initial: string; label: string; multiline?: boolean; onDone: (value: string | null) => void }) {
+export function InlineField({ initial, label, multiline, onDone }: { initial: string; label: string; multiline?: boolean; onDone: (value: string | null) => void }) {
   const done = useRef(false)
   const finish = (v: string | null) => {
     if (done.current) return

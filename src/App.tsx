@@ -43,12 +43,13 @@ import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
 import { Rail } from './components/Rail.tsx'
+import { ChatsDock, type DockContext } from './components/ChatsDock.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
 import type { ProjectActions } from './components/ProjectView.tsx'
 import type { GitMark } from '../shared/git.ts'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
-import { CHAT_TAB, ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
+import { ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
 import { ContextCtx, type ContextApi } from './lib/context.ts'
 import type { SwitchItem } from './lib/switcher.ts'
 import { followState, onChatsEvent, onContextEvent, type Connection } from './lib/events.ts'
@@ -117,6 +118,9 @@ export function App() {
   const [selectedIds, setSelectedIds] = useLocal<Record<string, string | undefined>>('selectedId', {})
   const [collapsed, setCollapsed] = useLocal<Record<string, boolean>>('collapsed', {})
   const [navWidth, setNavWidth] = useLocal('navWidth', 280)
+  // The chats dock (part 12): open or a strip, and the chat it shows per profile.
+  const [dock, setDock] = useLocal<{ open: boolean }>('dock', { open: true })
+  const [dockActive, setDockActive] = useLocal<Record<string, string | undefined>>('dockActive', {})
   const [history, setHistory] = useState<(string | undefined)[]>([])
   const [search, setSearch] = useState<SearchState>({ open: false, query: '' })
   const [notesList, setNotesList] = useState<NoteSummary[]>([])
@@ -575,22 +579,27 @@ export function App() {
     setChatList((cur) => (cur?.profile === chat.profile ? { ...cur, list: [...cur.list.filter((c) => c.id !== chat.id), chat] } : cur))
   }, [])
 
-  /** Show a chat: its tab in its project, its chat entry, or a page of its own. */
+  /** Show a chat: a step's in its project tab, an entry's on its page, any other in the dock (part 12). */
   const openChat = useCallback(
     (chat: Chat) => {
       const a = activeRef.current
       const p = a?.profile
       if (!a || !p) return
+      if (!chat.slot) {
+        setDockActive((d) => ({ ...d, [a.id]: chat.id }))
+        setDock({ open: true })
+        return
+      }
       const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(projectRef(item)) === chat.host, drawerRef.current)
       const item = project && getItem(p, project)
       if (project && item?.type === 'folder') {
-        showProjectTab(a.id, projectRef(item), chat.slot ? slotStep(chat.slot) : CHAT_TAB + chat.id)
+        showProjectTab(a.id, projectRef(item), slotStep(chat.slot))
         return navigate(itemKey(project))
       }
       const entry = findEntry(p, 'chat', (it) => it.type === 'chat' && entrySlot(it) === chat.host, drawerRef.current)
       navigate(entry ? itemKey(entry) : CHAT_KEY + chat.id)
     },
-    [navigate],
+    [navigate, setDock, setDockActive],
   )
 
   // Desktop notifications for a chat that needs you while the window is not looked at;
@@ -673,9 +682,12 @@ export function App() {
   const newChatIn = useCallback(
     async (addr: ItemAddr, agent?: string) => {
       const chat = await chatsRef.current?.start({ at: addr, agent })
-      if (chat) openChat(chat)
+      if (!chat) return
+      // The project shows beside its new chat in the dock.
+      navigate(itemKey(addr))
+      openChat(chat)
     },
-    [openChat],
+    [openChat, navigate],
   )
 
   // Running chats (and any that need you) per project or chat entry, for the nav.
@@ -861,6 +873,11 @@ export function App() {
         e.preventDefault()
         searchRef.current?.focus()
         searchRef.current?.select()
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+        // Ctrl+J shows or hides the chats dock (in a terminal it is a newline for the program).
+        if ((e.target as HTMLElement | null)?.closest?.('.xterm')) return
+        e.preventDefault()
+        setDock((d) => ({ open: !d.open }))
       } else if (e.altKey && !e.ctrlKey && e.key === 'ArrowLeft') {
         // In text, Alt+← moves the cursor.
         if ((e.target as HTMLElement | null)?.closest?.('input, textarea, .cm-editor')) return
@@ -915,6 +932,18 @@ export function App() {
     const own = getItem(active.profile, addr)
     return { kind: 'entry', addr, item, origin: found.addr, shared: own?.type === 'shared' ? own : undefined }
   }, [active, selected, selectedIds])
+
+  /** Where the dock's New chat starts: the item shown, else the drawer the nav shows. */
+  const dockContext = useMemo<DockContext>(() => {
+    const p = active?.profile
+    const d = p ? drawersOf(p)[drawer] : undefined
+    const drawerBase = d?.folder ?? p?.home ?? '~'
+    if (p && selection?.kind === 'entry' && selection.item.type === 'folder') {
+      const item = selection.item
+      return { kind: 'item', addr: selection.origin, label: item.label, base: item.path ?? drawerBase, agent: item.agent }
+    }
+    return { kind: 'drawer', drawer, label: d?.name ?? p?.name ?? '', base: drawerBase }
+  }, [active?.profile, selection, drawer])
 
   // An entry of another drawer (Ctrl+K, Back, Recent work) brings its drawer along.
   useEffect(() => {
@@ -1167,6 +1196,16 @@ export function App() {
                 openExternally={openExternally}
                 startEditing={() => setEditing(true)}
               />
+              {profile && chatsApi && (
+                <ChatsDock
+                  profile={profile}
+                  context={dockContext}
+                  open={dock.open}
+                  setOpen={(open) => setDock({ open })}
+                  active={chatsApi.list.find((c) => c.id === dockActive[active.id] && !c.slot) ?? null}
+                  select={(chat) => openChat(chat)}
+                />
+              )}
               <Rail drawer={profile ? (drawersOf(profile)[drawer] ?? null) : null} active={selection?.kind === 'rail' ? selection.tool : null} onPick={(tool) => navigate(RAIL_KEY + tool)} />
               {dialog?.mode === 'note' ? (
                 <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />

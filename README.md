@@ -212,16 +212,17 @@ You review code. Don't edit files.
 ### Chats
 
 - A chat is the real `claude` CLI (or your login shell) in a terminal inside the app, so everything claude does works as in GNOME Terminal, including `/remote-control` for your phone.
+- **The chats dock** (part 12) is the column to the right of the page: every chat of the profile as a vertical list (pinned first, then the newest), with the active one's terminal under it. **Ctrl+J**, or the arrows in its corner, folds it to a strip showing the count and a dot when a chat needs you. A chat started from an item remembers that page: the chat's instructions carry the page's text, and its tooltip says where it came from.
 - Start one:
-  - **New chat** at the end of a project's tab row (the arrow next to it offers **Shell**), or **New chat** / **New shell** when you right-click a project in the nav.
+  - **New chat** in the dock's header (the arrow next to it offers the agent profiles and **Shell**) starts in the item you're looking at (its folder, or its drawer's folder for a page without one), else in the drawer's folder. **New chat** / **New shell** when you right-click a project in the nav do the same for that project and show it.
   - A **chat step** (`type: chat`) is a fixed tab in every project that uses the workflow. It starts the first time you open it. `agent: shell` makes it a shell, `path:` a folder inside the project, `args:` extra arguments for claude.
   - **Chat here** / **Shell here** when you right-click a folder in the file browser.
   - A **chat entry** in the nav (`type: chat`, `path:` defaults to home) has a page of its own, for chats outside projects.
 - Chats keep running when you switch tabs or projects, reload or close the window; the screen comes back as you left it. After the service restarts (a pull, a reboot), they show **Stopped** with **Resume** and **New session**. Nothing starts by itself.
-- **History** (end of the tab row) lists the Claude sessions in the project folder and below it; pick one to resume it in a new tab. A stopped chat step or entry also offers its folder's earlier sessions.
-- A tab's right-click menu: **Rename…**, **Colour…**, **Pin** (pinned tabs come first and have no ×), **Summarize and continue**, **Close**. Closing a running chat asks first; claude's conversation stays in History.
+- **History** (in the dock's header) lists the Claude sessions in the folder New chat would start in, and below it; pick one to resume it in the dock. A stopped chat step or entry also offers its folder's earlier sessions.
+- A chat's right-click menu in the dock: **Rename…**, **Colour…**, **Pin** (pinned chats come first and have no ×), **Summarize and continue**, **Close**. Closing a running chat asks first; claude's conversation stays in History. A step's or entry's chat is listed under its step's name.
 - **Summarize and continue** asks claude (in the background, on a copy of the session) for a handoff summary, then starts a new chat with it. After 40 messages the button says so.
-- When a chat goes quiet after working (claude finished or is asking for permission), or rings the bell, while you're not looking at it, its tab gets a dot and the project's spark in the nav turns the accent colour. If the window isn't focused, you also get a desktop notification (the browser asks for permission on your first chat).
+- When a chat goes quiet after working (claude finished or is asking for permission), or rings the bell, while you're not looking at it (the dock folded, another chat shown, the window elsewhere), its row gets a dot, the folded dock too, and the project's spark in the nav turns the accent colour. If the window isn't focused, you also get a desktop notification (the browser asks for permission on your first chat).
 - Drag files or folders from the browser, or a step tab, onto a chat or its tab: their paths are typed into the prompt.
 - In the terminal, **Ctrl+C** interrupts as usual, **Ctrl+Shift+C** copies the selection and **Ctrl+Shift+V** pastes. Links open in your browser.
 - Tab names, colours and pins live with the service's chat list (`~/.local/state/workbench/chats.json`), not in your YAML: they belong to a running session. A chat you want in every project is a chat step.

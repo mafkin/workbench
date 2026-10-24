@@ -118,7 +118,9 @@ const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.b
 const ChatStart = z.object({
   profile: z.string(),
   rev: z.string(),
-  at: ItemAddr,
+  /** The entry the chat belongs to, or (part 12) a drawer, for a chat in its folder with no page. */
+  at: ItemAddr.optional(),
+  drawer: z.int().nonnegative().optional(),
   step: z.int().nonnegative().optional(),
   /** claude, shell or an agent profile's name (the New chat menu); else the step's, entry's or project's. */
   agent: z.string().trim().min(1).max(64).optional(),
@@ -608,12 +610,21 @@ export async function buildServer(opts: ServerOptions) {
     const body = parse(ChatStart, req.body)
     const p = store.profile(body.profile)
     if (p.rev !== body.rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
+    let spec: ChatSpec
+    if (!body.at) {
+      // A chat of the drawer's own (the dock's New chat with no page shown): in its folder, else home.
+      const d = body.drawer ?? 0
+      const own = drawersOf(p.profile)[d]
+      if (!own) throw new StoreError('No such drawer', 404)
+      const cwd = body.path === undefined ? await chatFolder(p.profile, own.folder ?? p.profile.home ?? '~', false) : await chatFolder(p.profile, body.path, true)
+      spec = { profile: body.profile, host: `drawer:${own.name}`, slot: null, cwd, ...(await agentFor(body.profile, p.profile, d, body.agent, cwd, [])) }
+      return chats.start({ ...spec, resume: body.resume })
+    }
     // A shared entry starts its original's chat; the chat gets the shared folders of the drawer holding the original.
     const found = entryAt(p.profile, body.at)
     if (!found) throw new StoreError('No such entry', 404)
     const { item } = found
     const drawer = found.addr.drawer ?? 0
-    let spec: ChatSpec
     if (item.type === 'chat') {
       const slot = entrySlot(item)
       const cwd = await chatFolder(p.profile, item.path ?? '~', false)
@@ -627,9 +638,11 @@ export async function buildServer(opts: ServerOptions) {
       const ref = projectRef(item)
       spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args, item)) }
     } else if (item.type === 'folder') {
-      const cwd = body.path === undefined ? await chatFolder(p.profile, itemBase(p.profile, item), false) : await chatFolder(p.profile, body.path, true)
+      // A page without a folder of its own starts in its drawer's folder (part 12), else home.
+      const base = item.path ?? drawersOf(p.profile)[drawer]?.folder ?? itemBase(p.profile, item)
+      const cwd = body.path === undefined ? await chatFolder(p.profile, base, false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [], item)) }
+      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, page: item.page, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [], item)) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }

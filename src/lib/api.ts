@@ -124,7 +124,9 @@ export async function uploadFile(profile: string, dir: string, file: File): Prom
 
 // Chats: started from an entry or step by address; the service picks the program.
 export interface ChatStart {
-  at: ItemAddr
+  /** The entry the chat belongs to; or (part 12) none and a `drawer`, for a chat in the drawer's folder. */
+  at?: ItemAddr
+  drawer?: number
   /** A chat step of the project at `at`. */
   step?: number
   /** New chat in a project: claude, shell or an agent profile (default the project's), in `path` (default the project folder). */

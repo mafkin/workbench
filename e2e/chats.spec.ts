@@ -7,7 +7,9 @@ const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workflow' })
 const tab = (page: Page, name: string) => tabs(page).getByRole('tab', { name, exact: true })
-const chatTabs = (page: Page) => tabs(page).locator('.chat-tab')
+// Chats live in the dock (part 12): every chat of the profile, pinned first, then the newest first.
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Chats' })
+const chatTabs = (page: Page) => dock(page).getByRole('tab')
 const screen = (page: Page) => page.locator('.chat-terminal .xterm-rows')
 const row = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
 
@@ -18,7 +20,7 @@ async function typeInChat(page: Page, text: string) {
 }
 
 async function newChat(page: Page) {
-  await page.getByRole('button', { name: 'New chat', exact: true }).click()
+  await dock(page).getByRole('button', { name: 'New chat', exact: true }).click()
   await expect(screen(page)).toContainText('FAKE CLAUDE')
 }
 
@@ -47,7 +49,8 @@ test('New chat runs claude in the project; typing reaches it; the tab takes its 
   await expect(screen(page)).toContainText('you said: hello there')
   await expect(page.locator('.chat-bar')).toContainText('~/alpha')
   await expect(entry(page, 'Alpha').locator('.chat-mark')).toBeVisible()
-  await expect(page.locator('.crumbs')).toContainText('Alpha/Fake Claude')
+  // The page stays on the project; the chat is beside it.
+  await expect(page.locator('.page-title')).toHaveText('Alpha')
   await page.screenshot({ path: 'test-results/chat-tab.png' })
 })
 
@@ -72,10 +75,10 @@ test('a chat step starts when first opened; a shell step runs the login shell in
   await expect(screen(page)).toContainText(`FAKE SHELL cwd=${ALPHA}/src args=["-l"]`)
   await typeInChat(page, 'make test')
   await expect(screen(page)).toContainText('ran: make test')
-  // Back to the step: the same chat, not a new one.
+  // Back to the step: the same chat, not a new one. The dock lists the steps' chats too.
   await tab(page, 'agent').click()
-  await expect(screen(page)).toContainText(`FAKE CLAUDE cwd=${ALPHA}`)
-  await expect(chatTabs(page)).toHaveCount(0)
+  await expect(screen(page).first()).toContainText(`FAKE CLAUDE cwd=${ALPHA}`)
+  await expect(chatTabs(page)).toHaveText(['term', 'agent'])
 })
 
 test('closing a running chat asks first; History lists its session and resumes it', async ({ page }) => {
@@ -91,7 +94,7 @@ test('closing a running chat asks first; History lists its session and resumes i
   await expect(chatTabs(page)).toHaveCount(0)
   await expect(page.locator('.toast')).toContainText('its session stays in History')
 
-  await page.getByRole('button', { name: 'History' }).click()
+  await dock(page).getByRole('button', { name: 'History' }).click()
   await page.getByRole('menuitem', { name: /plan the release/ }).click()
   await expect(screen(page)).toContainText('resumed=true')
   await expect(chatTabs(page)).toHaveCount(1)
@@ -121,17 +124,24 @@ test('chats can be renamed, coloured and pinned from the tab menu', async ({ pag
   await expect(chatTabs(page).first().getByRole('button', { name: /Close/ })).toHaveCount(0)
 })
 
-test('a chat that goes quiet after working marks its tab and the nav until you look', async ({ page }) => {
+test('a chat that goes quiet after working marks the dock and the nav until you look', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await newChat(page)
   await typeInChat(page, 'work')
-  await tab(page, 'All files').click()
-  await expect(chatTabs(page).first().locator('.attention')).toBeVisible()
+  // Hidden, the chat is not looked at: the strip and the nav say it needs you.
+  await dock(page).getByRole('button', { name: 'Hide chats' }).click()
+  await expect(dock(page).locator('.attention')).toBeVisible()
   await expect(entry(page, 'Alpha').locator('.chat-mark.attention')).toBeVisible()
   await page.screenshot({ path: 'test-results/chat-needs-you.png' })
-  await chatTabs(page).first().click()
+  await dock(page).getByRole('button', { name: /^Show chats/ }).click()
   await expect(screen(page)).toContainText('done')
   await expect(entry(page, 'Alpha').locator('.chat-mark.attention')).toHaveCount(0)
+  // Ctrl+J hides and shows it too.
+  await page.locator('.page-title').click()
+  await page.keyboard.press('Control+j')
+  await expect(dock(page).getByRole('button', { name: /^Show chats/ })).toBeVisible()
+  await page.keyboard.press('Control+j')
+  await expect(chatTabs(page)).toHaveCount(1)
 })
 
 test('a file dragged onto a chat tab is typed into its prompt', async ({ page }) => {
@@ -152,7 +162,7 @@ test('Summarize and continue opens a new chat seeded with the summary', async ({
   await expect(screen(page)).toContainText('you said: fix the parser')
   await page.getByRole('button', { name: /Summarize and continue/ }).click()
   await expect(chatTabs(page)).toHaveCount(2)
-  await expect(chatTabs(page).nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(chatTabs(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(screen(page)).toContainText('SUMMARY of')
 })
 
@@ -165,7 +175,7 @@ test('Chat here and Shell here start in a folder of the project', async ({ page 
   await row(page, 'src').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Shell here' }).click()
   await expect(screen(page)).toContainText(`FAKE SHELL cwd=${ALPHA}/src`)
-  await expect(chatTabs(page)).toHaveText(['Fake Claude', 'Shell'])
+  await expect(chatTabs(page)).toHaveText(['Shell', 'Fake Claude'])
 })
 
 test('a chat entry in the nav has its own page; New chat from the nav menu opens in the project', async ({ page }) => {
@@ -178,7 +188,7 @@ test('a chat entry in the nav has its own page; New chat from the nav menu opens
   await entry(page, 'Alpha').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'New shell' }).click()
   await expect(page.locator('.page-title')).toContainText('Alpha')
-  await expect(chatTabs(page)).toHaveText(['Shell'])
+  await expect(chatTabs(page)).toHaveText(['Shell', 'Scratch'])
   await expect(screen(page)).toContainText('FAKE SHELL')
 
   // A project whose folder is missing says so instead of starting anything.
