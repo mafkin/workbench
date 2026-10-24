@@ -35,9 +35,6 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
   const p = active.profile
   const [name, setName] = useState(p?.name ?? '')
   const [accent, setAccent] = useState(p?.accent ?? ACCENTS[0])
-  const [home, setHome] = useState(p?.home ?? '')
-  const [newWiki, setNewWiki] = useState('')
-  const [wikiEdited, setWikiEdited] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
   const [newId, setNewId] = useState('')
@@ -62,10 +59,9 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
     if (!name.trim()) return setError('A name is required')
     if (!HEX.test(accent)) return setError('Accent must be a #rrggbb colour')
     const ops: Op[] = []
-    const set = (key: 'name' | 'accent' | 'home', value: string, was: string | undefined) => value.trim() !== (was ?? '') && ops.push({ op: 'setProfileField', key, value: value.trim() })
+    const set = (key: 'name' | 'accent', value: string, was: string | undefined) => value.trim() !== (was ?? '') && ops.push({ op: 'setProfileField', key, value: value.trim() })
     set('name', name, p.name)
     set('accent', accent, p.accent)
-    set('home', home, p.home)
     if (ops.length && (await run(ops, 'Profile settings saved'))) onClose()
     else if (!ops.length) onClose()
   }
@@ -76,7 +72,7 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
     if (!newName.trim()) return setError('The new profile needs a name')
     if (!PROFILE_ID.test(id)) return setError(PROFILE_ID_RULE)
     try {
-      await api.createProfile(id, newName.trim(), copy ? active.id : undefined, newWiki.trim() || `~/notes/${id}`)
+      await api.createProfile(id, newName.trim(), copy ? active.id : undefined)
       await onChanged()
       onSwitch(id)
       onClose()
@@ -128,15 +124,10 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
               <input className="mono hex" name="accent" value={accent} onChange={(e) => setAccent(e.target.value)} disabled={!p} aria-label="Accent colour" />
             </div>
           </div>
-          <label className="field">
-            <span>Home folder</span>
-            <input className="mono" name="home" value={home} onChange={(e) => setHome(e.target.value)} placeholder="~/work" disabled={!p} />
-            <span className="hint">The file browser may open it and everything inside. Empty: only the notes folder and the items’ folders.</span>
-          </label>
           <div className="field">
-            <span>Wiki folder</span>
-            <span className="mono wiki-folder">{p?.notes ?? '—'}</span>
-            <span className="hint">The profile’s pages (index.md, pages, drawers, agents), notes, daily notes and context live here. To move it, move the folder and change its line in settings.yaml.</span>
+            <span>Folder</span>
+            <span className="mono wiki-folder">{active.wiki ?? '—'}</span>
+            <span className="hint">The profile’s folder in the Workbench: its pages, drawers, notes, daily notes, templates, skills and context live here. Its name is the profile’s id.</span>
           </div>
           <div className="form-actions">
             <button type="submit" className="btn primary" disabled={!p}>
@@ -170,10 +161,7 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
               aria-label="New profile name"
               onChange={(e) => {
                 setNewName(e.target.value)
-                if (!idEdited) {
-                  setNewId(idFrom(e.target.value))
-                  if (!wikiEdited) setNewWiki(`~/notes/${idFrom(e.target.value)}`)
-                }
+                if (!idEdited) setNewId(idFrom(e.target.value))
               }}
             />
             <input
@@ -185,18 +173,6 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
               onChange={(e) => {
                 setNewId(e.target.value)
                 setIdEdited(true)
-                if (!wikiEdited) setNewWiki(`~/notes/${e.target.value}`)
-              }}
-            />
-            <input
-              className="mono"
-              name="newWiki"
-              value={newWiki}
-              placeholder="~/notes/id"
-              aria-label="Wiki folder"
-              onChange={(e) => {
-                setNewWiki(e.target.value)
-                setWikiEdited(true)
               }}
             />
             <label className="check">

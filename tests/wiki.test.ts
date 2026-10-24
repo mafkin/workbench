@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Op } from '../shared/config-schema.ts'
+import { drawersOf, type Op } from '../shared/config-schema.ts'
 import { Wiki } from '../server/wiki.ts'
 import { PERSONAL_WIKI, WORK_WIKI, writeSettings, writeWiki } from './fixtures/wiki.ts'
 
@@ -11,7 +11,7 @@ let home: string
 let cfg: string
 let wiki: Wiki
 
-const NOTES = () => path.join(home, 'notes')
+const NOTES = () => path.join(home, 'wb/work')
 const read = (rel: string) => fsp.readFile(path.join(NOTES(), rel), 'utf8')
 const exists = (rel: string) => fsp.access(path.join(NOTES(), rel)).then(() => true, () => false)
 
@@ -30,10 +30,10 @@ const work = () => wiki.profile('work').profile!
 beforeEach(async () => {
   dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-wiki-'))
   home = path.join(dir, 'home')
-  cfg = path.join(dir, 'cfg')
+  cfg = path.join(home, 'wb')
   await writeWiki(NOTES(), WORK_WIKI)
-  await writeWiki(path.join(home, 'pnotes'), PERSONAL_WIKI)
-  await writeSettings(cfg, { work: '~/notes', personal: '~/pnotes' })
+  await writeWiki(path.join(home, 'wb/personal'), PERSONAL_WIKI)
+  await writeSettings(cfg, ['work', 'personal'])
   wiki = new Wiki(cfg, home)
   await wiki.init({ watch: false })
 })
@@ -48,7 +48,7 @@ describe('reading a wiki', () => {
     const p = work()
     expect(p.name).toBe('Work')
     expect(p.accent).toBe('#7d93ab')
-    expect(p.notes).toBe('~/notes')
+    expect(p.root).toBe('~/wb/work')
     expect(p.sections.map((s) => s.title)).toEqual(['Projects', 'Tools', 'Notes'])
     const [alpha, beta, gamma] = p.sections[0].items
     expect(alpha).toEqual({
@@ -75,7 +75,7 @@ describe('reading a wiki', () => {
     expect(wiki.state().activeProfile).toBe('work')
     expect(wiki.state().profiles.map((x) => x.id)).toEqual(['work', 'personal'])
     expect(wiki.profile('work').file).toBe(path.join(NOTES(), 'index.md'))
-    expect(wiki.profile('work').wiki).toBe('~/notes')
+    expect(wiki.profile('work').wiki).toBe('~/wb/work')
   })
 
   it('reads agents from agents/*.md and drawers from drawer pages', async () => {
@@ -83,13 +83,13 @@ describe('reading a wiki', () => {
       'agents/Reviewer.md': '---\nmodel: opus\npermission: plan\nfolders: [~/shared]\n---\nYou review code.\n',
       'index.md': '---\nname: Work\n---\n## Drawers\n\n- [[drawers/Work]]\n- [[drawers/Game dev]]\n',
       'drawers/Work.md': '## Projects\n- [[Alpha]]\n',
-      'drawers/Game dev.md': '---\nlogo: abc.png\nfolder: ~/notes/drawers/game-dev\nuses: [Work]\n---\n## Games\n- [[Beta]]\n- [[Alpha]]\n',
+      'drawers/Game dev.md': '---\nlogo: abc.png\nfolder: ~/wb/work/drawers/game-dev\nuses: [Work]\n---\n## Games\n- [[Beta]]\n- [[Alpha]]\n',
     })
     await wiki.init({ watch: false })
     const p = work()
     expect(p.agents).toEqual({ Reviewer: { model: 'opus', permission: 'plan', folders: ['~/shared'], allowedTools: [], disallowedTools: [], instructions: 'You review code.' } })
     expect(p.drawers?.map((d) => d.name)).toEqual(['Work', 'Game dev'])
-    expect(p.drawers?.[1]).toMatchObject({ logo: 'abc.png', folder: '~/notes/drawers/game-dev', uses: ['Work'] })
+    expect(p.drawers?.[1]).toMatchObject({ logo: 'abc.png', folder: '~/wb/work/drawers/game-dev', uses: ['Work'] })
     expect(p.drawers?.[1].sections[0].items.map((i) => i.label)).toEqual(['Beta', 'Alpha'])
     expect(p.sections).toEqual([])
   })
@@ -102,9 +102,9 @@ describe('reading a wiki', () => {
     })
     await wiki.init({ watch: false })
     const items = work().sections[0].items
-    expect(items[0]).toEqual({ type: 'note', label: 'Nope', path: '~/notes/Nope.md' })
-    expect(items[1]).toEqual({ type: 'note', label: 'Bad', path: '~/notes/Bad.md' })
-    expect(items[2]).toEqual({ type: 'note', label: 'Files', path: '~/notes/index.md', icon: 'triangle-alert' })
+    expect(items[0]).toEqual({ type: 'note', label: 'Nope', path: '~/wb/work/Nope.md' })
+    expect(items[1]).toEqual({ type: 'note', label: 'Bad', path: '~/wb/work/Bad.md' })
+    expect(items[2]).toEqual({ type: 'note', label: 'Files', path: '~/wb/work/index.md', icon: 'triangle-alert' })
     expect(items[3].type).toBe('group')
     expect(items[4].type).toBe('folder')
     expect((items[4] as { steps: { icon?: string }[] }).steps[0].icon).toBe('triangle-alert')
@@ -308,19 +308,17 @@ describe('the profile’s own fields', () => {
   it('setProfileField, setCategory and setMcpOff edit index.md’s frontmatter', async () => {
     await run([
       { op: 'setProfileField', key: 'theme', value: 'fjord' },
-      { op: 'setProfileField', key: 'home', value: '~/work' },
       { op: 'setCategory', name: 'game', color: '#8fa58a' },
       { op: 'setMcpOff', names: ['plugin:x:slack'], off: true },
     ])
-    expect(await read('index.md')).toContain('---\nname: Work\naccent: "#7d93ab"\ntheme: fjord\nhome: ~/work\ncategories:\n  game: "#8fa58a"\nmcpOff:\n  - plugin:x:slack\n---\nWords about')
-    expect(work()).toMatchObject({ theme: 'fjord', home: '~/work', categories: { game: '#8fa58a' }, mcpOff: ['plugin:x:slack'] })
+    expect(await read('index.md')).toContain('---\nname: Work\naccent: "#7d93ab"\ntheme: fjord\ncategories:\n  game: "#8fa58a"\nmcpOff:\n  - plugin:x:slack\n---\nWords about')
+    expect(work()).toMatchObject({ theme: 'fjord', categories: { game: '#8fa58a' }, mcpOff: ['plugin:x:slack'] })
     await run([
       { op: 'setProfileField', key: 'theme', value: '' },
       { op: 'setCategory', name: 'game', color: null },
       { op: 'setMcpOff', names: ['plugin:x:slack'], off: false },
     ])
-    expect(await read('index.md')).toContain('---\nname: Work\naccent: "#7d93ab"\nhome: ~/work\n---\n')
-    expect(await status(run([{ op: 'setProfileField', key: 'notes', value: '~/elsewhere' }]))).toBe(400)
+    expect(await read('index.md')).toContain('---\nname: Work\naccent: "#7d93ab"\n---\n')
   })
 
   it('agent profiles are pages in agents/: create, update, rename with its uses, delete only when unused', async () => {
@@ -371,13 +369,13 @@ describe('drawers are pages in drawers/', () => {
     expect(await read('drawers/Game dev.md')).not.toContain('Beta')
 
     await run([
-      { op: 'setDrawer', drawer: 1, field: 'folder', value: '~/notes/drawers/game-dev' },
+      { op: 'setDrawer', drawer: 1, field: 'folder', value: '~/wb/work/drawers/game-dev' },
       { op: 'setDrawer', drawer: 1, field: 'uses', value: ['Work'] },
       { op: 'setDrawer', drawer: 0, field: 'name', value: 'Office' },
     ])
     expect(await read('index.md')).toContain('- [[drawers/Office]]\n- [[drawers/Game dev]]\n')
     expect(await exists('drawers/Work.md')).toBe(false)
-    expect(await read('drawers/Game dev.md')).toContain('---\nfolder: ~/notes/drawers/game-dev\nuses:\n  - Office\n---\n')
+    expect(await read('drawers/Game dev.md')).toContain('---\nfolder: ~/wb/work/drawers/game-dev\nuses:\n  - Office\n---\n')
     expect(work().drawers?.map((d) => d.name)).toEqual(['Office', 'Game dev'])
     expect(await status(run([{ op: 'moveItem', from: { section: 0, index: 0 }, to: { drawer: 1, section: 0 }, index: 0 }]))).toBe(400)
     await run([{ op: 'deleteDrawer', drawer: 1 }])
@@ -431,56 +429,69 @@ describe('drawers are pages in drawers/', () => {
 })
 
 describe('profiles and settings', () => {
-  it('creates a profile as a new wiki (blank or a copy), switches, and forgets one', async () => {
-    await wiki.createProfile('side', { name: 'Side', wiki: '~/side' })
-    expect(await fsp.readFile(path.join(home, 'side/index.md'), 'utf8')).toBe('---\nname: "Side"\naccent: "#b39b72"\n---\n## Start\n')
+  it('creates a profile as a folder in the Workbench (blank with one drawer, or a copy), switches, and forgets one', async () => {
+    await wiki.createProfile('side', { name: 'Side' })
+    expect(await fsp.readFile(path.join(cfg, 'side/index.md'), 'utf8')).toBe('---\nname: "Side"\naccent: "#b39b72"\n---\n## Drawers\n\n- [[drawers/Side]]\n')
+    expect(await fsp.readFile(path.join(cfg, 'side/drawers/Side.md'), 'utf8')).toBe('## Side\n')
+    expect((await fsp.stat(path.join(cfg, 'side/drawers/Side'))).isDirectory()).toBe(true)
+    expect(wiki.profile('side').profile).toMatchObject({ root: '~/wb/side', drawers: [{ name: 'Side', folder: '~/wb/side/drawers/Side', sections: [{ title: 'Side', items: [] }] }] })
+    expect(wiki.profile('side').wiki).toBe('~/wb/side')
     expect(wiki.state().profiles.map((p) => p.id)).toEqual(['work', 'personal', 'side'])
-    await wiki.createProfile('copy', { name: 'Copy', wiki: '~/copy', copyFrom: 'work' })
+    await wiki.createProfile('copy', { name: 'Copy', copyFrom: 'work' })
     expect(wiki.profile('copy').profile).toMatchObject({ name: 'Copy', accent: '#7d93ab' })
     expect(wiki.profile('copy').profile?.sections.map((s) => s.title)).toEqual(['Projects', 'Tools', 'Notes'])
-    expect(await fsp.readFile(path.join(home, 'copy/Workflow.md'), 'utf8')).toBe(WORK_WIKI['Workflow.md'])
-    expect(await status(wiki.createProfile('again', { name: 'Again', wiki: '~/notes' }))).toBe(409)
-    expect(await status(wiki.createProfile('nested', { name: 'Nested', wiki: '~/notes/sub' }))).toBe(409)
-    expect(await status(wiki.createProfile('outer', { name: 'Outer', wiki: '~' }))).toBe(409)
-    expect(await status(wiki.createProfile('Bad Id', { name: 'x', wiki: '~/x' }))).toBe(400)
+    expect(await fsp.readFile(path.join(cfg, 'copy/Workflow.md'), 'utf8')).toBe(WORK_WIKI['Workflow.md'])
+    expect(await status(wiki.createProfile('work', { name: 'Again' }))).toBe(409)
+    expect(await status(wiki.createProfile('Bad Id', { name: 'x' }))).toBe(400)
     await wiki.setActive('side')
     expect(wiki.state().activeProfile).toBe('side')
     await wiki.removeProfile('side')
     expect(wiki.state().profiles.map((p) => p.id)).toEqual(['work', 'personal', 'copy'])
     expect(wiki.state().activeProfile).toBe('work')
-    expect(await fsp.readFile(path.join(home, 'side/index.md'), 'utf8')).toContain('Side')
-    expect(await fsp.readFile(path.join(cfg, 'settings.yaml'), 'utf8')).toContain('profiles:\n  work: ~/notes\n  personal: ~/pnotes\n  copy: ~/copy\n')
+    expect(await fsp.readFile(path.join(cfg, 'side/index.md'), 'utf8')).toContain('Side')
+    expect(await fsp.readFile(path.join(cfg, 'settings.yaml'), 'utf8')).toContain('profiles:\n  - work\n  - personal\n  - copy\n')
   })
 
-  it('reads YAML profiles read-only until migrate() turns them into wikis', async () => {
-    const legacy = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-legacy-'))
-    const lhome = path.join(legacy, 'home')
-    await fsp.mkdir(path.join(legacy, 'cfg/profiles'), { recursive: true })
-    await fsp.writeFile(path.join(legacy, 'cfg/settings.yaml'), 'activeProfile: work\nprofiles: [work]\n')
-    await fsp.writeFile(
-      path.join(legacy, 'cfg/profiles/work.yaml'),
-      'name: Work\nnotes: ~/notes\nworkflow:\n  - { label: readme, type: note, path: README.md }\nagents:\n  Reviewer: { model: opus }\nsections:\n  - title: Projects\n    items:\n      - { label: Alpha, type: folder, path: ~/alpha, status: paused }\n      - { label: Today, type: daily }\n',
-    )
-    const w = new Wiki(path.join(legacy, 'cfg'), lhome)
+  it('a drawer without folder: works in drawers/<Name>/ of its profile, made on read; folder: points elsewhere', async () => {
+    expect(work().drawers).toBeUndefined()
+    expect(drawersOf(work())[0].folder).toBe('~/wb/work/drawers/Work')
+    await run([{ op: 'addDrawer', name: 'Game dev' }])
+    const game = work().drawers!.find((d) => d.name === 'Game dev')!
+    expect(game.folder).toBe('~/wb/work/drawers/Game dev')
+    expect((await fsp.stat(path.join(NOTES(), 'drawers/Game dev'))).isDirectory()).toBe(true)
+    expect(await read('drawers/Game dev.md')).not.toContain('folder:')
+    await run([{ op: 'setDrawer', drawer: 1, field: 'folder', value: '~/games/mrmak' }])
+    expect(work().drawers![1].folder).toBe('~/games/mrmak')
+    expect(await read('drawers/Game dev.md')).toContain('folder: ~/games/mrmak')
+    await run([{ op: 'setDrawer', drawer: 1, field: 'folder', value: '' }])
+    expect(work().drawers![1].folder).toBe('~/wb/work/drawers/Game dev')
+  })
+
+  it('an empty store waits for setup: setDir makes the first profile and its drawer, or adopts a folder that has settings.yaml', async () => {
+    const fresh = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-fresh-'))
+    const w = new Wiki(null, fresh)
     await w.init({ watch: false })
     try {
-      expect(w.legacy).toBe(true)
-      expect(w.profile('work')).toMatchObject({ legacy: true })
-      expect(w.profile('work').profile?.sections[0].items[0]).toMatchObject({ label: 'Alpha', status: 'paused' })
-      expect(await status(w.apply('work', w.profile('work').rev, [{ op: 'addSection', title: 'X' }]))).toBe(423)
-      expect(await w.migrate()).toEqual({ moved: ['work'] })
-      expect(w.legacy).toBe(false)
-      expect(await fsp.readFile(path.join(lhome, 'notes/index.md'), 'utf8')).toBe('---\nname: Work\naccent: "#7d93ab"\n---\n## Projects\n\n- [[Alpha]]\n- [Today](daily:)\n')
-      expect(await fsp.readFile(path.join(lhome, 'notes/pages/Alpha.md'), 'utf8')).toBe('---\nfolder: ~/alpha\nstatus: paused\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [readme](README.md)\n')
-      expect(await fsp.readFile(path.join(lhome, 'notes/agents/Reviewer.md'), 'utf8')).toBe('---\nmodel: opus\n---\n')
-      expect(await fsp.readFile(path.join(legacy, 'cfg/settings.yaml'), 'utf8')).toContain('profiles:\n  work: ~/notes\n')
-      await fsp.access(path.join(legacy, 'cfg/profiles/work.yaml.bak'))
-      expect(w.profile('work').profile?.sections[0].items[0]).toMatchObject({ label: 'Alpha', path: '~/alpha', status: 'paused', page: 'pages/Alpha.md' })
-      expect(w.profile('work').profile?.workflow.map((s) => s.label)).toEqual(['readme'])
-      expect(w.profile('work').profile?.agents?.Reviewer.model).toBe('opus')
+      expect(w.dir).toBeNull()
+      expect(w.state()).toEqual({ activeProfile: '', profiles: [] })
+      expect(await status(w.createProfile('x', { name: 'X' }))).toBe(409)
+      await w.setDir(path.join(fresh, 'Workbench'), { id: 'main', name: 'Main' })
+      expect(await fsp.readFile(path.join(fresh, 'Workbench/settings.yaml'), 'utf8')).toContain('activeProfile: main\nprofiles:\n  - main\n')
+      expect(await fsp.readFile(path.join(fresh, 'Workbench/main/index.md'), 'utf8')).toBe('---\nname: "Main"\naccent: "#7d93ab"\n---\n## Drawers\n\n- [[drawers/Main]]\n')
+      expect(await fsp.readFile(path.join(fresh, 'Workbench/main/drawers/Main.md'), 'utf8')).toBe('## Main\n')
+      expect((await fsp.stat(path.join(fresh, 'Workbench/main/drawers/Main'))).isDirectory()).toBe(true)
+      expect(w.state().activeProfile).toBe('main')
+      expect(w.state().dir).toBe('~/Workbench')
+      expect(w.profile('main').profile).toMatchObject({ name: 'Main', drawers: [{ name: 'Main', sections: [{ title: 'Main', items: [] }] }] })
+      expect(await status(w.setDir(path.join(fresh, 'Other')))).toBe(409)
+      // Another store on the same folder adopts it as it is.
+      const again = new Wiki(path.join(fresh, 'Workbench'), fresh)
+      await again.init({ watch: false })
+      expect(again.state().profiles.map((p) => p.id)).toEqual(['main'])
+      again.close()
     } finally {
       w.close()
-      await fsp.rm(legacy, { recursive: true, force: true })
+      await fsp.rm(fresh, { recursive: true, force: true })
     }
   })
 

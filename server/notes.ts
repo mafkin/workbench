@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import {
-  allSections,
+  drawersOf,
   displayPath,
   NOTE_EXT,
   itemBase,
@@ -82,16 +82,16 @@ const TEMPLATE_NAME = /^[a-z][a-z0-9-]{0,39}$/
 /** Note entries and projects' note steps: files the config names, whatever their extension. */
 function noteEntries(profile: Profile): string[] {
   const out: string[] = []
-  const visit = (items: NavItem[]) => {
+  const visit = (items: NavItem[], drawer: number) => {
     for (const item of items) {
       if (item.type === 'note') out.push(item.path)
-      else if (item.type === 'group') visit(item.items)
+      else if (item.type === 'group') visit(item.items, drawer)
       else if (item.type === 'folder') {
-        for (const step of stepsOf(profile, item)) if (step.type === 'note') out.push(stepPath(itemBase(profile, item), step.path))
+        for (const step of stepsOf(profile, item)) if (step.type === 'note') out.push(stepPath(itemBase(profile, item, drawer), step.path))
       }
     }
   }
-  for (const s of allSections(profile)) visit(s.items)
+  drawersOf(profile).forEach((d, di) => d.sections.forEach((s) => visit(s.items, di)))
   return out
 }
 
@@ -396,8 +396,8 @@ export class Notes extends EventEmitter {
 
   async #roots(profile: Profile): Promise<Roots> {
     let root: Roots['root'] = null
-    if (profile.notes) {
-      const lexical = absPath(profile.notes, this.home)
+    if (profile.root !== '~') {
+      const lexical = absPath(profile.root, this.home)
       root = { lexical, real: await realish(lexical) }
     }
     const entries = new Map<string, string>()
@@ -419,7 +419,7 @@ export class Notes extends EventEmitter {
     const lexical = absPath(raw, this.home)
     const real = await realish(lexical)
     const { entries } = await this.#roots(profile)
-    const inFolders = (await browseRoots(profile, this.home)).some((r) => inside(real, r.real))
+    const inFolders = (await browseRoots(profile, this.home, this.#store.dir)).some((r) => inside(real, r.real))
     const ok =
       kind === 'note'
         ? (inFolders && NOTE_EXT.test(real)) || entries.has(real)

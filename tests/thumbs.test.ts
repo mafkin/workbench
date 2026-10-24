@@ -6,6 +6,7 @@ import zlib from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildServer } from '../server/main.ts'
 import { Thumbs } from '../server/thumbs.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 let dir: string
 let home: string
@@ -47,7 +48,8 @@ beforeEach(async () => {
   await fsp.writeFile(path.join(home, 'outside/secret.png'), 'no')
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), 'name: Work\nsections:\n  - title: Projects\n    items:\n      - { label: Art, type: folder, path: ~/art }\n')
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, thumbsDir })
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, thumbsDir })
 })
 
 afterEach(async () => {

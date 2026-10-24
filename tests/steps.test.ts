@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseDocument } from 'yaml'
 import { buildServer } from '../server/main.ts'
 import { categoryColor, chatName, entrySlot, folderRoots, NavItem, Profile, projectHost, stepEntry, stepPath, stepSlot, stepsOf } from '../shared/config-schema.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const SOURCE = `# Personal
 name: Personal
@@ -68,7 +69,7 @@ describe('steps in the schema', () => {
 
   it('lets the browser open folder steps, also outside the project', () => {
     const p = Profile.parse(parseDocument(SOURCE.replace('path: assets }', 'path: ~/Shared/assets }')).toJS())
-    expect(folderRoots(p).map((r) => r.path)).toEqual(['~', '~/Projects/tuohi', '~/Shared/assets', '~/wargame'])
+    expect(folderRoots(p).map((r) => r.path)).toEqual(['~/Projects/tuohi', '~/Shared/assets', '~/wargame'])
   })
 })
 
@@ -187,7 +188,8 @@ sections:
 `,
     )
     spawned = []
-    server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, spawn, watch: false })
+    await migrateFixture(path.join(dir, 'cfg'), home)
+    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, spawn, watch: false })
   })
 
   afterEach(async () => {
@@ -215,9 +217,9 @@ sections:
     expect(spawned).toEqual([{ command: 'blender', args: ['models/main.blend'], cwd: path.join(home, 'proj') }])
   })
 
-  it('an item without a folder runs its launchers in home, and has nothing to open in Files', async () => {
+  it('an item without a folder runs its launchers in its drawer’s folder, and has nothing to open in Files', async () => {
     expect((await open(0, 1)).statusCode).toBe(200)
-    expect(spawned).toEqual([{ command: 'make', args: [], cwd: home }])
+    expect(spawned).toEqual([{ command: 'make', args: [], cwd: path.join(home, 'wb/work/drawers/Work') }])
     expect((await open(undefined, 1)).statusCode).toBe(422)
   })
 

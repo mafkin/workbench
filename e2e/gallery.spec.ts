@@ -80,7 +80,7 @@ test.beforeEach(async ({ page }) => {
   fs.writeFileSync(path.join(ASSETS, 'game/icon.png'), png(16, 16, [90, 180, 90, 255]))
   fs.writeFileSync(path.join(ASSETS, 'game/main.tscn'), '[gd_scene format=3]\n')
   // Blender and Godot aren't installed here; rules of the profile's own run as written (into the fake spawn's log).
-  await writeWork(WORK.replace('notes: ~/notes\n', 'notes: ~/notes\nopenWith:\n  - { ext: [blend], command: blender }\n  - { ext: [tscn], command: godot, args: [--editor, --path, "{godot}"] }\n'))
+  await writeWork(WORK.replace('accent: "#7d93ab"\n', 'accent: "#7d93ab"\nopenWith:\n  - { ext: [blend], command: blender }\n  - { ext: [tscn], command: godot, args: [--editor, --path, "{godot}"] }\n'))
   await page.goto('/')
   await expect(entry(page, 'Alpha')).toBeVisible()
   await expect(page.locator('.dot.live')).toBeVisible()

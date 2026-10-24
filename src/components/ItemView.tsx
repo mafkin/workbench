@@ -101,7 +101,7 @@ export function ItemView({ addr, item, kicker, profile, profileId, home, actions
   const shown = tabSteps(steps)
   const own = item.steps !== undefined
   // Relative step paths, launchers and chats start in the item's folder, else in home.
-  const base = itemBase(profile, item)
+  const base = itemBase(profile, item, addr.drawer)
   const ref = projectRef(item)
   const [tabs, setTabs] = useLocal<Record<string, string>>('projectTab', {})
   const tabKey = `${profileId}|${ref}`
@@ -114,7 +114,7 @@ export function ItemView({ addr, item, kicker, profile, profileId, home, actions
   const showRow = shown.length >= 2 || shown.some(opensOutside)
   const blank = shown.length === 0
   // With a row of tabs, the item's own page is one of them.
-  const pageTab = !!item.page && !!profile.notes && showRow
+  const pageTab = !!item.page && showRow
   const onPage = pageTab && saved === PAGE_TAB
   // The saved step by its label, else the first.
   const active = onPage ? null : (inTab.find((s) => s.label === saved) ?? inTab[0] ?? null)
@@ -262,7 +262,7 @@ export function ItemView({ addr, item, kicker, profile, profileId, home, actions
     if (profile.workflow.length) {
       out.push({ label: 'Add profile steps', icon: <RotateCcw size={14} />, run: () => void actions.run([seeded({ op: 'addWorkflow', at: addr } as Op)], 'Added the profile steps') })
       // The template is a page: edit it like any other.
-      if (profile.notes) out.push({ label: 'Open Workflow.md', icon: <FileText size={14} />, run: () => notes.open(joinNotes(profile.notes!, 'Workflow.md')) })
+      out.push({ label: 'Open Workflow.md', icon: <FileText size={14} />, run: () => notes.open(joinNotes(profile.root, 'Workflow.md')) })
     }
     if (steps.length) {
       out.push({
@@ -434,13 +434,13 @@ export function ItemView({ addr, item, kicker, profile, profileId, home, actions
 
       {!showRow && !blank && <div className="step-gap" />}
       {onPage ? (
-        <NoteView key={item.page} path={joinNotes(profile.notes!, item.page!)} title={item.label} compact heading="Page" />
+        <NoteView key={item.page} path={joinNotes(profile.root, item.page!)} title={item.label} compact heading="Page" />
       ) : !active ? (
         blank ? (
-          item.page && profile.notes ? (
+          item.page ? (
             // A page without a Workflow: the page itself, with the ways to give it tabs beneath.
             <div className="item-page" onContextMenu={(e) => (e.preventDefault(), setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() }))}>
-              <NoteView key={item.page} path={joinNotes(profile.notes, item.page)} title={item.label} compact heading="Page" />
+              <NoteView key={item.page} path={joinNotes(profile.root, item.page)} title={item.label} compact heading="Page" />
               <div className="item-empty-actions">
                 <span className="hint">Add a tab:</span>
                 {quickAddButtons()}

@@ -10,7 +10,7 @@ const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
 
 const WORK = `name: Work
-notes: ~/notes
+notes: ~/wb/work
 sections:
   - title: Projects
     items:
@@ -46,7 +46,7 @@ const exists = (p: string) => fsp.stat(p).then(() => true, () => false)
 beforeEach(async () => {
   dir = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'wb-context-')))
   home = path.join(dir, 'home')
-  notes = path.join(home, 'notes')
+  notes = path.join(home, 'wb/work')
   await fsp.mkdir(path.join(home, 'alpha'), { recursive: true })
   await fsp.mkdir(path.join(home, 'elsewhere'), { recursive: true })
   await fsp.writeFile(path.join(home, 'alpha/report.pdf'), 'pdf bytes')
@@ -56,9 +56,9 @@ beforeEach(async () => {
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
   await fsp.writeFile(path.join(dir, 'cfg/profiles/personal.yaml'), PERSONAL)
   // Every wiki profile has a notes folder (its wiki), so Personal gets one of its own.
-  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
+  await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({
-    configDir: path.join(dir, 'cfg'),
+    dir: path.join(home, 'wb'),
     port: 7420,
     distDir: null,
     home,
@@ -76,12 +76,12 @@ afterEach(async () => {
 describe('context folders', { timeout: 15_000 }, () => {
   it('is not set up until asked; setup makes the folders and starter notes, never overwriting', async () => {
     let status = (await call<ContextStatus>('GET', '/api/context?profile=work')).body
-    expect(status).toMatchObject({ notes: '~/notes', ready: false, inbox: 0 })
+    expect(status).toMatchObject({ notes: '~/wb/work', ready: false, inbox: 0 })
     expect(status.folders.map((f) => [f.name, f.path, f.exists])).toEqual([
-      ['context', '~/notes/context', false],
-      ['knowledge', '~/notes/knowledge', false],
-      ['processes', '~/notes/processes', false],
-      ['inbox', '~/notes/inbox', false],
+      ['context', '~/wb/work/context', false],
+      ['knowledge', '~/wb/work/knowledge', false],
+      ['processes', '~/wb/work/processes', false],
+      ['inbox', '~/wb/work/inbox', false],
     ])
     expect(await server.context.chatContext('work')).toBeNull()
 
@@ -98,7 +98,7 @@ describe('context folders', { timeout: 15_000 }, () => {
     // The folders are entries of the nav: a Context heading at the top, once.
     const index = await fsp.readFile(path.join(notes, 'index.md'), 'utf8')
     expect(index).toContain('## Context\n\n- [Context](context/)\n- [Knowledge](knowledge/)\n- [Processes](processes/)\n- [Inbox](inbox/)\n')
-    expect(server.store.profile('work').profile?.sections[0]).toMatchObject({ title: 'Context', items: [{ type: 'folder', label: 'Context', path: '~/notes/context' }, {}, {}, { label: 'Inbox', path: '~/notes/inbox' }] })
+    expect(server.store.profile('work').profile?.sections[0]).toMatchObject({ title: 'Context', items: [{ type: 'folder', label: 'Context', path: '~/wb/work/context' }, {}, {}, { label: 'Inbox', path: '~/wb/work/inbox' }] })
     await call('POST', '/api/context/setup', { profile: 'work' })
     expect((await fsp.readFile(path.join(notes, 'index.md'), 'utf8')).split('## Context').length).toBe(2)
   })
@@ -159,9 +159,9 @@ describe('context folders', { timeout: 15_000 }, () => {
   it('Send to inbox copies a file from the profile’s folders under a free name', async () => {
     await call('POST', '/api/context/setup', { profile: 'work' })
     const first = await call('POST', '/api/context/inbox', { profile: 'work', path: '~/alpha/report.pdf' })
-    expect(first).toMatchObject({ status: 200, body: { path: '~/notes/inbox/report.pdf' } })
+    expect(first).toMatchObject({ status: 200, body: { path: '~/wb/work/inbox/report.pdf' } })
     const second = await call('POST', '/api/context/inbox', { profile: 'work', path: '~/alpha/report.pdf' })
-    expect(second.body.path).toBe('~/notes/inbox/report 2.pdf')
+    expect(second.body.path).toBe('~/wb/work/inbox/report 2.pdf')
     expect(await fsp.readFile(path.join(notes, 'inbox/report 2.pdf'), 'utf8')).toBe('pdf bytes')
     expect(await fsp.readFile(path.join(home, 'alpha/report.pdf'), 'utf8')).toBe('pdf bytes')
     // Home is a profile folder only when the profile says so; Work's folders are its notes and Alpha.

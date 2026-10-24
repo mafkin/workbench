@@ -16,7 +16,7 @@ const PICTURE = encodePng(120, 80, Buffer.from(Array.from({ length: 120 * 80 }, 
 /** Work with two drawers: its own headings, and Research. Written as pages: drawers/Work.md and drawers/Research.md. */
 const DRAWERS = `name: Work
 accent: "#7d93ab"
-notes: ~/notes
+notes: ~/workbench/work
 drawers:
   - name: Work
     sections:
@@ -25,11 +25,11 @@ drawers:
           - { label: Alpha, type: folder, path: ~/alpha }
           - { label: Beta, type: folder, path: ~/beta }
   - name: Research
-    folder: ~/notes/drawers/research
+    folder: ~/workbench/work/drawers/research
     sections:
       - title: Reading
         items:
-          - { label: Ideas, type: note, path: ~/notes/Ideas.md }
+          - { label: Ideas, type: note, path: ~/workbench/work/Ideas.md }
 `
 
 async function pickDrawer(page: Page, name: string) {
@@ -44,7 +44,7 @@ async function drawerMenu(page: Page, item: string) {
 }
 
 async function withDrawers(page: Page) {
-  await fsp.mkdir(path.join(HOME, 'notes/drawers/research'), { recursive: true })
+  await fsp.mkdir(path.join(HOME, 'workbench/work/drawers/research'), { recursive: true })
   await writeWork(DRAWERS)
   await page.reload()
   await expect(entry(page, 'Beta')).toBeVisible()
@@ -125,24 +125,26 @@ test('Show in drawers links the same page from another drawer; deleting it in on
   expect(await wikiText('pages/Alpha.md')).toContain('folder: ~/alpha')
 })
 
-test('Drawer settings: a logo, the shared folder and the drawers used; the Shared heading opens them', async ({ page }) => {
+test('Drawer settings: a logo, the drawer’s own folder by default, the drawers used; the Shared heading opens them', async ({ page }) => {
   await withDrawers(page)
   await drawerMenu(page, 'Drawer settings…')
   const dialog = page.getByRole('dialog', { name: 'Drawer settings' })
   await dialog.getByLabel('Logo picture').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: PICTURE })
   await expect(dialog.locator('.drawer-logo img')).toBeVisible()
-  await dialog.getByRole('button', { name: 'Use ~/notes/drawers/work' }).click()
-  await expect(dialog.locator('input[name=drawerFolder]')).toHaveValue('~/notes/drawers/work')
+  // The folder field is empty: the drawer works in drawers/Work inside the profile, made already.
+  await expect(dialog.locator('input[name=drawerFolder]')).toHaveValue('')
+  await expect(dialog.locator('input[name=drawerFolder]')).toHaveAttribute('placeholder', 'drawers/Work (its own)')
+  expect((await fsp.stat(path.join(HOME, 'workbench/work/drawers/Work'))).isDirectory()).toBe(true)
   await dialog.getByRole('checkbox', { name: /Research/ }).check()
   await page.screenshot({ path: 'test-results/drawers-settings.png' })
   await dialog.getByRole('button', { name: 'Save' }).click()
 
-  await expect.poll(() => wikiText('drawers/Work.md')).toMatch(/^---\nlogo: [0-9a-f]{12}\.png\nfolder: ~\/notes\/drawers\/work\nuses:\n  - Research\n---\n## Projects/)
-  expect((await fsp.stat(path.join(HOME, 'notes/drawers/work'))).isDirectory()).toBe(true)
+  await expect.poll(() => wikiText('drawers/Work.md')).toMatch(/^---\nlogo: [0-9a-f]{12}\.png\nuses:\n  - Research\n---\n## Projects/)
   await expect(picker(page).locator('.drawer-logo img')).toBeVisible()
 
+  // Shared lists the folders used from other drawers; the drawer's own is the rail's Files.
   const sharedHeading = nav(page).getByRole('group', { name: 'Shared' })
-  await expect(sharedHeading.locator('.item')).toHaveText(['Workthis drawer', 'Research'])
+  await expect(sharedHeading.locator('.item')).toHaveText(['Research'])
   await sharedHeading.locator('.item', { hasText: 'Research' }).click()
   await expect(page.getByRole('tree', { name: 'Files' })).toBeVisible()
   await expect(sharedHeading.locator('.item', { hasText: 'Research' })).toHaveClass(/selected/)

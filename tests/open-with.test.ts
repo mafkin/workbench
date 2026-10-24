@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Profile } from '../shared/config-schema.ts'
 import { buildServer } from '../server/main.ts'
 import { openProgram } from '../server/open-with.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 let dir: string
 let home: string
@@ -44,7 +45,8 @@ beforeEach(async () => {
     path.join(dir, 'cfg/profiles/work.yaml'),
     'name: Work\nopenWith:\n  - { ext: [kra, .ORA], command: krita }\nsections:\n  - title: Projects\n    items:\n      - { label: Art, type: folder, path: ~/art }\n',
   )
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, spawn: fakeSpawn as never, thumbsDir: path.join(dir, 'thumbs') })
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, spawn: fakeSpawn as never, thumbsDir: path.join(dir, 'thumbs') })
 })
 
 afterEach(async () => {

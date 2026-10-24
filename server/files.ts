@@ -450,7 +450,7 @@ export class Files extends EventEmitter {
     const profile = this.#profile(id)
     const lexical = absPath(raw, this.home)
     const real = await realish(lexical)
-    if (!(await browseRoots(profile, this.home)).some((r) => within(real, r.real))) {
+    if (!(await browseRoots(profile, this.home, this.#store.dir)).some((r) => within(real, r.real))) {
       throw new StoreError("Outside this profile's folders", 403)
     }
     return { real, display: displayPath(lexical, this.home) }
@@ -461,7 +461,7 @@ export class Files extends EventEmitter {
     const profile = this.#profile(id)
     const lexical = absPath(raw, this.home)
     const real = path.join(await realish(path.dirname(lexical)), path.basename(lexical))
-    if (!(await browseRoots(profile, this.home)).some((r) => inside(real, r.real))) throw new StoreError("Outside this profile's folders", 403)
+    if (!(await browseRoots(profile, this.home, this.#store.dir)).some((r) => inside(real, r.real))) throw new StoreError("Outside this profile's folders", 403)
     return { real, display: displayPath(lexical, this.home) }
   }
 
@@ -475,7 +475,7 @@ export class Files extends EventEmitter {
     const lexical = absPath(raw, this.home)
     const real = path.join(await realish(path.dirname(lexical)), path.basename(lexical))
     const display = displayPath(lexical, this.home)
-    const roots = await browseRoots(profile, this.home)
+    const roots = await browseRoots(profile, this.home, this.#store.dir)
     if (!roots.some((r) => inside(real, r.real))) throw new StoreError("Outside this profile's folders", 403)
     if (roots.some((r) => within(r.real, real))) throw new StoreError(`${display} is one of this profile's folders or holds one`, 403)
     if (!(await exists(real))) throw new StoreError('Not found', 404)

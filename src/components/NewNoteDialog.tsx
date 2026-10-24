@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { joinNotes, noteFileName } from '../../shared/config-schema.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
-import { NotesFolderHint } from './NotesFolderHint.tsx'
 
 interface Props {
   context: string
@@ -49,9 +48,6 @@ export function NewNoteDialog({ context, onClose, onCreate }: Props) {
           <small>{context}</small>
         </header>
         <div className="body">
-          {!root ? (
-            <NotesFolderHint compact />
-          ) : (
             <label className="field">
               <span>Title</span>
               <input
@@ -66,7 +62,6 @@ export function NewNoteDialog({ context, onClose, onCreate }: Props) {
               />
               {error ? <span className="err">{error}</span> : <span className="hint mono">{path ?? `${root}/…`}</span>}
             </label>
-          )}
         </div>
         <footer>
           <button type="button" className="btn ghost" onClick={onClose}>

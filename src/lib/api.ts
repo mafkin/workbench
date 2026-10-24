@@ -59,9 +59,10 @@ export const undo = (profile: string, rev: string) =>
   api<{ rev: string }>(`/api/profiles/${encodeURIComponent(profile)}/undo`, { body: { rev } })
 export const setActive = (profile: string) => api('/api/active', { body: { profile } })
 /** A new profile: blank, or a copy of another (its headings and workflow) under a new name. */
-export const createProfile = (id: string, name: string, copyFrom?: string, wiki?: string) => api<{ id: string }>('/api/profiles', { body: { id, name, copyFrom, wiki } })
+export const createProfile = (id: string, name: string, copyFrom?: string) => api<{ id: string }>('/api/profiles', { body: { id, name, copyFrom } })
+/** Setup (part 13): the folder Workbench works in, with its first profile's name. */
+export const setup = (dir: string, name: string) => api<AppState>('/api/setup', { body: { dir, name } })
 /** Profiles still in YAML become wikis. */
-export const migrate = () => api<{ moved: string[] }>('/api/migrate', { body: {} })
 /** The profile's file goes to the Trash. */
 export const removeProfile = (id: string) => api(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' })
 /** Open an entry, or with `step`, start a project's launcher step. */
@@ -171,7 +172,6 @@ export const switchMcp = (profile: string, folder: string | null, keys: string[]
   api<{ setup: ClaudeSetup; rev?: string }>('/api/claude/mcp', { body: { profile, keys, on, drawer, ...(folder ? { path: folder } : { rev }) } })
 
 /** Make <notes or home>/drawers/<name> for a drawer; returns it for `folder:`. */
-export const drawerFolder = (profile: string, name: string) => api<{ folder: string }>('/api/drawers/folder', { body: { profile, name } })
 
 // Background pictures: copies in the config folder, chosen per profile.
 export const listBackgrounds = () => api<string[]>('/api/backgrounds')

@@ -5,10 +5,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const WORK = `name: Work
-home: ~/work
-sections: []
+sections:
+  - title: Work
+    items:
+      - { label: Work, type: folder, path: ~/work }
 `
 
 let dir: string
@@ -62,7 +65,8 @@ beforeEach(async () => {
   await write('elsewhere/x.txt', 'x')
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), spawn: fakeSpawn as any })
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), spawn: fakeSpawn as any })
 })
 
 afterEach(async () => {

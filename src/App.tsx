@@ -44,6 +44,7 @@ import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
 import { Rail } from './components/Rail.tsx'
+import { SetupScreen } from './components/SetupScreen.tsx'
 import { ChatsDock, type DockContext } from './components/ChatsDock.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
 import type { ItemActions } from './components/ItemView.tsx'
@@ -299,17 +300,6 @@ export function App() {
   }, [search.open, setSelected, setSelectedIds])
 
   /** Open a note or folder by path; one that is also a nav entry opens as that entry. */
-  /** Profiles still in YAML become wikis (the banner's button). */
-  const migrate = useCallback(async () => {
-    try {
-      const { moved } = await api.migrate()
-      toasts.push({ message: moved.length ? `Moved ${moved.join(', ')} to pages; the YAML is kept as .bak` : 'Nothing to move' })
-      await refresh()
-    } catch (err) {
-      fail(err)
-    }
-  }, [refresh, fail, toasts.push])
-
   const openPath = useCallback(
     (type: 'note' | 'folder', path: string) => {
       const p = activeRef.current?.profile
@@ -326,7 +316,7 @@ export function App() {
   const openContext = useCallback(
     (name: ContextFolder) => {
       const p = activeRef.current?.profile
-      const want = p?.notes ? normalizePath(expandHome(`${p.notes}/${name}`, homeRef.current)) : null
+      const want = p ? normalizePath(expandHome(`${p.root}/${name}`, homeRef.current)) : null
       const addr = p && want ? findEntry(p, 'folder', (item) => 'path' in item && !!item.path && normalizePath(expandHome(item.path, homeRef.current)) === want) : null
       navigate(addr ? itemKey(addr) : CONTEXT_KEY + name)
     },
@@ -392,11 +382,8 @@ export function App() {
   const createLinkedNote = useCallback(
     async (name: string) => {
       const a = activeRef.current
-      const root = a?.profile?.notes
-      if (!a || !root) {
-        toasts.push({ message: 'Set a notes folder for this profile first', kind: 'error' })
-        return
-      }
+      const root = a?.profile?.root
+      if (!a || !root) return
       const parts = name.split('/').map((s) => s.trim()).filter((s) => s && s !== '.' && s !== '..')
       const file = noteFileName(parts.pop() ?? '')
       if (!file) return
@@ -418,11 +405,6 @@ export function App() {
   const missingNote = useCallback(
     (name: string) => toasts.push({ message: `No note named "${name}" yet`, action: { label: 'Create', run: () => void createLinkedNote(name) } }),
     [toasts.push, createLinkedNote],
-  )
-
-  const setRoot = useCallback(
-    (value: string) => void run([{ op: 'setProfileField', key: 'notes', value }], `Notes folder set to ${value}`),
-    [run],
   )
 
   const openExternally = useCallback(
@@ -575,7 +557,7 @@ export function App() {
     setContextStatus(null)
     refreshContext()
     return onContextEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshContext())
-  }, [active?.id, active?.profile?.notes, refreshContext])
+  }, [active?.id, active?.profile?.root, refreshContext])
 
   /** Put a chat the service just returned into the list, so its tab shows before the next event. */
   const upsertChat = useCallback((chat: Chat) => {
@@ -675,7 +657,7 @@ export function App() {
       history: (path) => api.chatHistory(active.id, path).catch(() => []),
       open: openChat,
       agents: active.profile?.agents ?? {},
-      editAgents: (folder) => setAgentsFor(folder ?? active.profile?.home ?? '~'),
+      editAgents: (folder) => setAgentsFor(folder ?? active.profile?.root ?? '~'),
     }
   }, [active, chatList, fail, upsertChat, openChat, closeChat])
   const chatsRef = useRef(chatsApi)
@@ -937,7 +919,7 @@ export function App() {
   const dockContext = useMemo<DockContext>(() => {
     const p = active?.profile
     const d = p ? drawersOf(p)[drawer] : undefined
-    const drawerBase = d?.folder ?? p?.home ?? '~'
+    const drawerBase = d?.folder ?? p?.root ?? '~'
     if (p && selection?.kind === 'entry' && selection.item.type === 'folder') {
       const item = selection.item
       return { kind: 'item', addr: selection.origin, label: item.label, base: item.path ?? drawerBase, agent: item.agent }
@@ -989,12 +971,9 @@ export function App() {
 
   const notesApi = useMemo<NotesApi | null>(() => {
     if (!active) return null
-    const home = active.profile?.home
     return {
       profile: active.id,
-      root: active.profile?.notes,
-      suggestedRoot: `${home && home !== '~' ? home.replace(/\/+$/, '') : '~'}/notes`,
-      setRoot,
+      root: active.profile?.root ?? '~',
       list: notesList,
       projects,
       open: openNote,
@@ -1007,7 +986,7 @@ export function App() {
       fresh,
       clearFresh: () => setFresh(null),
     }
-  }, [active, setRoot, notesList, projects, openNote, openFolder, missingNote, createLinkedNote, notesChanged, toasts.push, fresh])
+  }, [active, notesList, projects, openNote, openFolder, missingNote, createLinkedNote, notesChanged, toasts.push, fresh])
 
   const contextApi = useMemo<ContextApi>(
     () => ({
@@ -1015,8 +994,6 @@ export function App() {
       setup: async () => {
         const a = activeRef.current
         if (!a?.profile) return
-        // Context lives in the notes folder; a profile without one gets the usual one first.
-        if (!a.profile.notes && notesApi && !(await run([{ op: 'setProfileField', key: 'notes', value: notesApi.suggestedRoot }], `Notes folder set to ${notesApi.suggestedRoot}`))) return
         try {
           setContextStatus(await api.setupContext(a.id))
           await refresh()
@@ -1107,7 +1084,7 @@ export function App() {
     }
     items.push(
       { id: 'action:look', kind: 'action', label: 'Theme and background…', detail: p.name, run: () => setLookOpen(true) },
-      { id: 'action:agents', kind: 'action', label: 'Agent profiles…', detail: p.name, run: () => setAgentsFor(p.home ?? '~') },
+      { id: 'action:agents', kind: 'action', label: 'Agent profiles…', detail: p.name, run: () => setAgentsFor(p.root) },
       { id: 'action:profile', kind: 'action', label: 'Profile settings…', detail: p.name, run: () => setProfileOpen(true) },
       { id: 'action:edit', kind: 'action', label: 'Edit navigation', detail: 'Drag, add, rename, delete', run: () => setEditing(true) },
     )
@@ -1116,6 +1093,9 @@ export function App() {
     }
     return items
   }
+
+  // No Workbench folder yet (part 13): the setup screen, until the service has one.
+  if (state?.setup) return <SetupScreen suggested={state.setup.suggested} onDone={setState} />
 
   if (!state || !active || !notesApi || !chatsApi) {
     return (
@@ -1165,7 +1145,6 @@ export function App() {
                 drawer={drawer}
                 onDrawer={pickDrawer}
                 onNewDrawer={() => setDrawerDialog({ index: null })}
-                onMigrate={() => void migrate()}
                 onDrawerSettings={() => setDrawerDialog({ index: drawer })}
                 filesSelected={selection?.kind === 'files' ? selection.path : null}
                 openFiles={(path) => navigate(FILES_KEY + path)}

@@ -41,7 +41,7 @@ test.afterAll(closeChats)
 
 test('Set up context from the nav; its notes open in tabs', async ({ page }) => {
   await page.screenshot({ path: 'test-results/context-setup-row.png' })
-  await context(page).getByRole('button', { name: 'Set up context in ~/notes' }).click()
+  await context(page).getByRole('button', { name: 'Set up context in ~/workbench/work' }).click()
   await expect(page.locator('.page-title')).toHaveText('Context')
   await expect(row(page, 'Context')).toHaveClass(/selected/)
   expect(await fsp.readFile(path.join(NOTES, 'index.md'), 'utf8')).toContain('## Context\n\n- [Context](context/)\n- [Knowledge](knowledge/)\n- [Processes](processes/)\n- [Inbox](inbox/)\n')
@@ -61,7 +61,7 @@ test('Set up context from the nav; its notes open in tabs', async ({ page }) => 
 
 test('each profile’s context lives in its own wiki', async ({ page }) => {
   await pickProfile(page, 'Personal')
-  await context(page).getByRole('button', { name: 'Set up context in ~/pnotes' }).click()
+  await context(page).getByRole('button', { name: 'Set up context in ~/workbench/personal' }).click()
   await expect(row(page, 'Inbox')).toBeVisible()
   expect(await fsp.readFile(path.join(PNOTES, 'context/README.md'), 'utf8')).toContain('context/preferences.md')
 })

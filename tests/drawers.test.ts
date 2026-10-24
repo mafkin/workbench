@@ -8,7 +8,7 @@ const TWO = Profile.parse({
   name: 'Work',
   drawers: [
     { name: 'Work', sections: [{ title: 'Projects', items: [{ label: 'Tower', type: 'folder', path: '~/dev/tower' }] }] },
-    { name: 'Research', folder: '~/notes/drawers/research', sections: [{ title: 'Reading', items: [{ label: 'Papers', type: 'note', path: '~/p.md' }] }] },
+    { name: 'Research', folder: '~/wb/work/drawers/research', sections: [{ title: 'Reading', items: [{ label: 'Papers', type: 'note', path: '~/p.md' }] }] },
   ],
 })
 
@@ -40,6 +40,6 @@ describe('drawers in the schema', () => {
   })
 
   it("a drawer's shared folder is one of the profile's folders", () => {
-    expect(folderRoots(TWO)).toContainEqual({ label: 'Research (shared folder)', path: '~/notes/drawers/research' })
+    expect(folderRoots(TWO)).toContainEqual({ label: 'Research (drawer)', path: '~/wb/work/drawers/research' })
   })
 })

@@ -15,9 +15,11 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.dot.live')).toBeVisible()
 })
 
-test('the rail: Settings gives the drawer a folder, which brings Files and Git; the tools act on it', async ({ page }) => {
-  // Without a folder, only the tools that need none.
-  await expect(rail(page).getByRole('button')).toHaveText(['Skills', 'MCP', 'Settings'])
+test('the rail: every drawer has Files and Git on its own folder; Settings points them at another folder', async ({ page }) => {
+  // The drawer's own folder, drawers/Work in the profile, is there from the start.
+  await expect(rail(page).getByRole('button')).toHaveText(['Files', 'Git', 'Skills', 'MCP', 'Settings'])
+  await tool(page, 'Files').click()
+  await expect(page.getByRole('navigation', { name: 'Path' })).toContainText('Work')
   await tool(page, 'Drawer settings').click()
   await expect(title(page)).toHaveText('Drawer settings')
   await expect(tool(page, 'Drawer settings')).toHaveAttribute('aria-pressed', 'true')

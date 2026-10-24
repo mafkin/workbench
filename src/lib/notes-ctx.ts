@@ -4,12 +4,8 @@ import type { NoteSummary } from '../../shared/config-schema.ts'
 /** What note views need from the app; provided by App for the active profile. */
 export interface NotesApi {
   profile: string
-  /** The profile's notes folder as written in its config, if set. */
-  root?: string
-  /** Offered when no notes folder is set: `<home>/notes`. */
-  suggestedRoot: string
-  /** Write `notes:` into the profile file. */
-  setRoot: (value: string) => void
+  /** The profile's folder (part 13): where new notes, daily notes, search and wiki links live. */
+  root: string
   /** Every note the profile can reach, newest first; resolves wiki links. */
   list: NoteSummary[]
   /** The profile's projects, for `[[Project/path]]` links to files in them. */

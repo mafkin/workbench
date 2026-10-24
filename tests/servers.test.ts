@@ -5,6 +5,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseNetTcp, Procfs } from '../server/procfs.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const NET_TCP = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 41234 1 0000000000000000 100 0 0 10 0
@@ -103,7 +104,8 @@ sections:
       - { label: Beta, type: folder, path: ~/beta }
 `,
   )
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state') })
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state') })
 })
 
 afterEach(async () => {
@@ -133,7 +135,8 @@ describe('servers running in projects', { timeout: 15_000 }, () => {
     const web = await start(SERVER, path.join(home, 'alpha'))
     const text = await fsp.readFile(path.join(dir, 'cfg/profiles/work.yaml'), 'utf8')
     await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), text.replace('{ name: api, url: "http://127.0.0.1:1/health" }', `{ name: web, port: ${web.port} }`))
-    await server.store.init({ watch: false, seed: false })
+    await migrateFixture(path.join(dir, 'cfg'), home)
+    await server.store.init({ watch: false })
     const { body } = await call('GET', '/api/servers?profile=work')
     const alpha = body.projects.find((p: { label: string }) => p.label === 'Alpha')
     expect(alpha.rows).toEqual([expect.objectContaining({ name: 'web', declared: true, port: web.port, pid: web.pid, health: expect.objectContaining({ state: 'up' }) })])
@@ -144,7 +147,8 @@ describe('servers running in projects', { timeout: 15_000 }, () => {
     expect(before.body.projects.map((p: { label: string }) => p.label)).toEqual(['Alpha', 'Beta'])
     const text = await fsp.readFile(path.join(dir, 'cfg/profiles/work.yaml'), 'utf8')
     await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), text.replace('label: Beta', 'label: Gamma'))
-    await server.store.init({ watch: false, seed: false })
+    await migrateFixture(path.join(dir, 'cfg'), home)
+    await server.store.init({ watch: false })
     const after = await call('GET', '/api/servers?profile=work')
     expect(after.body.projects.map((p: { label: string }) => p.label)).toEqual(['Alpha', 'Gamma'])
   })

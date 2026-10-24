@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, DIR, resetFixture, SPAWN_LOG, WORK, WORK_FILE, writeWork } from './fixture.ts'
+import { ALPHA, resetFixture, SPAWN_LOG, WB, WORK, WORK_FILE, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -68,7 +68,8 @@ test('Use as background in the file browser copies the picture and shows it', as
   await page.getByRole('menuitem', { name: 'Use as background' }).click()
   await expect.poll(workYaml).toContain('background: photo.png\n')
   await expect.poll(() => rootVar(page, '--backdrop')).toContain('url("blob:')
-  expect(fs.readFileSync(path.join(DIR, 'backgrounds/photo.png'))).toEqual(PNG)
+  // Pictures the app copies live in the Workbench folder (part 13).
+  expect(fs.readFileSync(path.join(WB, 'backgrounds/photo.png'))).toEqual(PNG)
 })
 
 test('a picture added by path can be picked and deleted; then the theme’s own shows again', async ({ page }) => {

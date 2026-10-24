@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 let dir: string
 let home: string
@@ -19,8 +20,10 @@ const sh = (cwd: string, ...args: string[]) => {
   return execFileSync('git', args, { cwd, env, encoding: 'utf8' })
 }
 
-const start = (fetchEveryMs = 0) =>
-  buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: fetchEveryMs })
+const start = async (fetchEveryMs = 0) => {
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  return buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: fetchEveryMs })
+}
 
 const status = async () => {
   const res = await server.app.inject({ method: 'GET', url: '/api/git/status?profile=work&path=~/alpha', headers })

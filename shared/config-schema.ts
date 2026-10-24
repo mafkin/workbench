@@ -259,9 +259,13 @@ export const Profile = z.object({
   theme: z.string().trim().min(1).optional(),
   /** `theme` (the theme's own, the default), `none`, or a picture's name in the backgrounds folder. */
   background: z.string().trim().min(1).optional(),
-  home: z.string().optional(),
-  /** Folder for new notes, daily notes, search and wiki links. */
-  notes: z.string().trim().regex(/^(~|\/)/, 'Notes folder must start with ~ or /').optional(),
+  /**
+   * The profile's folder (part 13): `<Workbench>/<id>`, absolute, set by the store
+   * when it reads the pages, never written to a page. It is the notes folder, the
+   * wiki root and where context/, templates/ and skills/ live. A profile parsed
+   * without one (tests) is rooted at home.
+   */
+  root: z.string().default('~'),
   /** The steps every project starts with. */
   workflow: list(StepItem),
   /** Colours for project categories; others get one from a palette. */
@@ -288,12 +292,13 @@ export const Profile = z.object({
   })
 })
 
-/** A profile's id is its file name: `profiles/<id>.yaml`. */
+/** A profile's id is its folder name inside the Workbench folder. */
 export const PROFILE_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
 export const PROFILE_ID_RULE = 'A profile id is lower-case letters, digits, - and _ (up to 32), starting with a letter or digit'
 /** Accents offered for new profiles and in Profile settings. */
 export const ACCENTS = ['#7d93ab', '#8fa58a', '#b39b72', '#a58aa5', '#7fa6a1', '#b38a7d']
 
+/** `settings.yaml` in the Workbench folder: the active profile and the ids in switcher order (each a subfolder). */
 export const Settings = z.object({
   activeProfile: z.string().optional(),
   profiles: list(z.string()),
@@ -335,7 +340,7 @@ export const TYPE_FIELDS: Record<AnyType, string[]> = {
 }
 
 /** Profile-level keys the app can set, in the order a new key is placed. */
-export const PROFILE_FIELDS = ['name', 'accent', 'theme', 'background', 'home', 'notes'] as const
+export const PROFILE_FIELDS = ['name', 'accent', 'theme', 'background'] as const
 
 /** The look of a profile: base colours and a background of its own (see src/lib/themes.ts). */
 export const THEMES = ['slate', 'fjord', 'moss', 'ember', 'dusk', 'graphite'] as const
@@ -365,7 +370,7 @@ export const Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('updateItem'), at: ItemAddr, item: itemInput }),
   z.object({ op: z.literal('deleteItem'), at: ItemAddr }),
   z.object({ op: z.literal('moveItem'), from: ItemAddr, to: ListAddr, index }),
-  // An empty value removes an optional key (home, notes).
+  // An empty value removes an optional key (theme, background).
   z.object({ op: z.literal('setProfileField'), key: z.enum(PROFILE_FIELDS), value: z.string() }),
   /** A category's colour in `categories:`; null goes back to the palette's pick. */
   z.object({ op: z.literal('setCategory'), name: z.string().trim().min(1), color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A category colour must be #rrggbb').nullable() }),
@@ -415,22 +420,20 @@ export interface ConfigError {
 }
 
 /** The file a profile is read from, for messages: its wiki's index.md, or the YAML file while it is still one. */
-export function profileFile(p: { id: string; legacy?: boolean; wiki?: string }): string {
-  return p.legacy || !p.wiki ? `${p.id}.yaml` : `${p.wiki.replace(/\/+$/, '')}/index.md`
+export function profileFile(p: { id: string; wiki?: string }): string {
+  return `${(p.wiki ?? p.id).replace(/\/+$/, '')}/index.md`
 }
 
 export interface ProfileState {
   id: string
-  /** The profile's main file: `index.md` of its wiki, or the YAML file of a profile not moved to pages yet. */
+  /** The profile's main file: `index.md` of its folder. */
   file: string
   rev: string
   /** Last valid content; kept while the file on disk is broken. */
   profile: Profile | null
   error: ConfigError | null
-  /** The wiki folder as written in settings (`~/notes`). */
+  /** The profile's folder, `~/…` when under home (`<Workbench>/<id>`). */
   wiki?: string
-  /** Still a YAML profile: read-only until it is moved to pages. */
-  legacy?: boolean
   /** Lines and pages the wiki could not use as written; the profile still works. */
   problems?: string[]
 }
@@ -440,8 +443,10 @@ export interface AppState {
   profiles: ProfileState[]
   /** The user's home directory, for comparing `~` paths. */
   home: string
-  /** Some profile is still a YAML file; the app offers to move it to pages. */
-  legacy?: boolean
+  /** The service has no Workbench folder yet (part 13): the app shows the setup screen. */
+  setup?: { suggested: string }
+  /** The Workbench folder, `~/…` when under home. */
+  dir?: string
 }
 
 /** Expand a leading `~` and `=~/` (as in `--dir=~/x`) to the home directory. */
@@ -460,8 +465,20 @@ export function itemKey(a: ItemAddr): string {
 /** The profile's drawers; without `drawers:`, one named after the profile holding its `sections:`. */
 export function drawersOf(profile: Profile): Drawer[] {
   if (profile.drawers?.length) return profile.drawers
-  return [{ name: profile.name, sections: profile.sections, ...(profile.mcpOff ? { mcpOff: profile.mcpOff } : {}), ...(profile.skills ? { skills: profile.skills } : {}) }]
+  const d: Drawer = { name: profile.name, sections: profile.sections, ...(profile.mcpOff ? { mcpOff: profile.mcpOff } : {}), ...(profile.skills ? { skills: profile.skills } : {}) }
+  // A profile parsed without a folder (tests) has no drawer folder either.
+  return [profile.root === '~' ? d : { ...d, folder: defaultDrawerFolder(profile, d) }]
 }
+
+/**
+ * A drawer's own folder when its page names none (part 13): `drawers/<Name>/`
+ * in the profile's folder, made by the store. `folder:` on the page points at
+ * another folder (a repository elsewhere) instead.
+ */
+export const defaultDrawerFolder = (profile: Pick<Profile, 'root'>, drawer: Pick<Drawer, 'name'>) => `${profile.root.replace(/\/+$/, '')}/drawers/${drawer.name}`
+
+/** Whether a drawer's folder is its own default one (so the page has no `folder:`). */
+export const ownDrawerFolder = (profile: Pick<Profile, 'root'>, drawer: Drawer) => !drawer.folder || drawer.folder === defaultDrawerFolder(profile, drawer)
 
 /** A drawer's name as a folder name: "Game dev" → game-dev. */
 export const drawerSlug = (name: string) =>
@@ -650,8 +667,8 @@ export const itemsWithFolder = (profile: Profile) =>
 /** What keys an item's chats, tabs and Recent work: its folder, else its `id`, else its label. */
 export const projectRef = (item: ItemLike) => item.path ?? (item.id ? `id:${item.id}` : `label:${item.label}`)
 
-/** The folder an item's relative step paths, launchers and chats start from: its own, else the profile's home. */
-export const itemBase = (profile: Pick<Profile, 'home'>, item: { path?: string }) => item.path ?? profile.home ?? '~'
+/** The folder an item's relative step paths, launchers and chats start from: its own, else its drawer's, else the profile's folder. */
+export const itemBase = (profile: Profile, item: { path?: string }, drawer = 0) => item.path ?? drawersOf(profile)[drawer]?.folder ?? profile.root
 
 /** Collapse `.` and `..` in a `~/…` or absolute path; a `..` that cannot be collapsed is kept. */
 export function normalizePath(p: string): string {
@@ -706,33 +723,34 @@ export function categoriesOf(profile: Profile): string[] {
 // File browser (part 3)
 
 /**
- * Folders the file browser may open, as written in the config: home, the notes
- * folder, every folder entry and every drawer's shared folder. The service resolves and enforces them; the UI
- * shows them as chips.
+ * Folders the file browser may open, as written in the config: the profile's
+ * folder, every folder entry and every drawer's folder. The service resolves
+ * and enforces them (plus the Workbench folder itself); the UI shows them as chips.
  */
 export function folderRoots(profile: Profile): { label: string; path: string }[] {
   const out: { label: string; path: string }[] = []
-  if (profile.home) out.push({ label: 'Home', path: profile.home })
-  if (profile.notes) out.push({ label: 'Notes', path: profile.notes })
-  const project = (item: NavItem) => {
+  if (profile.root !== '~') out.push({ label: profile.name, path: profile.root })
+  const project = (item: NavItem, drawer: number) => {
     if (item.type !== 'folder') return
     if (item.path) out.push({ label: item.label, path: item.path })
     // A step can sit outside its project, e.g. a shared assets folder; a report
     // or a file needs its own folder (a report loads the files next to it).
-    const base = itemBase(profile, item)
+    const base = itemBase(profile, item, drawer)
     for (const step of stepsOf(profile, item)) {
       const label = `${item.label} › ${step.label}`
       if (step.type === 'folder') out.push({ label, path: stepPath(base, step.path) })
       if (step.type === 'report' || step.type === 'file') out.push({ label, path: stepPath(base, parentPath(step.path)) })
     }
   }
-  for (const section of allSections(profile)) {
-    for (const item of section.items) {
-      project(item)
-      if (item.type === 'group') item.items.forEach(project)
+  drawersOf(profile).forEach((d, di) => {
+    for (const section of d.sections) {
+      for (const item of section.items) {
+        project(item, di)
+        if (item.type === 'group') item.items.forEach((c) => project(c, di))
+      }
     }
-  }
-  for (const d of profile.drawers ?? []) if (d.folder) out.push({ label: `${d.name} (shared folder)`, path: d.folder })
+  })
+  for (const d of drawersOf(profile)) if (d.folder) out.push({ label: `${d.name} (drawer)`, path: d.folder })
   return out
 }
 

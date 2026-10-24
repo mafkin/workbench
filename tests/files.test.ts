@@ -19,11 +19,10 @@ let gioFails: string | null
 let clock: number
 
 const WORK = `name: Work
-home: ~/work
-notes: ~/notes
 sections:
   - title: Projects
     items:
+      - { label: Work, type: folder, path: ~/work }
       - { label: Proj, type: folder, path: ~/proj }
       - label: Group
         type: group
@@ -32,8 +31,10 @@ sections:
 `
 
 const PERSONAL = `name: Personal
-home: ~/personal
-sections: []
+sections:
+  - title: Mine
+    items:
+      - { label: Personal, type: folder, path: ~/personal }
 `
 
 /** Spawn that records calls; `gio trash` succeeds (doing nothing) unless `gioFails` is set. */
@@ -98,8 +99,8 @@ beforeEach(async () => {
   spawned = []
   gioFails = null
   clock = 1_000_000
-  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
-  store = new Wiki(path.join(dir, 'cfg'), home)
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  store = new Wiki(path.join(home, 'wb'), home)
   await store.init({ watch: false })
   files = new Files(store, home, { spawn: fakeSpawn as any, now: () => clock })
 })
@@ -112,7 +113,7 @@ afterEach(async () => {
 
 describe('which folders the browser may open', () => {
   it('opens home, the notes folder and every folder entry, also inside groups', async () => {
-    for (const p of ['~/work', '~/notes', '~/proj', '~/proj/src', '~/deep/folder']) {
+    for (const p of ['~/work', '~/wb/work', '~/proj', '~/proj/src', '~/deep/folder']) {
       expect(await status(files.list('work', p))).toBe(200)
     }
   })
@@ -208,7 +209,7 @@ describe('operations', () => {
 
   it('never renames, moves or trashes a root or a folder holding one', async () => {
     expect(await status(files.op('work', { op: 'rename', path: '~/proj', name: 'x' }))).toBe(403)
-    expect(await status(files.op('work', { op: 'trash', paths: ['~/notes'] }))).toBe(403)
+    expect(await status(files.op('work', { op: 'trash', paths: ['~/wb/work'] }))).toBe(403)
     expect(await status(files.op('work', { op: 'move', paths: ['~/proj'], to: '~/work' }))).toBe(403)
     expect(spawned).toEqual([])
   })
@@ -346,7 +347,7 @@ describe('HTTP routes', () => {
   const q = (p: string) => encodeURIComponent(p)
 
   beforeEach(async () => {
-    server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, spawn: fakeSpawn as any })
+    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, spawn: fakeSpawn as any })
   })
 
   afterEach(() => server.app.close())

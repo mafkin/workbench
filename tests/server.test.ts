@@ -128,10 +128,10 @@ sections:
       - { label: Today, type: daily }
 `,
     )
-    await migrateFixture(path.join(dir, 'cfg'), path.join(dir, 'home'), { defaultWiki: (id) => path.join(dir, 'wiki', id) })
+    await migrateFixture(path.join(dir, 'cfg'), path.join(dir, 'home'))
     spawn = fakeSpawn()
     server = await buildServer({
-      configDir: path.join(dir, 'cfg'),
+      dir: path.join(dir, 'home/wb'),
       port: 7420,
       distDir: null,
       home: path.join(dir, 'home'),

@@ -4,7 +4,6 @@ import { fillTemplate, isoDate, joinNotes, type NavItem } from '../../shared/con
 import * as api from '../lib/api.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { EntryIcon } from './EntryIcon.tsx'
-import { NotesFolderHint } from './NotesFolderHint.tsx'
 import { NoteView } from './NoteView.tsx'
 
 type DailyItem = Extract<NavItem, { type: 'daily' }>
@@ -40,19 +39,6 @@ export function DailyView({ item, kicker }: { item: DailyItem; kicker: string })
     }, midnight.getTime() - now.getTime() + 1000)
     return () => clearTimeout(timer)
   }, [today])
-
-  if (!notes.root) {
-    return (
-      <div className="page">
-        <div className="page-kicker">{kicker} · Daily</div>
-        <h1 className="page-title">
-          <EntryIcon type="daily" icon={item.icon} size={22} />
-          {item.label}
-        </h1>
-        <NotesFolderHint />
-      </div>
-    )
-  }
 
   const root = notes.root
   const path = `${inNotes(root, item.folder?.trim() || 'daily').replace(/\/+$/, '')}/${date}.md`

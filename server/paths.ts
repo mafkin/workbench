@@ -50,10 +50,14 @@ export async function realish(p: string): Promise<string> {
   }
 }
 
-/** The profile's folders (home, notes folder, folder entries), resolved; one that cannot be resolved is left out. */
-export async function browseRoots(profile: Profile, home: string): Promise<Root[]> {
+/**
+ * The profile's folders (the Workbench folder when given, the profile's own,
+ * folder entries, drawers' folders), resolved; one that cannot be resolved is left out.
+ */
+export async function browseRoots(profile: Profile, home: string, workbench?: string | null): Promise<Root[]> {
   const out = new Map<string, Root>()
-  for (const { path: p } of folderRoots(profile)) {
+  const all = [...(workbench ? [{ label: 'Workbench', path: workbench }] : []), ...folderRoots(profile)]
+  for (const { path: p } of all) {
     try {
       const lexical = absPath(p, home)
       const real = await realish(lexical)

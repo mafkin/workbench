@@ -3,7 +3,6 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { NotesOverview, SearchHit } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
-import { NotesFolderHint } from './NotesFolderHint.tsx'
 
 /** Text with the given [start, end) ranges wrapped in <mark>. */
 export function marked(text: string, ranges: [number, number][]): ReactNode[] {
@@ -80,16 +79,9 @@ export function SearchView({ query, onQuery, onResults }: { query: string; onQue
       </h1>
       <p className="page-sub">
         {error ?? (hits ? `${hits.length} ${hits.length === 1 ? 'note' : 'notes'}` : 'Searching…')}
-        {notes.root ? (
-          <>
-            {' in '}
-            <span className="mono">{notes.root}</span> and note entries
-          </>
-        ) : (
-          ' among note entries'
-        )}
+        {' in '}
+        <span className="mono">{notes.root}</span> and note entries
       </p>
-      {!notes.root && <NotesFolderHint compact />}
       {!q && overview && overview.tags.length > 0 && (
         <section className="search-overview" aria-label="Tags">
           <div className="section-label">Tags</div>

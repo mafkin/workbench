@@ -12,6 +12,8 @@ bin/workbench              # starts the service if needed, then opens the window
 
 `bin/workbench` builds the UI on first use and logs to `~/.local/state/workbench/server.log`. `npm install` also builds `node-pty` for chats, which needs `gcc`, `make` and `python3`.
 
+The first time, the app shows a **setup screen**: pick the folder Workbench works in (`~/Workbench` by default) and name the first profile. The folder is made with that profile and one drawer, nothing in it points at any folder of yours, and the choice is remembered in `~/.config/workbench/dir`. `bin/workbench --dir PATH` sets the folder from a terminal instead; `WORKBENCH_DIR` in the environment overrides both. A folder that already is a Workbench (it has a `settings.yaml`) is used as it is.
+
 For a window without browser chrome:
 
 1. Start Workbench once, so the service is running.
@@ -35,11 +37,23 @@ This writes three user units to `~/.config/systemd/user/` and starts the service
 
 ## Configuration
 
-Config lives in `~/.config/workbench/`. Set `WORKBENCH_CONFIG_DIR` to use another location.
+Everything Workbench keeps lives in **one folder**, the one you pick at setup (part 13). Nothing in it is tied to the rest of your machine, so it can be put in git or synced. Running chats, the MCP ledger, skill bundles and logs stay in `~/.local/state/workbench/`, thumbnails in `~/.cache/workbench/`.
+
+```
+~/Workbench/                    # the folder you picked (WORKBENCH_DIR, or ~/.config/workbench/dir)
+  settings.yaml                 # the active profile and the profiles in switcher order
+  backgrounds/  logos/          # pictures the app copied
+  main/                         # a profile = a wiki = its notes folder (the id is the folder name)
+    index.md                    # the profile and its drawer list
+    drawers/Main.md             # a drawer: its nav
+    drawers/Main/               # the drawer's own folder: its pages, references, assets
+    Workflow.md  agents/  templates/  skills/
+    context/  knowledge/  processes/  inbox/   # Set up context makes these
+```
 
 | File | Holds |
 | --- | --- |
-| `settings.yaml` | the active profile and, in order, each profile's wiki folder |
+| `settings.yaml` | the active profile and, in order, the profile ids (each a subfolder) |
 | `backgrounds/`, `logos/` | pictures the app copied for backgrounds and drawer logos |
 
 A profile is a **wiki**: a folder of Markdown pages. The pages are the configuration, and they are notes too, so search, `[[wiki links]]`, Mentions and the editor work on them. Edit them in Workbench or in any editor: hand edits show up live, and app edits touch only the lines they must, so prose around a list stays as you wrote it. A page that will not parse is reported in a banner (with the line) and never written over; a line that cannot be read as an entry shows up as a note that opens the page, so you can fix it.
@@ -48,16 +62,16 @@ A profile is a **wiki**: a folder of Markdown pages. The pages are the configura
 # settings.yaml
 activeProfile: work
 profiles:
-  work: ~/Documents/work/notes
-  personal: ~/Documents/notes
+  - work
+  - personal
 ```
 
 Inside a wiki:
 
 | Page | Holds |
 | --- | --- |
-| `index.md` | The profile in its frontmatter (`name`, `accent`, `theme`, `background`, `home`, `categories`, `openWith`, `mcpOff`). Its body is the nav: `##` headings with link lists, one nested list level for groups. With drawers, the body is a `## Drawers` list of drawer pages instead. |
-| `drawers/<Name>.md` | A drawer: frontmatter `logo`, `folder`, `uses`; the body is its nav, as in `index.md`. |
+| `index.md` | The profile in its frontmatter (`name`, `accent`, `theme`, `background`, `categories`, `openWith`, `skills`). Its body is the nav: `##` headings with link lists, one nested list level for groups. With drawers, the body is a `## Drawers` list of drawer pages instead. |
+| `drawers/<Name>.md` | A drawer: frontmatter `logo`, `uses`, `skills`, `mcpOff`, and `folder` only to work in a folder elsewhere (a repository) instead of its own `drawers/<Name>/`; the body is its nav, as in `index.md`. |
 | `pages/<Name>.md` (`drawers/<Drawer>/<Name>.md` in a drawer with a page; `projects/<Name>.md` in wikis made before the rename, still read), or any page linked as `[[Name]]` from the nav | An item. "Projects" is only a heading in the nav, not a kind of thing. The frontmatter is its card: `folder`, `status` (paused, done, archived), `category`, `pinned`, `agent`, `icon`, `description`, `servers`, and `id` for an item without a folder. `## Workflow` lists its tabs. The rest of the page is yours: the page itself shows when it has no tabs. |
 | `Workflow.md` | The profile steps: the list **Add profile steps** copies into a page and **Save as profile steps** writes here. |
 | `agents/<Name>.md` | An agent profile: frontmatter `model`, `effort`, `permission`, `prompt`, `folders`, `allowedTools`, `disallowedTools`, `mcp` (or `agent` for a Claude Code agent); the body is the instructions. |
@@ -85,8 +99,7 @@ A link's title is its icon (`[Docs](https://example.com "book")`, any name from 
 name: Work
 accent: "#7d93ab"
 theme: fjord                    # slate (default) | fjord | moss | ember | dusk | graphite
-background: theme               # theme (default) | none | a picture in ~/.config/workbench/backgrounds/
-home: ~/Documents/work
+background: theme               # theme (default) | none | a picture in <Workbench>/backgrounds/
 categories: { game: "#8fa58a" } # optional colours for project categories
 openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
   - { ext: [kra], command: krita }
@@ -145,7 +158,7 @@ allowedTools: [Read, Grep]
 You review code. Don't edit files.
 ```
 
-**Moving from the YAML profiles** (before part 11): the nav shows a banner with **Move to pages**, and `bin/workbench --migrate` does the same from a terminal. Each `profiles/<id>.yaml` becomes a wiki in its `notes:` folder (else `<home>/notes`, else `~/notes`); projects become pages under `projects/`, with the tabs they showed as their `## Workflow`; the YAML file is kept as `<id>.yaml.bak`. Comments in the YAML are not carried over. Until then the profile is read-only.
+**Older setups:** profiles from before part 13 (wikis anywhere, named in `~/.config/workbench/settings.yaml`) are not read. Copy a wiki's pages into `<Workbench>/<id>/` and add the id to `settings.yaml`; pages still in `projects/` are found there.
 
 ## Using it
 
@@ -170,12 +183,12 @@ You review code. Don't edit files.
 - The drawer you were in is remembered per profile in this browser. Back, Recent work and Ctrl+K bring an entry's drawer along.
 - **Logo:** **Choose picture…** in Drawer settings, or right-click a picture in the file browser and choose **Use as drawer logo**. Its middle is scaled to 64 × 64 and kept in `~/.config/workbench/logos/`. Without one, the drawer's initials on a tinted square.
 - **Show in drawers:** right-click an entry and tick **Show in <drawer>**. The same entry shows there too, under a heading of the same name, marked ⇄ with its own drawer; it opens the same page, chats and all. Renaming the original updates it; deleting the original asks first and removes it everywhere (Undo brings it back). Right-click a shared entry for **Go to <drawer>** or **Remove from this drawer**.
-- **Shared folder:** a drawer can have a folder of its own (Drawer settings offers `<notes>/drawers/<name>` in one click) and use other drawers' folders. They're listed under a fixed **Shared** heading, open in the file browser, and claude chats started in the drawer can read them (`--add-dir`, with a line in the system prompt). A project's chats get the folders of the drawer it lives in.
+- **Folders:** every drawer works in `drawers/<Name>/` inside its profile, made with the drawer: its pages, references and assets go there, and the rail's Files and Git show it. Drawer settings can point it at a folder elsewhere (a repository) instead. A drawer can use other drawers' folders; those are listed under a fixed **Shared** heading, open in the file browser, and claude chats started in the drawer can read them (`--add-dir`, with a line in the system prompt). A project's chats get the folders of the drawer it lives in.
 - Entries move between headings within their drawer only.
 
 ### Workspaces (part 12)
 
-- **A drawer is a workspace.** Give it a folder in its settings (the sliders on the rail) and the rail shows **Files** and **Git** for it; its nav lists the pages of the work (chapters, references, projects), which land under `drawers/<Name>/` in the wiki. A page without a folder of its own starts its chats in the drawer's folder, so a chapter page is a place to work from, not just to read.
+- **A drawer is a workspace.** It has a folder from the start (`drawers/<Name>/` in the profile, or one you point it at in its settings) and the rail shows **Files** and **Git** for it; its nav lists the pages of the work (chapters, references, projects), which land under `drawers/<Name>/` in the wiki. A page without a folder of its own starts its chats in the drawer's folder, so a chapter page is a place to work from, not just to read.
 - **Pinned skills** tie skills to places: the profile (`skills:` on `index.md`), a drawer (its page) or one page. Chats started there are told to use them; the wiki's own skills (`<wiki>/skills/<name>/SKILL.md`) load only where pinned. See Claude setup.
 - **The chats dock** keeps every chat beside the page you're reading, and a new chat starts where you are, with that page's text in its instructions. See Chats.
 - A good day looks like this: open the chapter you're on, pin the skill the task needs, **New chat**, and claude starts with the page, the drawer's folders, the context notes and the right skills.
@@ -246,7 +259,7 @@ You review code. Don't edit files.
   - `processes/`: workflows you repeat.
   - `inbox/`: handoffs and files to look at later.
 - **Setting it up:**
-  - The **Context** heading at the top of the sidebar starts with **Set up context in ~/notes**. It creates the folders and starter notes, never overwriting a file, and writes a `## Context` heading at the top of `index.md` (or of the first drawer's page) with links to the four folders, unless an entry already opens `context/`.
+  - The **Context** heading at the top of the sidebar starts with **Set up context in <the profile's folder>**. It creates the folders and starter notes, never overwriting a file, and writes a `## Context` heading at the top of `index.md` (or of the first drawer's page) with links to the four folders, unless an entry already opens `context/`.
   - After that, **Context**, **Knowledge**, **Processes** and **Inbox** are ordinary nav entries: move, rename or delete them like any other; the fixed heading is gone. The Inbox entry shows the count.
 - **Context** opens with tabs for its notes (Identity, Preferences, Goals, **Where things go**), editable in place, beside All files. The other three open their folder in the file browser. They're ordinary notes, so search and `[[wiki links]]` find them.
 - **Every claude chat** (not shells) starts with the context:
@@ -339,7 +352,7 @@ An item's **Git** step shows its folder's repository, with its count of changed 
 - A **daily** entry opens today's note, `<notes>/daily/YYYY-MM-DD.md`, creating it from `<notes>/templates/daily.md` the first time (`{{date}}` and `{{title}}` are filled in). The arrows step to other days. Left open past midnight, it moves to the new day.
 - **Task boxes** (`- [ ]`) tick in the formatted view too; the change saves like an edit.
 - **Code blocks** are coloured for JavaScript and TypeScript (with JSX), JSON, CSS, HTML and Markdown; other languages stay plain.
-- Without `notes:` in a profile, the app offers to set it to `<home>/notes` with one click. The folder is created with the first note.
+- A profile's notes folder is its own folder in the Workbench (`<Workbench>/<id>/`): new notes, daily notes, search and `[[wiki links]]` live there.
 - **Properties:** YAML frontmatter at the top of a note (`---` … `---`) shows as a row of properties above it instead of as text. Broken frontmatter says so there; the note still opens.
 - **Mentions:** under every note, the notes that link to it, with the lines that do. Click one to open it.
 - **Rename** (or **F2**) renames a note in the notes folder and rewrites the links to it in your other notes: `[[Old]]`, `[[folder/Old]]`, with headings and aliases kept, and relative links like `[x](Old.md)`. Renaming a `.md` in the file browser does the same. Notes outside the notes folder are named by your config, so they are renamed there.
@@ -394,11 +407,11 @@ Other websites therefore cannot call it. Launch requests name an entry's (or a s
 
 Notes can only touch:
 
-- Markdown files inside the profile's `notes:` folder,
+- Markdown files inside the profile's folder,
 - the files of that profile's note entries,
 - images inside those places, read-only.
 
-The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file (copies, uploads and restores from the Trash take a free name or refuse), and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
+The file browser can open the Workbench folder, the profile's folder entries and their folder steps, and every drawer's folder, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file (copies, uploads and restores from the Trash take a free name or refuse), and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
 
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else. Background pictures are copied only from the profile's folders, only raster types (no SVG, which can carry scripts), and served only by plain name from the backgrounds folder.
 
@@ -431,13 +444,14 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | --- | --- |
 | `shared/config-schema.ts` | zod schema and types shared by the UI and the service |
 | `server/config-ops.ts` | edits applied to the YAML document |
-| `server/config-store.ts` | loading, validation, atomic writes, watching and undo |
+| `server/config-store.ts` | the error type every service throws |
+| `server/seed.ts` | a fresh Workbench folder: settings and the first profile with one drawer |
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/trash.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; putting things back from the Trash; the folders a profile may reach; folder watching |
 | `server/servers.ts`, `server/procfs.ts` | servers running in projects: listening sockets and their processes from `/proc`, declared servers, health checks, Stop |
 | `server/thumbs.ts`, `server/open-with.ts` | gallery thumbnails (the cache, .blend previews, a Godot project's icon); the program a file opens in |
 | `server/git.ts`, `shared/git.ts` | git per project: status, diffs and hunks, stage, discard with Undo, commit, Draft, branches, stash, fetch, pull, push, conflicts, history, the nav's marks |
-| `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
+| `server/backgrounds.ts` | background pictures: copies in the Workbench folder, listed, served and deleted by name |
 | `server/chats.ts`, `server/session-hook.mjs`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list, following `/clear`; reading claude's transcripts for History; agent profiles as claude flags |
 | `server/context.ts` | context folders: status, setup, what a chat is told, handoffs and files into the inbox |
 | `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
@@ -461,4 +475,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
 | 11 | The wiki: pages as configuration (done) |
 | 12 | Workspaces: the drawer rail, pinned skills, the chats dock (done) |
+| 13 | One Workbench folder: the setup screen, profiles as subfolders, drawers with their own folders (done) |
 | later | A Tauri window, if wanted |

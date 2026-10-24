@@ -7,6 +7,7 @@ import {
   allSections,
   drawersOf,
   entryAt,
+  ownDrawerFolder,
   entrySlot,
   folderRoots,
   getItem,
@@ -33,7 +34,6 @@ import { ContextView } from './ContextView.tsx'
 import { DailyView } from './DailyView.tsx'
 import { agentIcon, EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
-import { NotesFolderHint } from './NotesFolderHint.tsx'
 import { NoteView } from './NoteView.tsx'
 import { ItemView, type ItemActions } from './ItemView.tsx'
 import { SearchView } from './SearchView.tsx'
@@ -185,7 +185,6 @@ function Home({
     <div className="page home-page">
       <div className="page-kicker">Profile</div>
       <h1 className="page-title">{profile.name}</h1>
-      {!profile.notes && <NotesFolderHint compact />}
       {dailyAddr && daily && (
         <button className="today-card" onClick={() => activate(dailyAddr, daily)}>
           <CalendarDays size={18} className="icon" />
@@ -331,6 +330,10 @@ function RailView({ tool, pane }: { tool: RailTool; pane: Props }) {
       </div>
     )
   }
+  // Skills and MCP: in the drawer's own folder (drawers/<Name>/ in the profile) the views show what claude
+  // loads everywhere and the switches set the drawer's defaults; a folder set on the page (a repository
+  // elsewhere) is a project folder for claude, so the views act in it.
+  const setupFolder = ownDrawerFolder(profile, d) ? undefined : (folder ?? undefined)
   return (
     <div className="page wide">
       <div className="page-kicker">{d.name}</div>
@@ -340,7 +343,7 @@ function RailView({ tool, pane }: { tool: RailTool; pane: Props }) {
           key={`${active.id}:${drawer}:${tool}`}
           profileId={active.id}
           profile={profile}
-          folder={folder ?? undefined}
+          folder={setupFolder}
           drawer={drawer}
           kinds={tool === 'mcp' ? ['mcp'] : ['skills', 'agents', 'commands', 'hooks', 'plugins']}
           rev={active.rev}
@@ -405,7 +408,7 @@ function EntryView({ addr, item, kicker, pane }: { addr: ItemAddr; item: NavItem
     // A folder link (no page): the file browser; the wiki's context/ opens the Context view.
     const profile = pane.active.profile!
     const want = item.path ? normalizePath(expandHome(item.path, pane.home)) : ''
-    const isContext = !!profile.notes && want === normalizePath(expandHome(`${profile.notes}/context`, pane.home))
+    const isContext = want === normalizePath(expandHome(`${profile.root}/context`, pane.home))
     if (isContext) return <ContextView key={`${pane.active.id}:context`} name="context" profileId={pane.active.id} profile={profile} home={pane.home} openFolder={pane.openFolder} toast={pane.toast} />
     return (
       <Browser

@@ -2,7 +2,7 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { parse as parseYaml, parseDocument } from 'yaml'
-import { migrateProfile } from '../../server/migrate.ts'
+import { migrateProfile } from './pages-from-yaml.ts'
 
 export const WORK_WIKI: Record<string, string> = {
   'index.md': `---
@@ -66,41 +66,40 @@ export async function writeWiki(root: string, files: Record<string, string>) {
   }
 }
 
-/** settings.yaml naming the wikis; `profiles` maps ids to `~/…` folders. */
-export async function writeSettings(dir: string, profiles: Record<string, string>, active = Object.keys(profiles)[0]) {
+/** The Workbench folder the unit tests use: `<home>/wb`, so the work profile is `~/wb/work` (part 13). */
+export const wbDir = (home: string) => path.join(home, 'wb')
+
+/** settings.yaml in the Workbench folder: the profile ids in order (each a subfolder). */
+export async function writeSettings(dir: string, ids: string[], active = ids[0]) {
   await fsp.mkdir(dir, { recursive: true })
-  const lines = Object.entries(profiles).map(([id, wiki]) => `  ${id}: ${wiki}`)
-  await fsp.writeFile(path.join(dir, 'settings.yaml'), `activeProfile: ${active}\nprofiles:\n${lines.join('\n')}\n`)
+  await fsp.writeFile(path.join(dir, 'settings.yaml'), `activeProfile: ${active}\nprofiles:\n${ids.map((id) => `  - ${id}`).join('\n')}\n`)
 }
 
 /**
- * Turn a config folder's YAML profiles (`profiles/<id>.yaml`, as the older
- * tests write them) into wikis, and settings.yaml into the map naming them.
- * The YAML files are removed, so the store reads pages. A profile without a
- * notes folder gets `defaultWiki(id)` (else `<home>/notes`). Profiles already
- * in settings as wikis are kept.
+ * Turn a test's YAML profiles (`<cfg>/profiles/<id>.yaml`, the fixtures'
+ * language) into wikis inside the Workbench folder `<home>/wb` (`<id>/` each),
+ * with its settings.yaml listing them in the order of `<cfg>/settings.yaml`
+ * (else alphabetical). The YAML files stay, so a test can edit and convert
+ * again. Returns the Workbench folder.
  */
-export async function migrateFixture(cfg: string, home: string, opts: { defaultWiki?: (id: string) => string } = {}) {
-  const dir = path.join(cfg, 'profiles')
-  const ids = (await fsp.readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith('.yaml')).map((f) => f.slice(0, -5))
+export async function migrateFixture(cfg: string, home: string, opts: { dir?: string } = {}): Promise<string> {
+  const dir = opts.dir ?? wbDir(home)
+  const yamlDir = path.join(cfg, 'profiles')
+  const ids = (await fsp.readdir(yamlDir).catch(() => [] as string[])).filter((f) => f.endsWith('.yaml')).map((f) => f.slice(0, -5))
   const settings = (parseYaml((await fsp.readFile(path.join(cfg, 'settings.yaml'), 'utf8').catch(() => '')) || '{}') ?? {}) as { activeProfile?: string; profiles?: string[] | Record<string, string> }
-  const listed = Array.isArray(settings.profiles) ? settings.profiles : []
-  const profiles: Record<string, string> = Array.isArray(settings.profiles) || !settings.profiles ? {} : { ...settings.profiles }
+  const listed = Array.isArray(settings.profiles) ? settings.profiles : Object.keys(settings.profiles ?? {})
   const order = [...listed.filter((id) => ids.includes(id)), ...ids.filter((id) => !listed.includes(id)).sort()]
   for (const id of order) {
-    const text = await fsp.readFile(path.join(dir, `${id}.yaml`), 'utf8')
-    const wiki = /^notes:/m.test(text) ? undefined : opts.defaultWiki?.(id)
-    const out = migrateProfile(text, { id, home, wiki })
-    profiles[id] = out.wiki
-    const root = out.wiki.startsWith('~') ? path.join(home, out.wiki.slice(1)) : out.wiki
-    await writeWiki(root, out.files)
-    await fsp.rm(path.join(dir, `${id}.yaml`))
+    const text = await fsp.readFile(path.join(yamlDir, `${id}.yaml`), 'utf8')
+    const out = migrateProfile(text, { id, wiki: path.join(dir, id) })
+    await writeWiki(path.join(dir, id), out.files)
   }
-  const active = settings.activeProfile && profiles[settings.activeProfile] ? settings.activeProfile : Object.keys(profiles)[0]
+  const active = settings.activeProfile && order.includes(settings.activeProfile) ? settings.activeProfile : order[0]
   // Through the document, so a comment in the test's settings.yaml stays.
   const doc = parseDocument((await fsp.readFile(path.join(cfg, 'settings.yaml'), 'utf8').catch(() => '')) || '{}')
   doc.set('activeProfile', active)
-  doc.set('profiles', doc.createNode(profiles))
-  await fsp.writeFile(path.join(cfg, 'settings.yaml'), doc.toString())
-  return profiles
+  doc.set('profiles', doc.createNode(order))
+  await fsp.mkdir(dir, { recursive: true })
+  await fsp.writeFile(path.join(dir, 'settings.yaml'), doc.toString())
+  return dir
 }

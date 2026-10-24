@@ -8,12 +8,15 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { buildServer } from '../server/main.ts'
-import { DIR, FAKE_CLAUDE, FAKE_SHELL, HOME, MANAGED, PORT, resetFixture, SPAWN_LOG, THUMBS, TRASH, TRASH_DIR } from './fixture.ts'
+import { DIR, FAKE_CLAUDE, FAKE_SHELL, HOME, MANAGED, PORT, resetFixture, SETUP_PORT, SPAWN_LOG, THUMBS, TRASH, TRASH_DIR, WB } from './fixture.ts'
 
-await fsp.rm(DIR, { recursive: true, force: true })
+// `E2E_SETUP=1`: a second service without a Workbench folder, for the setup screen spec (its pointer file stays in the fixture).
+// It starts beside the main one and must not touch the fixture the main one made.
+const setupMode = process.env.E2E_SETUP === '1'
+if (!setupMode) await fsp.rm(DIR, { recursive: true, force: true })
 // Claude's files come from the fake home, never from the machine's own.
 delete process.env.CLAUDE_CONFIG_DIR
-await resetFixture()
+if (!setupMode) await resetFixture()
 
 const spawn = ((command: string, args: string[], options: { cwd?: string } = {}) => {
   fs.appendFileSync(SPAWN_LOG, `${[command, ...args].join(' ')}${options.cwd ? ` (in ${options.cwd})` : ''}\n`)
@@ -36,8 +39,9 @@ const spawn = ((command: string, args: string[], options: { cwd?: string } = {})
 }) as any
 
 const { app } = await buildServer({
-  configDir: DIR,
-  port: PORT,
+  dir: setupMode ? null : WB,
+  pointerFile: setupMode ? path.join(DIR, 'setup-pointer') : null,
+  port: setupMode ? SETUP_PORT : PORT,
   home: HOME,
   spawn,
   stateDir: path.join(DIR, 'state'),
@@ -49,4 +53,4 @@ const { app } = await buildServer({
   gitFetchEveryMs: 0,
   thumbsDir: THUMBS,
 })
-await app.listen({ host: '127.0.0.1', port: PORT })
+await app.listen({ host: '127.0.0.1', port: setupMode ? SETUP_PORT : PORT })

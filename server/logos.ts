@@ -21,10 +21,15 @@ export function pngSize(b: Buffer): { width: number; height: number } | null {
 }
 
 export class Logos {
-  readonly dir: string
+  #dir: () => string
 
-  constructor(dir: string) {
-    this.dir = dir
+  /** `dir` gives `<Workbench>/logos` once the folder is known (part 13). */
+  constructor(dir: () => string) {
+    this.#dir = dir
+  }
+
+  get dir(): string {
+    return this.#dir()
   }
 
   /** Keep a logo; the same picture again gets the same name. */

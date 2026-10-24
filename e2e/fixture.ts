@@ -2,18 +2,22 @@
 import { execFileSync } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { migrateProfile } from '../server/migrate.ts'
+import { migrateProfile } from '../tests/fixtures/pages-from-yaml.ts'
 import { migrateFixture } from '../tests/fixtures/wiki.ts'
 import type { Page } from '@playwright/test'
 
 export const PORT = 7431
+/** The second e2e service, started without a Workbench folder (setup-screen.spec.ts). */
+export const SETUP_PORT = 7432
 export const DIR = path.resolve(import.meta.dirname, '.tmp-config')
 /** The gallery's thumbnail cache (cleared with each reset); outside the config folder, as ~/.cache is. */
 export const THUMBS = path.resolve(import.meta.dirname, '.tmp-thumbs')
 export const HOME = path.join(DIR, 'home')
 export const SPAWN_LOG = path.join(DIR, 'spawned.log')
-export const NOTES = path.join(HOME, 'notes')
-export const PNOTES = path.join(HOME, 'pnotes')
+/** The Workbench folder (part 13), inside the fake home; the profiles are its subfolders. */
+export const WB = path.join(HOME, 'workbench')
+export const NOTES = path.join(WB, 'work')
+export const PNOTES = path.join(WB, 'personal')
 /** The profiles are wikis (part 11): their index.md holds the profile and the nav. */
 export const WORK_FILE = path.join(NOTES, 'index.md')
 export const PERSONAL_FILE = path.join(PNOTES, 'index.md')
@@ -34,7 +38,6 @@ export const MANAGED = path.join(DIR, 'managed')
 export const WORK = `# fixture: work profile
 name: Work
 accent: "#7d93ab"
-notes: ~/notes
 # Every project starts with these
 workflow:
   - { label: sources, type: folder, path: src }
@@ -65,7 +68,7 @@ sections:
         type: daily
       - label: Ideas
         type: note
-        path: ~/notes/Ideas.md
+        path: ~/workbench/work/Ideas.md
       - label: Runbook
         type: note
         path: ~/repo/RUNBOOK.md
@@ -109,10 +112,10 @@ Tag the release, deploy, and keep a rollback ready.
 `
 
 const NOTE_FILES: Record<string, string> = {
-  'notes/Ideas.md': IDEAS,
-  'notes/work/Deploy plan.md': DEPLOY_PLAN,
-  'notes/templates/daily.md': '# {{date}}\n\n## Plan\n\n- [ ] \n',
-  'notes/img/diagram.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#7d93ab"/></svg>',
+  'workbench/work/Ideas.md': IDEAS,
+  'workbench/work/work/Deploy plan.md': DEPLOY_PLAN,
+  'workbench/work/templates/daily.md': '# {{date}}\n\n## Plan\n\n- [ ] \n',
+  'workbench/work/img/diagram.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#7d93ab"/></svg>',
   'repo/RUNBOOK.md': '# Runbook\n\nDeploy steps. See [[Ideas]].\n',
 }
 
@@ -161,10 +164,12 @@ export async function resetFixture() {
     if (f !== 'work.yaml' && f !== 'personal.yaml') await fsp.rm(path.join(DIR, 'profiles', f), { force: true })
   }
   // Tests create notes and files all over the fake home; start each one from a clean copy.
-  await fsp.rm(HOME, { recursive: true, force: true })
+  // The Workbench folder and its settings.yaml stay in place: the service watches them
+  // (a watch on a folder that is deleted and made anew goes quiet), and the rewrite below
+  // is what tells it the fixture is back to its start.
+  for (const name of await fsp.readdir(HOME).catch(() => [] as string[])) if (name !== 'workbench') await fsp.rm(path.join(HOME, name), { recursive: true, force: true })
+  for (const name of await fsp.readdir(WB).catch(() => [] as string[])) if (name !== 'settings.yaml') await fsp.rm(path.join(WB, name), { recursive: true, force: true })
   await fsp.rm(TRASH, { recursive: true, force: true })
-  await fsp.rm(path.join(DIR, 'backgrounds'), { recursive: true, force: true })
-  await fsp.rm(path.join(DIR, 'logos'), { recursive: true, force: true })
   await fsp.rm(MANAGED, { recursive: true, force: true })
   await fsp.rm(THUMBS, { recursive: true, force: true })
   await fsp.mkdir(ALPHA, { recursive: true })
@@ -181,14 +186,14 @@ export async function resetFixture() {
     await fsp.mkdir(path.dirname(path.join(HOME, rel)), { recursive: true })
     await fsp.writeFile(path.join(HOME, rel), text)
   }
-  // The YAML above is the fixture's spec; the app reads it as wikis (~/notes and ~/pnotes).
-  await migrateFixture(DIR, HOME, { defaultWiki: () => '~/pnotes' })
+  // The YAML above is the fixture's spec; the app reads it as wikis in ~/workbench (work/ and personal/).
+  await migrateFixture(DIR, HOME, { dir: WB })
 }
 
 /** A hand edit of the work profile: the YAML is the fixture's language, written into the wiki as pages (the app picks them up). */
 export async function writeWork(yaml: string, id = 'work') {
-  const { wiki, files } = migrateProfile(yaml, { id, home: HOME, wiki: id === 'work' ? '~/notes' : '~/pnotes' })
-  const root = path.join(HOME, wiki.slice(2))
+  const { files } = migrateProfile(yaml, { id, wiki: path.join(WB, id) })
+  const root = path.join(WB, id)
   // index.md last: once it changes, the pages it links must already be there.
   const { 'index.md': index, ...rest } = files
   for (const [rel, text] of Object.entries(rest)) {

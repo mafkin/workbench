@@ -31,14 +31,17 @@ async function hashOf(file: string): Promise<string> {
 }
 
 export class Backgrounds {
-  readonly dir: string
   #store: Wiki
   #home: string
 
-  constructor(dir: string, store: Wiki, home: string) {
-    this.dir = dir
+  constructor(store: Wiki, home: string) {
     this.#store = store
     this.#home = home
+  }
+
+  /** `<Workbench>/backgrounds` (part 13). */
+  get dir(): string {
+    return path.join(this.#store.need(), 'backgrounds')
   }
 
   async list(): Promise<string[]> {
@@ -71,7 +74,7 @@ export class Backgrounds {
     const p = this.#store.profile(profileId)
     if (!p.profile) throw new StoreError(`${profileId}.yaml has an error; fix it first`, 423)
     const real = await realish(absPath(raw, this.#home))
-    if (!(await browseRoots(p.profile, this.#home)).some((r) => within(real, r.real))) {
+    if (!(await browseRoots(p.profile, this.#home, this.#store.dir)).some((r) => within(real, r.real))) {
       throw new StoreError("Outside this profile's folders", 403)
     }
     const stat = await fsp.stat(real).catch(() => null)

@@ -6,7 +6,7 @@ const profile = (sections: unknown) => Profile.parse({ name: 'W', sections })
 
 const before = profile([
   { title: 'Projects', items: [{ label: 'Alpha', type: 'folder', path: '~/alpha' }, { label: 'Beta', type: 'folder', path: '~/beta' }] },
-  { title: 'Notes', items: [{ label: 'Ideas', type: 'note', path: '~/notes/Ideas.md' }] },
+  { title: 'Notes', items: [{ label: 'Ideas', type: 'note', path: '~/wb/work/Ideas.md' }] },
 ])
 const beta = entryId(before.sections[0].items[1])
 
@@ -18,7 +18,7 @@ describe('an entry is found again after it moves', () => {
   it('is found at its new address after a move, even into a group', () => {
     const moved = profile([
       { title: 'Projects', items: [{ label: 'Alpha', type: 'folder', path: '~/alpha' }] },
-      { title: 'Notes', items: [{ label: 'Old', type: 'group', items: [{ label: 'Beta', type: 'folder', path: '~/beta' }] }, { label: 'Ideas', type: 'note', path: '~/notes/Ideas.md' }] },
+      { title: 'Notes', items: [{ label: 'Old', type: 'group', items: [{ label: 'Beta', type: 'folder', path: '~/beta' }] }, { label: 'Ideas', type: 'note', path: '~/wb/work/Ideas.md' }] },
     ])
     expect(resolveEntry(moved, '0.1', beta)).toEqual({ section: 1, group: 0, index: 0 })
   })

@@ -1,12 +1,12 @@
-// Profiles as wikis (part 11). `settings.yaml` names each profile's wiki
-// folder; inside it, `index.md` holds the profile (frontmatter) and the nav
-// (or the list of drawer pages), `drawers/*.md` the drawers, item pages their
-// card and `## Workflow`, `Workflow.md` the profile steps and `agents/*.md`
-// the agent profiles. The pages are the source of truth: hand edits are
-// picked up by watchers, app edits touch only the lines they must, and a
-// page that will not parse is reported and never written. The in-memory
-// shape is the same `Profile` the YAML gave, so the rest of the app is
-// unchanged. Profiles still in YAML are read, read-only, until migrated.
+// Profiles as wikis (part 11) in one Workbench folder (part 13). `settings.yaml`
+// in that folder lists the profiles; each is a subfolder: `index.md` holds the
+// profile (frontmatter) and the nav (or the list of drawer pages), `drawers/*.md`
+// the drawers (each with a folder `drawers/<Name>/` of its own), item pages
+// their card and `## Workflow`, `Workflow.md` the profile steps and
+// `agents/*.md` the agent profiles. The pages are the source of truth: hand
+// edits are picked up by watchers, app edits touch only the lines they must,
+// and a page that will not parse is reported and never written. Until setup
+// names the folder the store is empty.
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -42,10 +42,10 @@ import {
   fillTemplate,
   isoDate,
 } from '../shared/config-schema.ts'
-import { describeIssue, parseProfile, StoreError } from './config-store.ts'
+import { describeIssue, StoreError } from './config-store.ts'
 import { revOf, writeAtomic } from './fs-util.ts'
-import { defaultWiki, migrateProfile } from './migrate.ts'
-import { absPath, realish } from './paths.ts'
+import { realish } from './paths.ts'
+import { profilePages, seedWorkbench, type FirstProfile } from './seed.ts'
 import { FolderWatcher } from './watch.ts'
 import * as md from './wiki-md.ts'
 import { PageError, type LinkContext, type PageRef } from './wiki-md.ts'
@@ -56,14 +56,14 @@ const MAX_PAGES = 5000
 const MAX_DEPTH = 8
 const MAX_WATCHED = 24
 
-/** `settings.yaml`: profiles as a map of id to wiki folder, or the older list of ids (YAML profiles in `profiles/`). */
+/** `settings.yaml`: the profile ids in switcher order (a map from before part 13 is read by its keys). */
 const SettingsFile = z.object({
   activeProfile: z.string().optional(),
-  profiles: z.union([z.record(z.string(), z.string()), z.array(z.string())]).nullish(),
+  profiles: z.union([z.array(z.string()), z.record(z.string(), z.string())]).nullish(),
 })
 
 /** The keys of `index.md`'s frontmatter the profile is read from (besides categories, openWith and mcpOff). */
-const INDEX_META = ['name', 'accent', 'theme', 'background', 'home'] as const
+const INDEX_META = ['name', 'accent', 'theme', 'background'] as const
 
 interface Entry extends ProfileState {
   /** The wiki folder, absolute, for pages; `~/…` form in `wiki`. */
@@ -104,11 +104,11 @@ const noExt = (rel: string) => rel.replace(NOTE_EXT, '')
 const nameOf = (rel: string) => noExt(rel.slice(rel.lastIndexOf('/') + 1))
 
 export class Wiki extends EventEmitter {
-  readonly dir: string
-  readonly settingsFile: string
+  /** The Workbench folder; null until setup names one. */
+  #dir: string | null
   readonly home: string
   #entries = new Map<string, Entry>()
-  #settings: { activeProfile?: string; profiles: Record<string, string>; legacy: string[] } = { profiles: {}, legacy: [] }
+  #settings: { activeProfile?: string; profiles: string[] } = { profiles: [] }
   #settingsText = ''
   #settingsWatcher: fs.FSWatcher | null = null
   #folders = new FolderWatcher(MAX_WATCHED, { change: (dir) => this.#touched(dir), replaced: (dir) => this.#touched(dir) })
@@ -117,26 +117,52 @@ export class Wiki extends EventEmitter {
   #queue: Promise<unknown> = Promise.resolve()
   #ready = false
 
-  constructor(dir: string, home: string) {
+  constructor(dir: string | null, home: string) {
     super()
-    this.dir = dir
+    this.#dir = dir
     this.home = home
-    this.settingsFile = path.join(dir, 'settings.yaml')
   }
 
-  async init({ seed = true, watch = true } = {}) {
-    await fsp.mkdir(this.dir, { recursive: true })
-    await this.#loadSettings()
-    if (seed && !Object.keys(this.#settings.profiles).length && !this.#settings.legacy.length) {
-      const { seedWiki } = await import('./seed.ts')
-      await seedWiki(this.dir, this.home)
-      await this.#loadSettings()
-    }
+  get dir(): string | null {
+    return this.#dir
+  }
+
+  /** The Workbench folder, or a 409 for the routes that need one. */
+  need(): string {
+    if (!this.#dir) throw new StoreError('Workbench has no folder yet; set one up first', 409)
+    return this.#dir
+  }
+
+  get settingsFile(): string {
+    return path.join(this.need(), 'settings.yaml')
+  }
+
+  /** Open the folder (when one is known) and read its profiles. Without one the store waits for `setDir`. */
+  async init({ watch = true, first }: { watch?: boolean; first?: FirstProfile } = {}) {
     this.#watching = watch
-    for (const id of Object.keys(this.#settings.profiles)) await this.#load(id)
-    for (const id of this.#settings.legacy) await this.#loadLegacy(id)
-    if (watch) this.#watchSettings()
+    if (this.#dir) await this.#open(this.#dir, first)
     this.#ready = true
+  }
+
+  /**
+   * Point the store at a Workbench folder (setup). A folder without a
+   * settings.yaml gets one and its first profile; one that has it is adopted.
+   */
+  setDir(dir: string, first?: FirstProfile): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#dir) throw new StoreError(`Workbench already works in ${displayPath(this.#dir, this.home)}`, 409)
+      await this.#open(dir, first)
+      this.emit('change')
+    })
+  }
+
+  async #open(dir: string, first?: FirstProfile) {
+    await fsp.mkdir(dir, { recursive: true })
+    this.#dir = dir
+    if (!(await exists(path.join(dir, 'settings.yaml')))) await seedWorkbench(dir, first ?? { id: 'main', name: 'Main' })
+    await this.#loadSettings()
+    for (const id of this.#settings.profiles) await this.#load(id)
+    if (this.#watching) this.#watchSettings()
   }
 
   close() {
@@ -146,11 +172,11 @@ export class Wiki extends EventEmitter {
     this.#timers.clear()
   }
 
-  /** Everything but `home`, which the server adds. */
-  state(): Omit<AppState, 'home'> {
-    const order = [...Object.keys(this.#settings.profiles), ...this.#settings.legacy].filter((id) => this.#entries.has(id))
+  /** Everything but `home` and `setup`, which the server adds. */
+  state(): Omit<AppState, 'home' | 'setup'> {
+    const order = this.#settings.profiles.filter((id) => this.#entries.has(id))
     const active = this.#settings.activeProfile && this.#entries.has(this.#settings.activeProfile) ? this.#settings.activeProfile : (order[0] ?? '')
-    return { activeProfile: active, profiles: order.map((id) => this.#public(this.#entries.get(id)!)) }
+    return { activeProfile: active, profiles: order.map((id) => this.#public(this.#entries.get(id)!)), ...(this.#dir ? { dir: displayPath(this.#dir, this.home) } : {}) }
   }
 
   profile(id: string): ProfileState {
@@ -163,11 +189,6 @@ export class Wiki extends EventEmitter {
   text(id: string, rel = 'index.md'): string {
     const e = this.#entry(id)
     return e.files.get(path.join(e.root, rel)) ?? ''
-  }
-
-  /** Whether any profile is still a YAML file. */
-  get legacy(): boolean {
-    return this.#settings.legacy.length > 0
   }
 
   /** Apply edits made in the UI. `rev` is the revision the UI last saw. */
@@ -212,39 +233,39 @@ export class Wiki extends EventEmitter {
   }
 
   /**
-   * A new profile: a wiki folder (made if missing; its index.md never overwritten)
-   * with a name and an unused accent, or a copy of another profile's index.md
-   * (its nav and look) and Workflow.md. Last in the switcher.
+   * A new profile: the folder `<Workbench>/<id>` (an index.md already there is
+   * kept) with a name, an unused accent and one drawer named after it, or a
+   * copy of another profile's index.md, drawer pages and Workflow.md (its nav
+   * and look). Last in the switcher.
    */
-  createProfile(id: string, opts: { name: string; wiki: string; copyFrom?: string }): Promise<void> {
+  createProfile(id: string, opts: { name: string; copyFrom?: string }): Promise<void> {
     return this.#serial(async () => {
+      const dir = this.need()
       if (!PROFILE_ID.test(id)) throw new StoreError(PROFILE_ID_RULE, 400)
-      if (this.#entries.has(id)) throw new StoreError(`There is already a profile "${id}"`, 409)
-      const root = absPath(opts.wiki, this.home)
-      for (const e of this.#entries.values()) {
-        if (e.root === root) throw new StoreError(`${opts.wiki} is already ${e.id}'s wiki`, 409)
-        if (root.startsWith(`${e.root}${path.sep}`)) throw new StoreError(`${opts.wiki} is inside ${e.id}'s wiki (${e.wiki}); pick a folder of its own`, 409)
-        if (e.root.startsWith(`${root}${path.sep}`)) throw new StoreError(`${opts.wiki} holds ${e.id}'s wiki (${e.wiki}); pick a folder of its own`, 409)
-      }
+      if (this.#entries.has(id) || this.#settings.profiles.includes(id)) throw new StoreError(`There is already a profile "${id}"`, 409)
+      const root = path.join(dir, id)
       const index = path.join(root, 'index.md')
       await fsp.mkdir(root, { recursive: true })
       if (!(await exists(index))) {
-        let text: string
-        let workflow: string | null = null
+        const files: Record<string, string> = {}
         if (opts.copyFrom) {
           const src = this.#entry(opts.copyFrom)
           if (!src.profile) throw new StoreError('That profile is broken', 423)
-          text = md.setMeta(src.files.get(path.join(src.root, 'index.md')) ?? '', 'name', opts.name)
-          workflow = src.files.get(path.join(src.root, 'Workflow.md')) ?? null
+          files['index.md'] = md.setMeta(src.files.get(path.join(src.root, 'index.md')) ?? '', 'name', opts.name)
+          for (const [abs, text] of src.files) {
+            const rel = path.relative(src.root, abs)
+            if (rel === 'Workflow.md' || (rel.startsWith('drawers/') && !rel.slice(8).includes('/'))) files[rel] = text
+          }
         } else {
           const used = [...this.#entries.values()].map((e) => e.profile?.accent)
-          const accent = ACCENTS.find((a) => !used.includes(a)) ?? ACCENTS[0]
-          text = `---\nname: ${JSON.stringify(opts.name)}\naccent: "${accent}"\n---\n## Start\n`
+          Object.assign(files, profilePages(opts.name, ACCENTS.find((a) => !used.includes(a)) ?? ACCENTS[0]))
         }
-        await writeAtomic(index, text)
-        if (workflow !== null) await fsp.writeFile(path.join(root, 'Workflow.md'), workflow, { flag: 'wx' }).catch(() => {})
+        for (const [rel, text] of Object.entries(files)) {
+          await fsp.mkdir(path.dirname(path.join(root, rel)), { recursive: true })
+          await fsp.writeFile(path.join(root, rel), text, { flag: 'wx' }).catch(() => {})
+        }
       }
-      await this.#editSettings((doc) => setProfiles(doc, { ...this.#settings.profiles, [id]: displayPath(root, this.home) }))
+      await this.#editSettings((doc) => doc.set('profiles', doc.createNode([...this.#settings.profiles, id])))
       await this.#load(id)
       this.emit('change')
     })
@@ -255,55 +276,14 @@ export class Wiki extends EventEmitter {
     return this.#serial(async () => {
       this.#entry(id)
       if (this.#entries.size <= 1) throw new StoreError('The last profile cannot be removed', 409)
-      const { [id]: _gone, ...rest } = this.#settings.profiles
+      const rest = this.#settings.profiles.filter((p) => p !== id)
       const state = this.state()
       await this.#editSettings((doc) => {
-        setProfiles(doc, rest)
+        doc.set('profiles', doc.createNode(rest))
         if (state.activeProfile === id) doc.set('activeProfile', state.profiles.find((p) => p.id !== id)!.id)
       })
       this.#entries.delete(id)
       this.emit('change')
-    })
-  }
-
-  /** Move every YAML profile to pages (see migrate.ts); the YAML files are kept as `.bak`. */
-  migrate(): Promise<{ moved: string[] }> {
-    return this.#serial(async () => {
-      const moved: string[] = []
-      const profiles = { ...this.#settings.profiles }
-      for (const id of [...this.#settings.legacy]) {
-        const e = this.#entries.get(id)
-        if (!e) continue
-        if (!e.profile) throw new StoreError(`${id}.yaml has an error; fix it first`, 423)
-        const text = e.files.get(e.file) ?? ''
-        // A profile without a notes folder gets ~/notes, or ~/notes-<id> when another wiki is there or inside it.
-        const taken = Object.values(profiles).map((w) => absPath(w, this.home))
-        const clash = (w: string) => taken.some((t) => t === w || t.startsWith(`${w}${path.sep}`) || w.startsWith(`${t}${path.sep}`))
-        let wiki = defaultWiki(e.profile)
-        if (!e.profile.notes && clash(absPath(wiki, this.home))) wiki = `~/notes-${id}`
-        const out = migrateProfile(text, { id, home: this.home, wiki })
-        const root = absPath(out.wiki, this.home)
-        if (taken.includes(root)) throw new StoreError(`${id} and another profile would share ${out.wiki}`, 409)
-        for (const [rel, content] of Object.entries(out.files)) {
-          const abs = path.join(root, rel)
-          await fsp.mkdir(path.dirname(abs), { recursive: true })
-          // Never over a page the wiki already has.
-          await fsp.writeFile(abs, content, { flag: 'wx' }).catch((err) => {
-            if (err.code !== 'EEXIST') throw err
-          })
-        }
-        await fsp.rename(e.file, `${e.file}.bak`)
-        profiles[id] = out.wiki
-        moved.push(id)
-      }
-      await this.#editSettings((doc) => setProfiles(doc, profiles))
-      await this.#loadSettings()
-      for (const id of moved) {
-        this.#entries.delete(id)
-        await this.#load(id)
-      }
-      this.emit('change')
-      return { moved }
     })
   }
 
@@ -321,14 +301,15 @@ export class Wiki extends EventEmitter {
   }
 
   async #load(id: string) {
-    const wiki = this.#settings.profiles[id]
-    if (!wiki) return
+    if (!this.#dir || !this.#settings.profiles.includes(id)) return
+    const lexical = path.join(this.#dir, id)
     let root: string
     try {
-      root = await realish(absPath(wiki, this.home))
+      root = await realish(lexical)
     } catch {
-      root = absPath(wiki, this.home)
+      root = lexical
     }
+    const wiki = displayPath(lexical, this.home)
     const e: Entry = this.#entries.get(id) ?? { id, file: path.join(root, 'index.md'), rev: '', profile: null, error: null, wiki, root, files: new Map() }
     e.root = root
     e.wiki = wiki
@@ -336,9 +317,19 @@ export class Wiki extends EventEmitter {
     const before = e.rev
     const view = await this.#read(e, readDisk)
     this.#take(e, view)
+    await this.#drawerFolders(e)
     this.#entries.set(id, e)
     if (this.#watching) this.#watch(e)
     if (this.#ready && e.rev !== before) this.emit('change')
+  }
+
+  /** Every drawer's own folder (`drawers/<Name>/`) exists, so its Files, Git and new pages have somewhere to go. */
+  async #drawerFolders(e: Entry) {
+    if (!e.profile) return
+    const own = `${displayPath(e.root, this.home)}/drawers/`
+    for (const d of drawersOf(e.profile)) {
+      if (d.folder?.startsWith(own)) await fsp.mkdir(path.join(e.root, 'drawers', d.folder.slice(own.length)), { recursive: true }).catch(() => {})
+    }
   }
 
   #take(e: Entry, view: View) {
@@ -457,10 +448,11 @@ export class Wiki extends EventEmitter {
         const page = md.parsePage(text)
         if (page.metaError) return fail(`${d.rel}: ${page.metaError}`, 1)
         const m = page.meta
+        // A drawer without `folder:` works in its own `drawers/<Name>/` (part 13).
         drawers.push({
           name: d.name,
           ...(typeof m.logo === 'string' ? { logo: m.logo } : {}),
-          ...(typeof m.folder === 'string' ? { folder: m.folder } : {}),
+          folder: typeof m.folder === 'string' ? m.folder : `${displayPath(e.root, this.home)}/drawers/${d.name}`,
           ...(Array.isArray(m.uses) ? { uses: m.uses.map(String) } : {}),
           ...(Array.isArray(m.mcpOff) ? { mcpOff: m.mcpOff.map(String) } : {}),
           ...(Array.isArray(m.skills) ? { skills: m.skills.map(String) } : {}),
@@ -514,7 +506,8 @@ export class Wiki extends EventEmitter {
     }
 
     const meta = index.meta
-    const data: Record<string, unknown> = { notes: e.wiki, workflow, sections, ...(drawers ? { drawers } : {}) }
+    // The root in `~/…` form, as every other path the app shows; the service resolves it with absPath.
+    const data: Record<string, unknown> = { root: displayPath(e.root, this.home), workflow, sections, ...(drawers ? { drawers } : {}) }
     for (const key of INDEX_META) if (meta[key] !== undefined && meta[key] !== null) data[key] = meta[key]
     if (data.name === undefined) data.name = e.id
     for (const key of ['categories', 'openWith', 'mcpOff', 'skills'] as const) if (meta[key] !== undefined && meta[key] !== null && !(key === 'mcpOff' && drawers)) data[key] = meta[key]
@@ -551,26 +544,6 @@ export class Wiki extends EventEmitter {
     return { pages, byName }
   }
 
-  async #loadLegacy(id: string) {
-    const file = path.join(this.dir, 'profiles', `${id}.yaml`)
-    const text = await fsp.readFile(file, 'utf8').catch(() => null)
-    if (text === null) {
-      if (this.#entries.delete(id) && this.#ready) this.emit('change')
-      return
-    }
-    const e = this.#entries.get(id)
-    if (e && e.files.get(file) === text) return
-    const { profile, error } = parseProfile(text)
-    const entry: Entry = e ?? { id, file, rev: '', profile: null, error: null, root: '', files: new Map() }
-    entry.legacy = true
-    entry.files = new Map([[file, text]])
-    entry.rev = revOf(text)
-    entry.error = error
-    if (profile) entry.profile = profile
-    this.#entries.set(id, entry)
-    if (this.#ready) this.emit('change')
-  }
-
   // Watching
 
   #watch(e: Entry) {
@@ -580,7 +553,7 @@ export class Wiki extends EventEmitter {
 
   #touched(dir: string) {
     for (const e of this.#entries.values()) {
-      if (e.legacy || !(dir === e.root || dir.startsWith(`${e.root}${path.sep}`))) continue
+      if (!(dir === e.root || dir.startsWith(`${e.root}${path.sep}`))) continue
       clearTimeout(this.#timers.get(e.id))
       this.#timers.set(
         e.id,
@@ -594,7 +567,7 @@ export class Wiki extends EventEmitter {
 
   #watchSettings() {
     try {
-      this.#settingsWatcher = fs.watch(this.dir, (_event, name) => {
+      this.#settingsWatcher = fs.watch(this.need(), (_event, name) => {
         if (name !== 'settings.yaml') return
         clearTimeout(this.#timers.get('settings'))
         this.#timers.set(
@@ -603,19 +576,15 @@ export class Wiki extends EventEmitter {
             this.#timers.delete('settings')
             this.#serial(async () => {
               if (!(await this.#loadSettings())) return
-              // A profile that was just moved to pages is loaded afresh.
-              for (const id of Object.keys(this.#settings.profiles)) {
-                if (this.#entries.get(id)?.legacy) this.#entries.delete(id)
-                if (!this.#entries.has(id)) await this.#load(id)
-              }
-              for (const id of [...this.#entries.keys()]) if (!(id in this.#settings.profiles) && !this.#settings.legacy.includes(id)) this.#entries.delete(id)
+              for (const id of this.#settings.profiles) if (!this.#entries.has(id)) await this.#load(id)
+              for (const id of [...this.#entries.keys()]) if (!this.#settings.profiles.includes(id)) this.#entries.delete(id)
               this.emit('change')
             }).catch((err) => this.emit('error', err))
           }, 60),
         )
       })
     } catch {
-      // No config folder to watch yet.
+      // No folder to watch yet.
     }
   }
 
@@ -627,17 +596,9 @@ export class Wiki extends EventEmitter {
     this.#settingsText = text
     const parsed = SettingsFile.safeParse(parseDocument(text || '{}').toJS() ?? {})
     const s = parsed.success ? parsed.data : { profiles: undefined, activeProfile: undefined }
-    const profiles: Record<string, string> = {}
-    let legacy: string[] = []
-    if (Array.isArray(s.profiles)) legacy = s.profiles.filter((id) => PROFILE_ID.test(id))
-    else for (const [id, wiki] of Object.entries(s.profiles ?? {})) if (PROFILE_ID.test(id) && typeof wiki === 'string') profiles[id] = wiki
-    // YAML profiles not listed are still profiles, as before.
-    if (!Object.keys(profiles).length) {
-      const dir = path.join(this.dir, 'profiles')
-      const found = (await fsp.readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith('.yaml') && !f.startsWith('.')).map((f) => f.slice(0, -5))
-      for (const id of found.sort()) if (!legacy.includes(id)) legacy.push(id)
-    }
-    this.#settings = { activeProfile: s.activeProfile, profiles, legacy }
+    const listed = Array.isArray(s.profiles) ? s.profiles : Object.keys(s.profiles ?? {})
+    const profiles = listed.filter((id) => PROFILE_ID.test(id))
+    this.#settings = { activeProfile: s.activeProfile, profiles: [...new Set(profiles)] }
     return true
   }
 
@@ -662,7 +623,6 @@ export class Wiki extends EventEmitter {
   /** The entry, checked against the UI's revision and against the files on disk. */
   async #current(id: string, rev: string): Promise<Entry> {
     const e = this.#entry(id)
-    if (e.legacy) throw new StoreError(`${id} is still a YAML profile; move it to pages first`, 423)
     // The watchers may not have caught up with a hand edit yet.
     let changed = false
     for (const [abs, text] of e.files) if ((await readDisk(abs)) !== text) changed = true
@@ -687,6 +647,7 @@ export class Wiki extends EventEmitter {
       }
     }
     this.#take(e, await this.#read(e, readDisk))
+    await this.#drawerFolders(e)
     e.undo = keepUndo ? { files: before, revAfter: e.rev } : undefined
     if (this.#watching) this.#watch(e)
     this.emit('change')
@@ -854,7 +815,6 @@ export class Wiki extends EventEmitter {
         setNav(op.from.drawer, (t) => md.moveItem(t, op.from, { section: op.to.section, group: op.to.group, index: op.index }))
         return
       case 'setProfileField': {
-        if (op.key === 'notes') throw new OpError('The notes folder is the wiki itself; move the folder to change it')
         draft.put(index, md.setMeta(text(index), op.key, op.value.trim() || null))
         return
       }
@@ -1230,11 +1190,6 @@ class Draft {
   changes(): [string, string | null][] {
     return [...this.#changes].filter(([abs, text]) => text !== (this.#base.get(abs) ?? null) || (text === null && this.#base.has(abs)))
   }
-}
-
-/** The `profiles:` map in settings.yaml, as `id: ~/wiki` lines. */
-function setProfiles(doc: ReturnType<typeof parseDocument>, profiles: Record<string, string>) {
-  doc.set('profiles', doc.createNode(profiles))
 }
 
 export { expandHome }

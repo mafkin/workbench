@@ -74,8 +74,6 @@ interface Props extends NavActions {
   drawer: number
   onDrawer: (index: number) => void
   onNewDrawer: () => void
-  /** Move the profiles still in YAML to pages. */
-  onMigrate: () => void
   onDrawerSettings: () => void
   /** The folder whose page shows (`files:`), for the Shared heading. */
   filesSelected: string | null
@@ -322,19 +320,10 @@ export function NavPanel(props: Props) {
 
       {active.error && (
         <div className="banner" role="alert">
-          <strong>{active.legacy ? `${active.id}.yaml` : 'A page'} has an error</strong>
+          <strong>A page has an error</strong>
           {active.error.line ? ` on line ${active.error.line}` : ''}. Showing the last good version; editing is paused until
           the file is fixed.
           <span className="mono">{active.error.message}</span>
-        </div>
-      )}
-      {active.legacy && !active.error && (
-        <div className="banner" role="status">
-          <strong>{active.id} is still a YAML profile.</strong> Profiles are now pages in a wiki folder; editing is paused until it
-          is moved. The YAML file is kept as a backup.
-          <button className="btn primary" onClick={props.onMigrate}>
-            Move to pages
-          </button>
         </div>
       )}
       {!!active.problems?.length && (
@@ -584,7 +573,6 @@ function ContextBlock({
   toggleCollapsed: Props['toggleCollapsed']
 }) {
   const ctx = useContextFolders()
-  const notes = useNotes()
   const status = ctx?.status
   if (!ctx || !status) return null
   // Once set up, the folders are entries of the nav (a Context heading in the page); only the offer to set up stays here.
@@ -630,7 +618,7 @@ function ContextBlock({
           ) : (
             <button className="item context-setup" onClick={() => ctx.setup()} title="Creates context, knowledge, processes and inbox with starter notes">
               <FolderPlus size={15} className="icon" />
-              <span className="label">Set up context in {status.notes ?? notes.suggestedRoot}</span>
+              <span className="label">Set up context in {status.notes}</span>
             </button>
           )}
         </div>
@@ -661,8 +649,8 @@ function SharedBlock({
   const all = drawersOf(profile)
   const own = all[drawer]
   if (!own) return null
+  // The drawer's own folder is the rail's Files (part 13); Shared lists the folders it uses from other drawers.
   const rows: { name: string; folder: string; mine: boolean }[] = []
-  if (own.folder) rows.push({ name: own.name, folder: own.folder, mine: true })
   for (const use of own.uses ?? []) {
     const other = all[drawerIndex(profile, use)]
     if (other?.folder && other !== own && !rows.some((r) => r.folder === other.folder)) rows.push({ name: other.name, folder: other.folder, mine: false })

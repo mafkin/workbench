@@ -1,8 +1,8 @@
-// A YAML profile as pages (part 11): `index.md` with the profile and the nav
-// (or the drawer list), `drawers/*.md`, one page per project under
-// `pages/`, `Workflow.md` and `agents/*.md`. Pure: it returns the files to
-// write; the store writes them, never over a page that exists. The seed uses
-// it too, so a first run starts with pages.
+// The test fixtures' way of writing a wiki from a short YAML profile (what part
+// 11's migration did): `index.md` with the profile and the nav (or the drawer
+// list), `drawers/*.md`, one page per item under `pages/`, `Workflow.md` and
+// `agents/*.md`. Pure: it returns the files to write. The product no longer
+// reads YAML profiles (part 13); only the tests do, through this.
 import { Document } from 'yaml'
 import {
   AGENT_FIELDS,
@@ -12,16 +12,17 @@ import {
   hasDrawers,
   legacySteps,
   noteFileName,
+  Profile,
   type NavItem,
-  type Profile,
   type Section,
   type StepItem,
-} from '../shared/config-schema.ts'
-import { parseProfile } from './config-store.ts'
-import * as md from './wiki-md.ts'
+} from '../../shared/config-schema.ts'
+import { describeIssue } from '../../server/config-store.ts'
+import * as md from '../../server/wiki-md.ts'
+import { parseDocument } from 'yaml'
 
 export interface Migrated {
-  /** The wiki folder, as written (`~/…`). */
+  /** The wiki folder, as given (`~/…` or absolute). */
   wiki: string
   /** Files inside it. */
   files: Record<string, string>
@@ -29,14 +30,19 @@ export interface Migrated {
 
 export interface MigrateOptions {
   id: string
-  home: string
-  /** The wiki folder to use instead of the profile's `notes:` (or `<home>/notes`). */
-  wiki?: string
+  /** The wiki folder the pages are for (links are written relative to it). */
+  wiki: string
 }
 
-/** Where a profile's wiki goes: its notes folder, else `<home>/notes`, else `~/notes`. */
-export function defaultWiki(profile: Pick<Profile, 'notes' | 'home'>): string {
-  return profile.notes ?? (profile.home && profile.home !== '~' ? `${profile.home.replace(/\/+$/, '')}/notes` : '~/notes')
+/** The YAML as a Profile (the old `notes:` and `home:` keys are ignored). */
+export function parseProfile(text: string): { profile: Profile | null; error: string | null } {
+  const doc = parseDocument(text)
+  if (doc.errors.length) return { profile: null, error: doc.errors[0].message }
+  const data = (doc.toJS() ?? {}) as Record<string, unknown>
+  delete data.notes
+  delete data.home
+  const r = Profile.safeParse(data)
+  return r.success ? { profile: r.data, error: null } : { profile: null, error: describeIssue(r.error) }
 }
 
 /** The frontmatter block for `data` (keys with undefined or null left out), or '' when nothing is left. */
@@ -48,12 +54,12 @@ export function metaBlock(data: Record<string, unknown>): string {
 
 export function migrateProfile(text: string, opts: MigrateOptions): Migrated {
   const { profile, error } = parseProfile(text)
-  if (!profile) throw new Error(error?.message ?? 'The profile does not parse')
+  if (!profile) throw new Error(error ?? 'The profile does not parse')
   return migrateParsed(profile, opts)
 }
 
 export function migrateParsed(profile: Profile, opts: MigrateOptions): Migrated {
-  const wiki = opts.wiki ?? defaultWiki(profile)
+  const wiki = opts.wiki
   const files: Record<string, string> = {}
   const taken = new Set<string>()
   const free = (dir: string, name: string) => {
@@ -120,7 +126,6 @@ export function migrateParsed(profile: Profile, opts: MigrateOptions): Migrated 
     accent: profile.accent,
     theme: profile.theme,
     background: profile.background,
-    home: profile.home,
     categories: profile.categories,
     openWith: profile.openWith,
     mcpOff: profile.mcpOff,

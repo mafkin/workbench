@@ -116,9 +116,9 @@ export class Context extends EventEmitter {
     return p.profile
   }
 
-  /** The notes folder, absolute; null without one. */
-  #root(profile: Profile): string | null {
-    return profile.notes ? path.resolve(expandHome(profile.notes, this.#home)) : null
+  /** The profile's folder, absolute (part 13: a profile always has one; tests parsing a bare profile get home). */
+  #root(profile: Profile): string {
+    return path.resolve(expandHome(profile.root, this.#home))
   }
 
   #tilde(p: string) {
@@ -159,7 +159,7 @@ export class Context extends EventEmitter {
     const inboxDir = path.join(root, 'inbox')
     if (folders[3].exists) this.#watch(id, inboxDir)
     const inbox = folders[3].exists ? (await fsp.readdir(inboxDir).catch(() => [])).filter((n) => !n.startsWith('.')).length : 0
-    return { notes: this.#profile(id).notes ?? null, ready: folders[0].exists, folders, inbox }
+    return { notes: this.#tilde(root), ready: folders[0].exists, folders, inbox }
   }
 
   /**
@@ -170,7 +170,6 @@ export class Context extends EventEmitter {
   async setup(id: string): Promise<ContextStatus> {
     const profile = this.#profile(id)
     const root = this.#root(profile)
-    if (!root) throw new StoreError('Set a notes folder first (notes: in the profile)', 409)
     for (const name of CONTEXT_FOLDERS) await fsp.mkdir(path.join(root, name), { recursive: true })
     for (const [rel, text] of Object.entries(STARTER)) {
       await fsp.writeFile(path.join(root, rel), text, { flag: 'wx' }).catch((err) => {
@@ -178,8 +177,8 @@ export class Context extends EventEmitter {
       })
     }
     const linked = walkItems(profile).some((e) => e.item.type === 'folder' && !!e.item.path && path.resolve(expandHome(e.item.path, this.#home)) === path.join(root, 'context'))
-    if (!linked && profile.notes) {
-      const notes = profile.notes
+    if (!linked) {
+      const notes = this.#tilde(root)
       const ops: Op[] = [
         { op: 'addSection', drawer: 0, title: 'Context', index: 0 },
         ...CONTEXT_FOLDERS.map((name, i): Op => ({ op: 'addItem', to: { drawer: 0, section: 0 }, index: i, item: { type: 'folder', label: CONTEXT_LABEL[name], path: `${notes.replace(/\/+$/, '')}/${name}` } })),
@@ -244,7 +243,7 @@ export class Context extends EventEmitter {
     const value = raw.trim()
     if (!/^(~|\/)/.test(value)) throw new StoreError('Path must start with ~ or /', 400)
     const real = await realish(path.resolve(expandHome(value, this.#home)))
-    if (!(await browseRoots(profile, this.#home)).some((r) => within(real, r.real))) throw new StoreError("Not allowed: outside this profile's folders", 403)
+    if (!(await browseRoots(profile, this.#home, this.#store.dir)).some((r) => within(real, r.real))) throw new StoreError("Not allowed: outside this profile's folders", 403)
     const stat = await fsp.stat(real).catch(() => null)
     if (!stat) throw new StoreError('No such file', 404)
     if (!stat.isFile()) throw new StoreError('Only files can be sent to the inbox', 422)
@@ -268,9 +267,12 @@ export async function drawerContext(profile: Profile, drawer: number, home: stri
     if (other && other !== own) named.push({ name: other.name, folder: other.folder, mine: false })
   }
   const found: { line: string; dir: string }[] = []
+  // A drawer's own folder inside the profile (drawers/<Name>/, part 13) is already covered by the wiki's --add-dir.
+  const root = profile.root === '~' ? null : path.resolve(expandHome(profile.root, home))
   for (const d of named) {
     if (!d.folder) continue
     const dir = path.resolve(expandHome(d.folder, home))
+    if (root && (dir === root || dir.startsWith(`${root}${path.sep}`))) continue
     if (!(await fsp.stat(dir).catch(() => null))?.isDirectory() || found.some((f) => f.dir === dir)) continue
     found.push({ dir, line: `- ${dir}: ${d.mine ? `the ${d.name} drawer's own shared folder` : `shared by the ${d.name} drawer`}` })
   }
@@ -288,8 +290,8 @@ export async function drawerContext(profile: Profile, drawer: number, home: stri
 const PAGE_CAP = 16 * 1024
 
 export async function wikiContext(profile: Profile, home: string, page?: string): Promise<ChatContext | null> {
-  if (!profile.notes) return null
-  const root = path.resolve(expandHome(profile.notes, home))
+  if (profile.root === '~') return null
+  const root = path.resolve(expandHome(profile.root, home))
   if (!(await fsp.stat(root).catch(() => null))?.isDirectory()) return null
   const parts = [
     `# My wiki (Workbench, profile ${profile.name})`,

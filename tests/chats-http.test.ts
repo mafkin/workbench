@@ -55,9 +55,9 @@ beforeEach(async () => {
   await fsp.mkdir(path.join(home, 'elsewhere'), { recursive: true })
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
-  await migrateFixture(path.join(dir, 'cfg'), home, { defaultWiki: (id) => path.join(dir, 'wiki', id) })
+  await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({
-    configDir: path.join(dir, 'cfg'),
+    dir: path.join(home, 'wb'),
     port: 7420,
     distDir: null,
     home,
@@ -96,7 +96,7 @@ describe('chat routes', { timeout: 15_000 }, () => {
   })
 
   test('a chat gets the pinned skills: named in the prompt, the wiki’s own through --plugin-dir; a shell gets none', async () => {
-    const wiki = path.join(dir, 'wiki/work')
+    const wiki = path.join(home, 'wb/work')
     await fsp.mkdir(path.join(wiki, 'skills/concept-art'), { recursive: true })
     await fsp.writeFile(path.join(wiki, 'skills/concept-art/SKILL.md'), '---\ndescription: Prompts for concept art\n---\n# Concept art\n')
     await fsp.mkdir(path.join(home, '.claude/skills/deploy'), { recursive: true })
@@ -136,7 +136,7 @@ describe('chat routes', { timeout: 15_000 }, () => {
   })
 
   test('a chat from a page remembers it and gets its text; a drawer’s own chat runs in its folder', async () => {
-    const wiki = path.join(dir, 'wiki/work')
+    const wiki = path.join(home, 'wb/work')
     await fsp.writeFile(path.join(wiki, 'pages/Alpha.md'), '---\nfolder: ~/alpha\n---\n# Alpha\n\nA small pig. A very big sky.\n\n## Workflow\n\n- [All files](files:)\n')
     // No watcher in tests: the store notices the hand edit on the next apply (which it refuses, as stale).
     await server.store.apply('work', rev(), []).catch(() => {})
@@ -163,9 +163,9 @@ describe('chat routes', { timeout: 15_000 }, () => {
   test('an item without a folder: its chats run in home, keyed by its id; marks and servers skip it', async () => {
     const loose = { section: 0, index: 3 }
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose })
-    expect(adhoc.body).toMatchObject({ host: 'project:id:abc12345', slot: null, cwd: '~' })
+    expect(adhoc.body).toMatchObject({ host: 'project:id:abc12345', slot: null, cwd: '~/wb/work/drawers/Work' })
     const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose, step: 0 })
-    expect(step.body).toMatchObject({ host: 'project:id:abc12345', slot: 'step:id:abc12345|talk', cwd: '~' })
+    expect(step.body).toMatchObject({ host: 'project:id:abc12345', slot: 'step:id:abc12345|talk', cwd: '~/wb/work/drawers/Work' })
     expect((await call('GET', '/api/git/marks?profile=work')).status).toBe(200)
     expect((await call('GET', '/api/servers?profile=work')).status).toBe(200)
   })

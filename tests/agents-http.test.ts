@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import type { Chat } from '../shared/config-schema.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
@@ -59,8 +60,9 @@ beforeEach(async () => {
   await fsp.writeFile(path.join(home, '.claude/agents/orch.md'), '---\nname: orchestrator\n---\nYou coordinate.\n')
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
+  await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({
-    configDir: path.join(dir, 'cfg'),
+    dir: path.join(home, 'wb'),
     port: 7420,
     distDir: null,
     home,
@@ -79,7 +81,8 @@ describe('agent profiles at chat start', { timeout: 15_000 }, () => {
   test("New chat starts the project's default agent profile, with its flags and first prompt", async () => {
     const { body: chat } = await start({ at: ALPHA })
     expect(chat).toMatchObject({ agentProfile: 'Reviewer', bypass: false, agent: 'claude' })
-    await sees(chat.id, `args=["--model","opus","--permission-mode","plan","--session-id","${chat.session}","--settings"`)
+    await sees(chat.id, 'args=["--model","opus","--permission-mode","plan","--append-system-prompt"')
+    await sees(chat.id, `"--add-dir","${path.join(home, 'wb/work')}","--session-id","${chat.session}","--settings"`)
     await sees(chat.id, 'prompt=Look at the diff')
   })
 
@@ -89,7 +92,8 @@ describe('agent profiles at chat start', { timeout: 15_000 }, () => {
     const { body: wild } = await start({ at: BETA, agent: 'wild' })
     expect(wild).toMatchObject({ agentProfile: 'Wild', bypass: true })
     // The Claude agent decides the model: --model is left out.
-    await sees(wild.id, `args=["--agent","orchestrator","--permission-mode","bypassPermissions","--session-id"`)
+    await sees(wild.id, 'args=["--agent","orchestrator","--permission-mode","bypassPermissions","--append-system-prompt"')
+    await sees(wild.id, `"--add-dir","${path.join(home, 'wb/work')}","--session-id"`)
     expect((await start({ at: BETA })).body).toMatchObject({ agentProfile: null })
   })
 
