@@ -168,7 +168,6 @@ test('Today creates the daily note from the template', async ({ page }) => {
 
 test('every profile’s notes live in its wiki; Personal has its own', async ({ page }) => {
   await pickProfile(page, 'Personal')
-  await expect(page.locator('.notes-hint')).toHaveCount(0)
   await nav(page).locator('.section-head', { hasText: 'Games' }).click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'New note…' }).click()
   const dialog = page.getByRole('form', { name: 'New note' })
@@ -234,5 +233,7 @@ test('before a query the search shows the tags and the pages to write; a tag chi
   // Written now, so it is no longer a page to write.
   await entry(page, 'Ideas').click()
   await page.keyboard.press('Control+Shift+F')
-  await expect(page.getByRole('region', { name: 'Pages to write' })).not.toContainText('Art direction')
+  // The overview is fetched anew: wait for it before saying what it lacks.
+  await expect(missing).toContainText('Missing page')
+  await expect(missing).not.toContainText('Art direction')
 })

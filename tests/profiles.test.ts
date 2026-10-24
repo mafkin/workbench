@@ -10,7 +10,6 @@ import { migrateFixture } from './fixtures/wiki.ts'
 const WORK = `# My work setup
 name: Work
 accent: "#7d93ab"
-notes: ~/wb/work
 # Every project starts with these
 workflow:
   - { label: sources, type: folder, path: src }
@@ -29,13 +28,9 @@ let server: Awaited<ReturnType<typeof buildServer>>
 let spawned: string[]
 const headers = { host: '127.0.0.1:7420', 'x-workbench': '1' }
 
-/** gio trash moves the file into dir/trash. */
+/** Records what would have run: removing a profile must run nothing (no Trash). */
 function fakeSpawn(command: string, args: string[]) {
   spawned.push([command, ...args].join(' '))
-  if (command === 'gio' && args[0] === 'trash') {
-    fs.mkdirSync(path.join(dir, 'trash'), { recursive: true })
-    for (const p of args.slice(2)) fs.renameSync(p, path.join(dir, 'trash', path.basename(p)))
-  }
   const child = Object.assign(new EventEmitter(), { unref() {}, stderr: new EventEmitter() })
   setImmediate(() => {
     child.emit('spawn')
@@ -85,7 +80,7 @@ describe('adding and removing profiles', () => {
     expect(settings).toContain('  - games\n')
   })
 
-  it('copies the current profile’s index.md (its nav), drawer pages and Workflow.md under a new name', async () => {
+  it('copies the current profile’s index.md (its nav) and Workflow.md under a new name', async () => {
     await call('POST', '/api/profiles', { id: 'side', name: 'Side', copyFrom: 'work' })
     const text = await fsp.readFile(wb('side/index.md'), 'utf8')
     expect(text).toContain('name: Side')
@@ -96,11 +91,14 @@ describe('adding and removing profiles', () => {
   })
 
   it('refuses a taken or odd id and an empty name; a request cannot name a folder', async () => {
+    const work = await fsp.readFile(wb('work/index.md'), 'utf8')
     expect((await call('POST', '/api/profiles', { id: 'work', name: 'Again' })).status).toBe(409)
     expect((await call('POST', '/api/profiles', { id: '../x', name: 'X' })).status).toBe(400)
     expect((await call('POST', '/api/profiles', { id: 'ok', name: '' })).status).toBe(400)
-    expect(fs.existsSync(wb('work/index.md'))).toBe(true)
+    expect(await fsp.readFile(wb('work/index.md'), 'utf8')).toBe(work)
     expect(fs.existsSync(path.join(dir, 'home/x'))).toBe(false)
+    expect(fs.existsSync(wb('ok'))).toBe(false)
+    expect(ids()).toEqual(['work', 'personal'])
   })
 
   it('removes a profile from the switcher, keeping its folder; the active one moves on; the last one stays', async () => {

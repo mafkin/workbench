@@ -12,7 +12,6 @@ const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
 
 const WORK = `name: Work
-notes: ~/wb/work
 drawers:
   - name: Game dev
     folder: ~/shared/game
@@ -56,7 +55,7 @@ async function sees(id: string, text: string, timeout = 5000) {
 beforeEach(async () => {
   dir = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'wb-drawers-http-')))
   home = path.join(dir, 'home')
-  for (const d of ['tower', 'lab', 'notes', 'shared/game', 'shared/research']) await fsp.mkdir(path.join(home, d), { recursive: true })
+  for (const d of ['tower', 'lab', 'shared/game', 'shared/research']) await fsp.mkdir(path.join(home, d), { recursive: true })
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
   await migrateFixture(path.join(dir, 'cfg'), home)
@@ -101,9 +100,9 @@ describe('drawers in the service', { timeout: 15_000 }, () => {
     const status = await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/shared/game')}`)
     expect(status.status, JSON.stringify(status.body)).toBe(200)
     expect(status.body.branch).toBe('main')
-    // A drawer folder outside a repository, and a folder that is no drawer's and no project's.
-    expect((await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/shared/research')}`)).status).toBe(404)
-    expect((await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/wb/work')}`)).status).toBe(404)
+    // A drawer folder outside a repository, and a folder that is no drawer's and no item's: each for its own reason.
+    expect(await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/shared/research')}`)).toMatchObject({ status: 404, body: { error: 'This project is not in a git repository' } })
+    expect(await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/wb/work')}`)).toMatchObject({ status: 404, body: { error: 'Not a project of this profile' } })
   })
 
   test('the file routes may open drawer folders', async () => {
@@ -123,6 +122,9 @@ describe('drawers in the service', { timeout: 15_000 }, () => {
 
     expect((await call('PUT', '/api/logos', encodePng(65, 64, Buffer.alloc(65 * 64 * 4)), 'image/png')).status).toBe(422)
     expect((await call('PUT', '/api/logos', Buffer.from('RIFF0000WEBPVP8 '), 'image/webp')).status).toBe(415)
-    expect((await call('GET', '/api/logos/..%2Fprofiles%2Fwork.yaml')).status).toBe(404)
+    // Only names put gave, inside the folder.
+    expect((await call('GET', '/api/logos/..%2Fsettings.yaml')).status).toBe(404)
+    await fsp.writeFile(path.join(home, 'wb/logos/notes.png'), png)
+    expect((await call('GET', '/api/logos/notes.png')).status).toBe(404)
   })
 })

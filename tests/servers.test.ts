@@ -27,9 +27,12 @@ describe('reading listening sockets', () => {
 })
 
 describe('reading a process', () => {
+  let root: string
+  afterEach(() => fsp.rm(root, { recursive: true, force: true }))
+
   // comm is the main thread's name, which Node 26.11 sets to "node-MainThread".
   async function fakeProc(comm: string, cmdline: string[]) {
-    const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'wb-proc-'))
+    root = await fsp.mkdtemp(path.join(os.tmpdir(), 'wb-proc-'))
     await fsp.mkdir(path.join(root, '42'))
     await fsp.symlink(root, path.join(root, '42', 'cwd'))
     await fsp.writeFile(path.join(root, '42', 'comm'), `${comm}\n`)
@@ -38,15 +41,13 @@ describe('reading a process', () => {
   }
 
   it('names it after its program, not its thread name', async () => {
-    const root = await fakeProc('node-MainThread', ['/usr/bin/node', 'server.js'])
+    await fakeProc('node-MainThread', ['/usr/bin/node', 'server.js'])
     expect((await new Procfs(root).process(42))?.name).toBe('node')
-    await fsp.rm(root, { recursive: true })
   })
 
   it('keeps comm when the program rewrote its command line', async () => {
-    const root = await fakeProc('nginx', ['nginx: master process /usr/sbin/nginx'])
+    await fakeProc('nginx', ['nginx: master process /usr/sbin/nginx'])
     expect((await new Procfs(root).process(42))?.name).toBe('nginx')
-    await fsp.rm(root, { recursive: true })
   })
 })
 

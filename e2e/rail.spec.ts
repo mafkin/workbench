@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.dot.live')).toBeVisible()
 })
 
-test('the rail: every drawer has Files and Git on its own folder; Settings points them at another folder', async ({ page }) => {
+test('the rail: every drawer has Files on its own folder from the start; Settings points the tools at another folder', async ({ page }) => {
   // The drawer's own folder, drawers/Work in the profile, is there from the start.
   await expect(rail(page).getByRole('button')).toHaveText(['Files', 'Git', 'Skills', 'MCP', 'Settings'])
   await tool(page, 'Files').click()
@@ -40,7 +40,7 @@ test('the rail: every drawer has Files and Git on its own folder; Settings point
 
   await tool(page, 'Git').click()
   await expect(title(page)).toHaveText('Git')
-  await expect(page.locator('.git-view')).toContainText('master')
+  await expect(page.locator('.git-view')).toContainText('main')
   await page.screenshot({ path: 'test-results/rail-git.png' })
 
   // Ctrl+K lists the drawer's tools; the selection survives a reload.

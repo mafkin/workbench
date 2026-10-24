@@ -14,7 +14,6 @@ let store: Wiki
 let notes: Notes
 
 const WORK = `name: Work
-notes: ~/wb/work
 sections:
   - title: Docs
     items:
@@ -26,7 +25,6 @@ sections:
 `
 
 const PERSONAL = `name: Personal
-notes: ~/wb/personal
 sections: []
 `
 
@@ -173,12 +171,6 @@ describe('writing', () => {
     expect(await fsp.readFile(path.join(home, 'wb/work/new/deeper/Fresh.md'), 'utf8')).toBe('# Fresh\n')
     expect(await status(notes.write('work', '~/wb/work/Ideas.md', null, 'overwrite'))).toBe(409)
     expect(await fsp.readFile(path.join(home, 'wb/work/Ideas.md'), 'utf8')).toContain('Ship the notes part')
-  })
-
-  it('creates the notes folder itself when it does not exist yet', async () => {
-    await fsp.rm(path.join(home, 'wb/work'), { recursive: true })
-    await notes.write('work', '~/wb/work/First.md', null, '# First\n')
-    expect(await fsp.readFile(path.join(home, 'wb/work/First.md'), 'utf8')).toBe('# First\n')
   })
 
   it('leaves no temp files and keeps the file mode', async () => {
@@ -370,7 +362,6 @@ sections:
     await write('proj/docs/Guide.md', '# Guide\n')
     await write('proj/data.txt', 'data\n')
     await write('proj/pic.png', 'PNG')
-    await write('workhome/todo.md', '- a\n')
     await migrateFixture(path.join(dir, 'cfg'), home)
     browseStore = new Wiki(path.join(home, 'wb'), home)
     await browseStore.init({ watch: false })
@@ -391,8 +382,6 @@ sections:
   it('still refuses other files there, and Markdown elsewhere', async () => {
     expect(await status(browse.read('browse', '~/proj/data.txt'))).toBe(403)
     expect(await status(browse.read('browse', '~/secret.md'))).toBe(403)
-    // The old home: key is gone (part 13): a folder is reachable only as an entry or inside the Workbench.
-    expect(await status(browse.read('browse', '~/workhome/todo.md'))).toBe(403)
     await fsp.symlink(path.join(home, 'secret.md'), path.join(home, 'proj/out.md'))
     expect(await status(browse.read('browse', '~/proj/out.md'))).toBe(403)
   })
@@ -403,6 +392,9 @@ sections:
 
   it('keeps list and search to the wiki and note entries', async () => {
     expect((await browse.list('browse')).map((n) => n.name).sort()).toEqual(['Proj', 'index'])
+    // Guide.md opens as a note (above) but is not searched.
+    expect(await browse.search('browse', 'guide')).toEqual([])
+    expect((await browse.search('browse', 'proj')).map((h) => h.path)).toContain('~/wb/browse/pages/Proj.md')
   })
 })
 
@@ -411,7 +403,7 @@ describe('HTTP routes', () => {
   const headers = { host: '127.0.0.1:7420', 'x-workbench': '1' }
 
   beforeEach(async () => {
-    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false })
+    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0 })
   })
 
   afterEach(() => server.app.close())
@@ -495,6 +487,8 @@ describe('overview', () => {
   it('counts tags and lists the pages that links name but nobody wrote, spelled as the newest linker does', async () => {
     await write('wb/work/Tagged.md', '---\ntags: [deploy, game]\n---\n# Tagged\n\nSee [[Release notes]] and [[Ideas]], [[sub/Deploy plan#steps|the plan]], [[Nope.md]].\n')
     await write('wb/work/Inline.md', '# Inline\n\n#deploy again; [[release notes]] too, and [[Nope]].\n')
+    const hourAgo = new Date(Date.now() - 3600_000)
+    await fsp.utimes(path.join(home, 'wb/work/Tagged.md'), hourAgo, hourAgo)
     const o = await notes.overview('work')
     expect(o.tags).toEqual([
       { tag: 'deploy', count: 2 },
@@ -504,7 +498,7 @@ describe('overview', () => {
       ['release notes', 2],
       ['Nope', 2],
     ])
-    expect(['~/wb/work/Tagged.md', '~/wb/work/Inline.md']).toContain(o.missing[0].from)
+    expect(o.missing[0].from).toBe('~/wb/work/Inline.md')
   })
 })
 
@@ -596,7 +590,7 @@ describe('HTTP routes for the wiki', () => {
   const headers = { host: '127.0.0.1:7420', 'x-workbench': '1' }
 
   beforeEach(async () => {
-    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false })
+    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0 })
     await write('wb/work/A.md', 'See [[Deploy plan]].\n')
   })
 

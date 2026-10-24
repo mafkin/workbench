@@ -44,7 +44,7 @@ const { app } = await buildServer({
   port: setupMode ? SETUP_PORT : PORT,
   home: HOME,
   spawn,
-  stateDir: path.join(DIR, 'state'),
+  stateDir: path.join(DIR, setupMode ? 'state-setup' : 'state'),
   chatCommands: { claude: FAKE_CLAUDE, shell: FAKE_SHELL },
   // Quicker than on the desktop, so "needs you" shows within a test.
   chatTiming: { quietMs: 400, busyMs: 600 },

@@ -10,7 +10,6 @@ import { migrateFixture } from './fixtures/wiki.ts'
 
 const SOURCE = `# Personal
 name: Personal
-home: "~"
 # Every project starts with these
 workflow:
   - { label: assets, type: folder, path: assets } # textures and sprites
@@ -180,6 +179,7 @@ workflow:
   - { label: modeling, type: launch, command: blender, args: [models/main.blend] }
   - { label: board, type: link, url: "https://example.com/board" }
   - { label: report, type: report, path: out/index.html }
+  - { label: spec, type: file, path: spec.pdf }
 sections:
   - title: P
     items:
@@ -189,7 +189,7 @@ sections:
     )
     spawned = []
     await migrateFixture(path.join(dir, 'cfg'), home)
-    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, spawn, watch: false })
+    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, spawn, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0 })
   })
 
   afterEach(async () => {
@@ -202,7 +202,7 @@ sections:
     return server.app.inject({ method: 'POST', url: '/api/open', headers, payload: { profile: 'work', rev, at: { section: 0, index }, step } })
   }
 
-  // Proj has no steps: of its own: All files comes before the workflow.
+  // Proj was written without steps of its own: its page has All files (0), then the workflow (1-6).
   it('opens a link step in the browser, by address', async () => {
     expect((await open(4)).statusCode).toBe(200)
     expect(spawned).toEqual([{ command: 'xdg-open', args: ['https://example.com/board'], cwd: undefined }])
@@ -210,6 +210,8 @@ sections:
 
   it('does not open report or file steps outside the app', async () => {
     expect((await open(5)).statusCode).toBe(422)
+    expect((await open(6)).statusCode).toBe(422)
+    expect(spawned).toEqual([])
   })
 
   it('starts a launcher step in the project folder, by address', async () => {

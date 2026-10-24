@@ -137,6 +137,8 @@ sections:
       home: path.join(dir, 'home'),
       spawn: spawn.spawn,
       watch: false,
+      stateDir: path.join(dir, 'state'),
+      gitFetchEveryMs: 0,
     })
   })
 

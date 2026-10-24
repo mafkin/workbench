@@ -54,6 +54,8 @@ test('Ctrl+K goes to entries, steps and notes, and runs actions', async ({ page 
 test('Profile settings rename the profile and add and remove profiles', async ({ page }) => {
   await profileMenu(page, 'Profile settings…')
   const dialog = page.getByRole('dialog', { name: 'Profile settings' })
+  // The folder is the profile's id in the Workbench: shown, not edited.
+  await expect(dialog.locator('.wiki-folder')).toHaveText('~/workbench/work')
   await dialog.locator('input[name=name]').fill('Day job')
   await dialog.getByRole('radio', { name: '#b39b72' }).click()
   await page.screenshot({ path: 'test-results/polish-profile.png' })
@@ -62,7 +64,6 @@ test('Profile settings rename the profile and add and remove profiles', async ({
   const index = await fsp.readFile(WORK_FILE, 'utf8')
   expect(index).toContain('name: Day job')
   expect(index).toContain('accent: "#b39b72"')
-  expect(index).not.toContain('home:')
   expect(index).toContain('## Projects')
 
   await profileMenu(page, 'Add profile…')

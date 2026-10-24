@@ -10,7 +10,6 @@ const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
 
 const WORK = `name: Work
-notes: ~/wb/work
 sections:
   - title: Projects
     items:
@@ -55,7 +54,7 @@ beforeEach(async () => {
   await fsp.writeFile(path.join(dir, 'cfg/settings.yaml'), 'activeProfile: work\nprofiles: [work, personal]\n')
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
   await fsp.writeFile(path.join(dir, 'cfg/profiles/personal.yaml'), PERSONAL)
-  // Every wiki profile has a notes folder (its wiki), so Personal gets one of its own.
+  // Every profile is a folder in the Workbench, its notes and context included: Personal has its own.
   await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({
     dir: path.join(home, 'wb'),
@@ -164,7 +163,7 @@ describe('context folders', { timeout: 15_000 }, () => {
     expect(second.body.path).toBe('~/wb/work/inbox/report 2.pdf')
     expect(await fsp.readFile(path.join(notes, 'inbox/report 2.pdf'), 'utf8')).toBe('pdf bytes')
     expect(await fsp.readFile(path.join(home, 'alpha/report.pdf'), 'utf8')).toBe('pdf bytes')
-    // Home is a profile folder only when the profile says so; Work's folders are its notes and Alpha.
+    // Work's folders are the Workbench folder (its own inside it) and Alpha; nothing else in home.
     expect((await call('POST', '/api/context/inbox', { profile: 'work', path: '~/elsewhere/secret.txt' })).status).toBe(403)
     expect((await call('POST', '/api/context/inbox', { profile: 'work', path: '~/alpha' })).status).toBe(422)
     expect((await call('POST', '/api/context/inbox', { profile: 'work', path: '~/alpha/nope.txt' })).status).toBe(404)
@@ -174,6 +173,8 @@ describe('context folders', { timeout: 15_000 }, () => {
   it('tells the app when the inbox changes', async () => {
     await call('POST', '/api/context/setup', { profile: 'work' })
     await call('GET', '/api/context?profile=work')
+    // Setup's own event comes 100 ms later; only what follows is the inbox's.
+    await new Promise((r) => setTimeout(r, 300))
     const seen: string[] = []
     server.context.on('context', (e: { profile: string }) => seen.push(e.profile))
     await fsp.writeFile(path.join(notes, 'inbox/dropped.txt'), 'hi')

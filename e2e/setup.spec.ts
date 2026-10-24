@@ -13,16 +13,17 @@ const details = (page: Page) => page.getByLabel('Details')
 
 const rail = (page: Page) => page.getByRole('complementary', { name: 'Drawer tools' })
 
-/** The rail's Skills or MCP view: what claude loads for the Work drawer (everywhere until it has a folder). */
+/** The rail's Skills or MCP view: what claude loads for the Work drawer (everywhere, unless its folder is set elsewhere). */
 async function openRail(page: Page, tool: 'Skills' | 'MCP') {
   await rail(page).getByRole('button', { name: tool, exact: true }).click()
   await expect(page.locator('.page-title')).toHaveText(tool === 'MCP' ? 'MCP servers' : 'Skills')
 }
 
-/** Give the Work drawer Alpha's folder: the rail then shows what claude loads in ~/alpha. */
+/** Give the Work drawer Alpha's folder, and wait until the rail shows what claude loads in ~/alpha. */
 async function alphaDrawer(page: Page) {
   await writeWork(WORK_DRAWER)
-  await expect(rail(page).getByRole('button', { name: 'Files', exact: true })).toBeVisible()
+  await openRail(page, 'Skills')
+  await expect(page.locator('.setup-for')).toContainText('What applies in ~/alpha')
 }
 
 test.beforeEach(async ({ page }) => {
@@ -78,11 +79,20 @@ test('Check starts an MCP server and lists its tools; secrets never reach the pa
 
   // Everything the views show (the drawer folder's items too), and every response they got.
   await alphaDrawer(page)
-  await openRail(page, 'Skills')
-  for (const kindName of ['Skills', 'Agents', 'Commands', 'Hooks', 'Plugins']) await kind(page, kindName).click()
-  const html = await page.content()
+  const pages: string[] = []
+  for (const kindName of ['Skills', 'Agents', 'Commands', 'Hooks', 'Plugins']) {
+    await kind(page, kindName).click()
+    await expect(kind(page, kindName)).toHaveAttribute('aria-selected', 'true')
+    pages.push(await page.content())
+  }
+  await openRail(page, 'MCP')
+  // scratch (with a URL secret) is in ~/alpha's local servers only.
+  await expect(option(page, 'scratch')).toBeVisible()
+  await option(page, 'scratch').click()
+  await expect(details(page)).toContainText('scratch')
+  pages.push(await page.content())
   for (const s of CLAUDE_SECRETS) {
-    expect(html).not.toContain(s)
+    for (const html of pages) expect(html).not.toContain(s)
     for (const r of responses) expect(r).not.toContain(s)
   }
   expect(responses.length).toBeGreaterThan(3)

@@ -25,7 +25,7 @@ describe('an entry is found again after it moves', () => {
 
   it('is found after a rename by its path, and not confused with what took its place', () => {
     const renamed = profile([{ title: 'Projects', items: [{ label: 'Gamma', type: 'folder', path: '~/gamma' }, { label: 'Beta 2', type: 'folder', path: '~/beta' }] }])
-    expect(resolveEntry(renamed, '0.1', entryId(before.sections[0].items[0]))).toBeNull()
+    expect(resolveEntry(renamed, '0.0', entryId(before.sections[0].items[0]))).toBeNull()
     expect(resolveEntry(renamed, '0.1', beta)).toEqual({ section: 0, index: 1 })
     const gone = profile([{ title: 'Projects', items: [{ label: 'Gamma', type: 'folder', path: '~/gamma' }, { label: 'Delta', type: 'folder', path: '~/delta' }] }])
     expect(resolveEntry(gone, '0.1', beta)).toBeNull()

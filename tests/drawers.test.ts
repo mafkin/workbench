@@ -8,7 +8,7 @@ const TWO = Profile.parse({
   name: 'Work',
   drawers: [
     { name: 'Work', sections: [{ title: 'Projects', items: [{ label: 'Tower', type: 'folder', path: '~/dev/tower' }] }] },
-    { name: 'Research', folder: '~/wb/work/drawers/research', sections: [{ title: 'Reading', items: [{ label: 'Papers', type: 'note', path: '~/p.md' }] }] },
+    { name: 'Research', folder: '~/shared/research', sections: [{ title: 'Reading', items: [{ label: 'Papers', type: 'note', path: '~/p.md' }] }] },
   ],
 })
 
@@ -19,7 +19,7 @@ describe('drawers in the schema', () => {
     expect(drawersOf(TWO).map((d) => d.name)).toEqual(['Work', 'Research'])
   })
 
-  it('a file with both sections and drawers, or two drawers of one name, is an error', () => {
+  it('a profile with both sections and drawers, or two drawers of one name, does not parse', () => {
     const both = Profile.safeParse({ name: 'W', sections: [{ title: 'A', items: [] }], drawers: [{ name: 'A', sections: [] }] })
     expect(both.success).toBe(false)
     expect(both.error?.issues[0].message).toMatch(/either sections: or drawers:/)
@@ -39,7 +39,7 @@ describe('drawers in the schema', () => {
     expect(resolveEntry(TWO, '1:0.5', 'note|Papers|~/p.md')).toEqual(at)
   })
 
-  it("a drawer's shared folder is one of the profile's folders", () => {
-    expect(folderRoots(TWO)).toContainEqual({ label: 'Research (drawer)', path: '~/wb/work/drawers/research' })
+  it("a drawer's folder is one of the profile's folders", () => {
+    expect(folderRoots(TWO)).toContainEqual({ label: 'Research (drawer)', path: '~/shared/research' })
   })
 })

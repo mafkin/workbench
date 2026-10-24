@@ -40,7 +40,6 @@ test.beforeEach(async ({ page }) => {
   fs.writeFileSync(path.join(ALPHA, 'notes.txt'), `${LINES.join('\n')}\n`)
   sh(ALPHA, 'add', '-A')
   sh(ALPHA, 'commit', '-q', '-m', 'Start')
-  sh(ALPHA, 'branch', '-M', 'main')
   sh(DIR, 'init', '-q', '--bare', REMOTE)
   sh(ALPHA, 'remote', 'add', 'origin', REMOTE)
   sh(ALPHA, 'push', '-q', '-u', 'origin', 'main')
@@ -138,7 +137,8 @@ test('a pull that conflicts: the banner, Ask claude, and Abort', async ({ page }
 
   await banner.getByRole('button', { name: 'Ask claude about notes.txt' }).click()
   await expect(page.locator('.chat-terminal .xterm-rows')).toContainText('prompt=This repository has merge conflicts')
-  await railGit(page).click()
+  // The chat opens in the dock; the page stays on Git.
+  await expect(railGit(page)).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('alert', { name: 'Conflicts' }).getByRole('button', { name: 'Abort merge' }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Abort merge' }).click()
   await expect(page.getByRole('alert', { name: 'Conflicts' })).toHaveCount(0)

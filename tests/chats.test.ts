@@ -59,7 +59,7 @@ describe('chats', { timeout: 15_000 }, () => {
     expect(chats.screen(chat.id)).toContain('you said: hello there')
   })
 
-  test('after /clear (or /resume) in claude, the chat follows the new session', async () => {
+  test('after /clear in claude, the chat follows the new session, and Resume goes on in it', async () => {
     const chat = await chats.start(spec())
     await sees(chat.id, '"--settings"')
     chats.write(chat.id, 'clear\r')
@@ -67,11 +67,13 @@ describe('chats', { timeout: 15_000 }, () => {
     const now = /cleared: session=([0-9a-f-]{36})/.exec(chats.text(chat.id))![1]
     expect(now).not.toBe(chat.session)
     await until(() => chats.get(chat.id)?.session === now, 'the chat to follow the new session')
-    // Resume continues the session it is in now.
+    // Something said in the new session, so it has a transcript to resume.
+    chats.write(chat.id, 'after the clear\r')
+    await sees(chat.id, 'you said: after the clear')
     chats.write(chat.id, 'exit\r')
     await until(() => chats.get(chat.id)?.state === 'exited', 'exit')
     await chats.restart(chat.id, { fresh: false })
-    await sees(chat.id, `session=${now}`)
+    await sees(chat.id, `session=${now} resumed=true`)
   })
 
   test('the bell asks for attention unless someone is watching with focus', async () => {

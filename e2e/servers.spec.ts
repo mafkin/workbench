@@ -29,15 +29,14 @@ test.afterEach(() => {
   child = null
 })
 
-test('servers: a project’s running server shows in the nav, the card and the page; Stop asks first', async ({ page }) => {
+test('servers: an item’s running server shows in the nav and on the Servers page; Stop asks first', async ({ page }) => {
   await writeWork(WORK.replace('        path: ~/beta\n', '        path: ~/beta\n        servers:\n          - { name: api, url: "http://127.0.0.1:1/health" }\n'))
   const port = await startServer()
   await page.goto('/')
   await expect(entry(page, 'Alpha').locator('.server-mark')).toHaveAttribute('aria-label', '1 server running')
   await expect(entry(page, 'Beta').locator('.server-mark.down')).toHaveAttribute('aria-label', '1 down')
 
-  // The Servers page opens from the nav header (the card's line went with part 12's cleanup).
-  await entry(page, 'Alpha').click()
+  // The Servers page opens from the nav header.
   await page.getByRole('button', { name: 'Servers', exact: true }).click()
   await expect(page.locator('.page-title')).toHaveText('Servers')
   const alpha = page.getByRole('region', { name: 'Alpha' })

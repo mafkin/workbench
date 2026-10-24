@@ -252,7 +252,6 @@ describe('links from items', () => {
     for (const s of page.sections) {
       for (const it of s.items) {
         const { item } = navItemOf(it, ctx)
-        if (!item) continue
         const written = linkOf(item, ctx)
         const again = navItemOf(parsePage(`## X\n- ${written}\n`).sections[0].items[0], ctx).item
         expect(again).toEqual(item.type === 'group' ? { ...item, items: [] } : item)

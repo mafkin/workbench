@@ -119,6 +119,9 @@ describe('agent profiles at chat start', { timeout: 15_000 }, () => {
     while (server.chats.get(chat.id)?.state !== 'exited' && Date.now() < end) await new Promise((r) => setTimeout(r, 25))
     await call('POST', `/api/chats/${chat.id}/start`, { fresh: false })
     await sees(chat.id, 'resumed=true')
+    // An echo comes after the prompt line would have: the screen is complete up to here.
+    server.chats.write(chat.id, 'ping\r')
+    await sees(chat.id, 'you said: ping')
     expect(server.chats.text(chat.id)).not.toContain('prompt=')
     server.chats.write(chat.id, 'exit\r')
     while (server.chats.get(chat.id)?.state !== 'exited' && Date.now() < end + 5000) await new Promise((r) => setTimeout(r, 25))

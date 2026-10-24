@@ -8,7 +8,6 @@ import {
   AGENT_FIELDS,
   CARD_FIELDS,
   drawersOf,
-  entryAt,
   hasDrawers,
   legacySteps,
   noteFileName,
@@ -108,7 +107,7 @@ export function migrateParsed(profile: Profile, opts: MigrateOptions): Migrated 
 
   const line = (item: NavItem): string => {
     if (item.type === 'shared') {
-      const original = entryAt(profile, { drawer: 0, section: 0, index: 0 }) && findOriginal(profile, item)
+      const original = findOriginal(profile, item)
       return original ? line(original) : `${item.label} (shared from ${item.drawer}, not found)`
     }
     const rel = pageOf.get(item)

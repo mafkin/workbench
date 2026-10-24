@@ -22,13 +22,14 @@ const readJson = async () => JSON.parse(await fsp.readFile(file, 'utf8'))
 describe('switching MCP servers per folder', () => {
   it('adds and removes names in the folder’s disabledMcpServers, leaving the rest of the file as it was', async () => {
     const before = { numStartups: 3, oauthAccount: { accessToken: 'keep' }, projects: { '/a': { history: [1], disabledMcpServers: ['x'] }, '/b': {} } }
-    await fsp.writeFile(file, JSON.stringify(before, null, 2), { mode: 0o600 })
+    // Not 0600, which a new file gets: the file's own mode stays.
+    await fsp.writeFile(file, JSON.stringify(before, null, 2), { mode: 0o640 })
     await setFoldersOff(file, ['/a'], ['plugin:p:slack', 'x'], true)
     expect((await readJson()).projects['/a'].disabledMcpServers).toEqual(['x', 'plugin:p:slack'])
     await setFoldersOff(file, ['/a'], ['x'], false)
     const after = await readJson()
     expect(after).toEqual({ ...before, projects: { '/a': { history: [1], disabledMcpServers: ['plugin:p:slack'] }, '/b': {} } })
-    expect((await fsp.stat(file)).mode & 0o777).toBe(0o600)
+    expect((await fsp.stat(file)).mode & 0o777).toBe(0o640)
     expect(await fsp.readFile(file, 'utf8')).toBe(JSON.stringify(after, null, 2))
   })
 
@@ -52,7 +53,7 @@ describe('switching MCP servers per folder', () => {
   })
 })
 
-describe('profile defaults', () => {
+describe('the defaults (a drawer’s mcpOff:)', () => {
   it('turns the defaults off once per folder, so one switched back on stays on', async () => {
     const defaults = new McpDefaults({ stateDir: path.join(dir, 'state'), claudeJson: file })
     expect(await defaults.apply(['slack', 'gmail'], '/game')).toEqual(['slack', 'gmail'])

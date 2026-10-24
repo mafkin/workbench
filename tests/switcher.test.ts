@@ -18,6 +18,6 @@ describe('the quick switcher’s matching', () => {
   it('ranks by label first, then detail, and keeps recent picks first for an empty query', () => {
     const items = [item('Ideas', 'Notes'), item('Alpha', 'Projects'), item('Deploy plan', 'alpha notes', 'note'), item('New chat in Alpha', '', 'action')]
     expect(rank(items, 'alpha', []).map((i) => i.label)).toEqual(['Alpha', 'New chat in Alpha', 'Deploy plan'])
-    expect(rank(items, '', ['entry:Ideas']).map((i) => i.label)[0]).toBe('Ideas')
+    expect(rank(items, '', ['action:New chat in Alpha', 'note:Deploy plan']).map((i) => i.label)).toEqual(['New chat in Alpha', 'Deploy plan', 'Ideas', 'Alpha'])
   })
 })

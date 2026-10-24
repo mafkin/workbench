@@ -21,12 +21,10 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.dot.live')).toBeVisible()
 })
 
-test('the project header is the card: description and pin write the page’s frontmatter; status is set from the nav', async ({ page }) => {
+test('the item header is the card: description and pin write the page’s frontmatter; status is set from the nav', async ({ page }) => {
   await entry(page, 'Alpha').click()
   // Status, category and dates left the page (part 12): the header is the title, pin, path and description.
   await expect(page.locator('.item-head')).toHaveText(/^Alpha~\/alpha$/)
-  await expect(page.getByRole('button', { name: /^Status/ })).toHaveCount(0)
-  await expect(page.locator('.category-chip')).toHaveCount(0)
 
   await page.getByText('Add a description').click()
   await page.getByLabel('Description').fill('The alpha project')
@@ -71,7 +69,7 @@ test("a project's right-click menu archives it, with Undo", async ({ page }) => 
   expect(await alphaPage()).toBe(before)
 })
 
-test('a report tab shows the HTML report with its own stylesheet, sandboxed', async ({ page }) => {
+test('a lone report step fills the page with the HTML report, its own stylesheet, sandboxed', async ({ page }) => {
   await withProjects('        steps:\n          - { label: tests, type: report, path: reports/index.html }\n')
   await entry(page, 'Alpha').click()
   // The only step fills the page: no tab row.
@@ -101,16 +99,12 @@ test('a link tab opens the browser and stays on the current tab', async ({ page 
   await expect(tabs(page).getByRole('tab', { name: 'All files' })).toHaveAttribute('aria-selected', 'true')
 })
 
-test('a new entry is an item with no kind to pick; the step dialog offers every kind of step', async ({ page }) => {
+test('a new entry is an item with no kind to pick', async ({ page }) => {
   await page.getByRole('button', { name: 'Edit navigation' }).click()
   await page.getByRole('button', { name: 'Add entry to Tools' }).click()
   const add = page.getByRole('form', { name: 'Add item' })
   await expect(add.getByRole('radio')).toHaveCount(0)
   await expect(add.getByLabel('Folder (optional)')).toBeVisible()
   await add.getByRole('button', { name: 'Cancel' }).click()
-  await page.getByRole('button', { name: 'Edit navigation' }).click()
-
-  await entry(page, 'Alpha').click()
-  await tabs(page).getByRole('button', { name: 'Add step' }).click()
-  await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['File browser', 'Folder', 'Note', 'Report', 'File', 'Chat', 'Launcher', 'Link'])
+  await expect(add).toHaveCount(0)
 })

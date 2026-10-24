@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }) => {
 
 test.afterAll(closeChats)
 
-test('the rail pins a skill to the drawer; the card pins one to the page; a chat is told both and loads the wiki’s', async ({ page }) => {
+test('the rail pins a skill to the drawer; the card pins one to the page; a chat loads the wiki’s as a plugin', async ({ page }) => {
   // The rail's Skills view lists the wiki's skill with its own badge; Pin writes the drawer's list (index.md here).
   await rail(page).getByRole('button', { name: 'Skills', exact: true }).click()
   await expect(strip(page)).toContainText('Nothing pinned yet')
@@ -50,9 +50,8 @@ test('the rail pins a skill to the drawer; the card pins one to the page; a chat
   await expect.poll(() => fsp.readFile(wikiPage('pages/Alpha.md'), 'utf8')).toContain('skills:\n  - concept-art\n')
   await page.screenshot({ path: 'test-results/skills-chip.png' })
 
-  // A chat from the page is told both, and loads the wiki skill as a plugin.
+  // A chat from the page loads the wiki skill as a plugin (what its prompt says is checked in the unit tests).
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
-  // The prompt's text is checked in the unit tests; the screen shows the flags.
   await expect(screen(page)).toContainText('"--plugin-dir"')
 
   // Unpin from the chip's menu: the key goes.

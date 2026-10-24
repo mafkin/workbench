@@ -1,12 +1,14 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { DIR, page as wikiPage, pickProfile, profileButton, resetFixture, SPAWN_LOG, WORK, WORK_FILE, writeWork } from './fixture.ts'
+import { page as wikiPage, pickProfile, profileButton, resetFixture, SPAWN_LOG, WB, WORK, WORK_FILE, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const accent = (page: Page) => page.evaluate(() => document.documentElement.style.getPropertyValue('--accent'))
 const indexMd = () => fsp.readFile(WORK_FILE, 'utf8')
+/** The active profile as the service saved it. */
+const active = async () => /^activeProfile: (\S+)$/m.exec(await fsp.readFile(path.join(WB, 'settings.yaml'), 'utf8'))?.[1]
 
 test.beforeEach(async ({ page }) => {
   await resetFixture()
@@ -26,11 +28,12 @@ test('profile switch swaps nav, accent and title', async ({ page }) => {
   await expect(entry(page, 'Alpha')).toHaveCount(0)
   expect(await accent(page)).toBe('#8fa58a')
   await expect(page).toHaveTitle('Personal · Workbench')
+  await expect.poll(active).toBe('personal')
   await page.screenshot({ path: 'test-results/personal.png' })
 
   await page.keyboard.press('Control+1')
   await expect(entry(page, 'Alpha')).toBeVisible()
-  await expect.poll(async () => (await fsp.readFile(path.join(DIR, 'settings.yaml'), 'utf8'))).toContain('activeProfile: work')
+  await expect.poll(active).toBe('work')
 })
 
 test('selecting a folder shows its view', async ({ page }) => {

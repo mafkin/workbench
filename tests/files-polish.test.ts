@@ -61,6 +61,7 @@ beforeEach(async () => {
   await write('work/sub/deep/c.md', 'c')
   await write('work/.hidden/needle.txt', 'x')
   await write('work/node_modules/pkg/needle.js', 'x')
+  await write('work/.git/needle', 'x')
   await write('work/sub/needle notes.md', 'x')
   await write('elsewhere/x.txt', 'x')
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
@@ -118,7 +119,7 @@ describe('folder sizes and search', () => {
     expect(res.json()).toEqual({ bytes: 5 + 1 + 1, files: 3, complete: true })
   })
 
-  it('finds names in closed folders, skipping dotfolders, .git and node_modules unless hidden ones are shown', async () => {
+  it('finds names in closed folders, skipping dotfolders unless hidden ones are shown, and .git and node_modules always', async () => {
     const res = await get(`/api/files/find?profile=work&path=${q('~/work')}&q=NEEDLE`)
     expect(res.json()).toMatchObject({ complete: true, hits: [expect.objectContaining({ path: '~/work/sub/needle notes.md', kind: 'file', name: 'needle notes.md' })] })
     const hidden = await get(`/api/files/find?profile=work&path=${q('~/work')}&q=needle&hidden=1`)

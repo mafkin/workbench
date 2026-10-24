@@ -73,7 +73,7 @@ test('removing a step removes only the tab: the file stays, Undo brings it back,
   await dialog.locator('input[name=label]').fill('ideas')
   await dialog.locator('input[name=path]').fill('~/workbench/work/Ideas.md')
   await dialog.getByRole('button', { name: 'Add' }).click()
-  await page.getByRole('button', { name: 'New chat' }).waitFor()
+  await expect(page.locator('.markdown h1')).toHaveText('Ideas')
 
   await page.locator('.item-head').getByRole('button', { name: 'Add step' }).click()
   const link = page.getByRole('form', { name: 'Add step' })

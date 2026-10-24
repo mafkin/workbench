@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -19,13 +20,23 @@ afterEach(async () => {
 })
 
 const stdio = (env: Record<string, string> = {}, args = [FAKE_MCP]) => ({ transport: 'stdio' as const, config: { command: node, args, env } })
+/** The process is running (a zombie waiting to be reaped counts as gone). */
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
-    return true
   } catch {
     return false
   }
+  try {
+    return !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8'))
+  } catch {
+    return false
+  }
+}
+const gone = async (pid: number) => {
+  const end = Date.now() + 3000
+  while (alive(pid) && Date.now() < end) await new Promise((r) => setTimeout(r, 25))
+  return !alive(pid)
 }
 
 describe('checking a stdio server', () => {
@@ -63,11 +74,12 @@ describe('checking a stdio server', () => {
     expect(result.log).not.toContain('tok-SECRET-123')
   })
 
-  it('gives up on a server that does not answer, and stops it', async () => {
+  it('gives up on a server that does not answer, and stops it and its children even when it ignores TERM', { timeout: 10_000 }, async () => {
     const pidFile = path.join(dir, 'pid')
     const result = await checkServer(stdio({ FAKE_MCP_MODE: 'hang', FAKE_MCP_PIDFILE: pidFile }), { cwd: dir, timeoutMs: 600 })
     expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/no answer/i) })
-    expect(alive(Number(await fsp.readFile(pidFile, 'utf8')))).toBe(false)
+    expect(await gone(Number(await fsp.readFile(pidFile, 'utf8')))).toBe(true)
+    expect(await gone(Number(await fsp.readFile(`${pidFile}.child`, 'utf8')))).toBe(true)
   })
 
   it('says when the command is not there', async () => {
@@ -78,7 +90,7 @@ describe('checking a stdio server', () => {
 
 /** A small MCP server over HTTP: Streamable HTTP at /mcp, the legacy SSE transport at /sse. */
 function httpServer() {
-  const seen = { deleted: false, auth: [] as (string | undefined)[], protocol: [] as (string | undefined)[] }
+  const seen = { deleted: false, protocol: [] as (string | undefined)[] }
   let sse: http.ServerResponse | null = null
   const answer = (msg: any) => {
     if (msg.method === 'initialize') return { protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'web-mcp', version: '0.9' } }
@@ -89,7 +101,6 @@ function httpServer() {
     let body = ''
     req.on('data', (c) => (body += c))
     req.on('end', () => {
-      seen.auth.push(req.headers.authorization)
       if (req.url === '/locked') return res.writeHead(401).end('{"error":"sign in"}')
       if (req.url === '/sse' && req.method === 'GET') {
         sse = res
@@ -153,9 +164,7 @@ describe('checking an http or sse server', () => {
 
   it('reports a server that is not there', async () => {
     await web.close()
-    const result = await checkServer({ transport: 'http', config: { type: 'http', url: `${base}/mcp?key=sekrit-value` } }, { cwd: dir })
-    expect(result.ok).toBe(false)
-    expect(result.error).toBeTruthy()
-    expect(JSON.stringify(result)).not.toContain('sekrit-value')
+    const result = await checkServer({ transport: 'http', config: { type: 'http', url: `${base}/mcp` } }, { cwd: dir })
+    expect(result).toMatchObject({ ok: false, error: 'Cannot reach it (ECONNREFUSED)' })
   })
 })

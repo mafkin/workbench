@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // A stand-in for the claude CLI in tests: no network, no model. It prints what it
 // was started with, echoes what you type, keeps a transcript where claude would,
-// rings the bell on "ring", works for a while on "work", and answers -p with a
-// canned summary (or, asked for a commit message, one made from the diff on
-// stdin). Runs SessionStart hooks from --settings, and "clear" starts a new
-// session as /clear does.
+// rings the bell on "ring", works for a while on "work", says its terminal's size
+// on "size", and answers -p with a canned summary (or, asked for a commit message,
+// one made from the diff on stdin). Runs SessionStart hooks from --settings, and
+// "clear" starts a new session as /clear does.
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -17,7 +17,7 @@ const flag = (name) => {
   return i >= 0 ? argv[i + 1] : undefined
 }
 // Flags that take one value, and lists that take every word up to the next flag.
-const VALUED = new Set(['--settings', '--session-id', '--resume', '-r', '--model', '-n', '--name', '--agent', '--effort', '--permission-mode', '--append-system-prompt'])
+const VALUED = new Set(['--settings', '--session-id', '--resume', '--model', '--agent', '--effort', '--permission-mode', '--append-system-prompt', '--plugin-dir'])
 const LISTS = new Set(['--add-dir', '--allowedTools', '--disallowedTools', '--mcp-config', '--tools'])
 const positional = []
 for (let i = 0; i < argv.length; i++) {
@@ -48,7 +48,7 @@ function sessionStart(source) {
   }
 }
 
-if (argv.includes('-p') || argv.includes('--print')) {
+if (argv.includes('-p')) {
   // A commit message: drafted from the diff on stdin, naming the first file and the tools flag.
   if (positional.join(' ').includes('commit message')) {
     const diff = fs.readFileSync(0, 'utf8')
@@ -94,7 +94,10 @@ rl.on('line', (line) => {
     return
   }
   if (text === 'ring') process.stdout.write('\x07')
-  if (text.startsWith('title ')) process.stdout.write(`\x1b]0;✳ ${text.slice(6)}\x07`)
+  if (text === 'size') {
+    process.stdout.write(`size=${process.stdout.columns}x${process.stdout.rows}\r\n> `)
+    return
+  }
   if (text === 'work') {
     let n = 0
     const t = setInterval(() => {

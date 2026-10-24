@@ -115,11 +115,16 @@ test('the gallery: thumbnails made and cached, type filters, tile size, remember
   await page.keyboard.press('ArrowLeft')
   await expect(tile(page, 'notes.txt')).toHaveAttribute('aria-selected', 'true')
 
+  // Cached now: after a reload every tile shows its thumbnail without the browser making (and sending) one again.
+  const made: string[] = []
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && r.url().includes('/api/thumbs')) made.push(r.url())
+  })
   await page.reload()
   await page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name: 'assets', exact: true }).dblclick()
   await expect(gallery(page)).toBeVisible()
-  // Cached now: shown without being made again.
-  await expect(tile(page, 'tri.gltf').locator('img')).toBeVisible()
+  for (const name of ['red.png', 'blue.png', 'tri.gltf', 'tone.wav', 'ship.blend', 'game']) await expect(tile(page, name).locator('img')).toBeVisible()
+  expect(made).toEqual([])
 })
 
 test('previews: a 3D model with its counts, a .blend’s own preview, an audio waveform', async ({ page }) => {

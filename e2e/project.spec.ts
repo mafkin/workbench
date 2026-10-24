@@ -135,16 +135,17 @@ test('git: and setup: lines in a page (from before the rail) get no tab, and the
   await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['File browser', 'Folder', 'Note', 'Report', 'File', 'Chat', 'Launcher', 'Link'])
 })
 
-test("one project's steps can become every project's", async ({ page }) => {
+test('Save as profile steps writes Workflow.md from an item’s tabs; every item keeps its own', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await stepMenu(page, 'build', 'Remove tab')
   await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'sources', 'readme'])
+  const alphaBefore = await alphaPage()
   await stepMenu(page, 'readme', 'Save as profile steps')
   const workflow = () => fsp.readFile(wikiPage('Workflow.md'), 'utf8')
   await expect.poll(async () => (await workflow()).includes('run:make')).toBe(false)
   expect(await workflow()).toContain('- [All files](files:)\n- [sources](src/)\n- [readme](README.md)\n')
   // Every page keeps its own tabs; the profile steps are what Add profile steps brings.
-  expect(await alphaPage()).toContain('## Workflow')
+  expect(await alphaPage()).toBe(alphaBefore)
   await entry(page, 'Beta').click()
   await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'sources', 'readme', 'build'])
 })

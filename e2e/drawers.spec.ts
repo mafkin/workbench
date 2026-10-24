@@ -16,7 +16,6 @@ const PICTURE = encodePng(120, 80, Buffer.from(Array.from({ length: 120 * 80 }, 
 /** Work with two drawers: its own headings, and Research. Written as pages: drawers/Work.md and drawers/Research.md. */
 const DRAWERS = `name: Work
 accent: "#7d93ab"
-notes: ~/workbench/work
 drawers:
   - name: Work
     sections:
@@ -112,17 +111,26 @@ test('Show in drawers links the same page from another drawer; deleting it in on
   await expect(page.getByRole('menuitemcheckbox', { name: 'Show in Work' })).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
 
+  // Deleting it in Work takes only Work's link: Research keeps it, without asking.
   await pickDrawer(page, 'Work')
-  await entry(page, 'Alpha').click({ button: 'right' })
-  await expect(page.getByRole('menuitemcheckbox', { name: 'Show in Research' })).toHaveAttribute('aria-checked', 'true')
-  await page.getByRole('menuitemcheckbox', { name: 'Show in Research' }).click()
-  await expect.poll(() => wikiText('drawers/Research.md')).not.toContain('Alpha')
-
   await entry(page, 'Alpha').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Delete' }).click()
   await expect.poll(() => wikiText('drawers/Work.md')).not.toContain('Alpha')
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  expect(await wikiText('drawers/Research.md')).toContain('- [[Alpha]]\n')
   // The page itself is never deleted with its link.
   expect(await wikiText('pages/Alpha.md')).toContain('folder: ~/alpha')
+
+  // From Research: shown in Work again, then not; Research keeps its own.
+  await pickDrawer(page, 'Research')
+  await entry(page, 'Alpha').click({ button: 'right' })
+  await expect(page.getByRole('menuitemcheckbox', { name: 'Show in Work' })).toHaveAttribute('aria-checked', 'false')
+  await page.getByRole('menuitemcheckbox', { name: 'Show in Work' }).click()
+  await expect.poll(() => wikiText('drawers/Work.md')).toContain('[[Alpha]]')
+  await entry(page, 'Alpha').click({ button: 'right' })
+  await page.getByRole('menuitemcheckbox', { name: 'Show in Work' }).click()
+  await expect.poll(() => wikiText('drawers/Work.md')).not.toContain('Alpha')
+  expect(await wikiText('drawers/Research.md')).toContain('- [[Alpha]]\n')
 })
 
 test('Drawer settings: a logo, the drawer’s own folder by default, the drawers used; the Shared heading opens them', async ({ page }) => {

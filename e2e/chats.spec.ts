@@ -69,6 +69,8 @@ test('a chat keeps running across a reload, and its screen comes back', async ({
 test('a chat step starts when first opened; a shell step runs the login shell in its folder', async ({ page }) => {
   await withWork(page, '  - { label: build, type: launch, command: make, args: [all] }\n', '  - { label: agent, type: chat }\n  - { label: term, type: chat, agent: shell, path: src }\n')
   await entry(page, 'Alpha').click()
+  await expect(tab(page, 'agent')).toBeVisible()
+  await expect(chatTabs(page)).toHaveCount(0)
   await tab(page, 'agent').click()
   await expect(screen(page)).toContainText(`FAKE CLAUDE cwd=${ALPHA}`)
   await tab(page, 'term').click()
@@ -144,12 +146,15 @@ test('a chat that goes quiet after working marks the dock and the nav until you 
   await expect(chatTabs(page)).toHaveCount(1)
 })
 
-test('a file dragged onto a chat tab is typed into its prompt', async ({ page }) => {
+test('a file dragged onto a chat tab is typed into its prompt, and shows that chat', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await newChat(page)
-  await tab(page, 'All files').click()
-  await row(page, 'README.md').dragTo(chatTabs(page).first())
-  await expect(chatTabs(page).first()).toHaveAttribute('aria-selected', 'true')
+  await dock(page).getByRole('button', { name: 'New chat', exact: true }).click()
+  await expect(chatTabs(page)).toHaveCount(2)
+  // Newest first: the older chat is the second tab, not the one shown.
+  await expect(chatTabs(page).nth(1)).toHaveAttribute('aria-selected', 'false')
+  await row(page, 'README.md').dragTo(chatTabs(page).nth(1))
+  await expect(chatTabs(page).nth(1)).toHaveAttribute('aria-selected', 'true')
   await expect(screen(page)).toContainText(path.join(ALPHA, 'README.md'))
   await page.keyboard.press('Enter')
   await expect(screen(page)).toContainText(`you said: ${path.join(ALPHA, 'README.md')}`)
@@ -166,19 +171,20 @@ test('Summarize and continue opens a new chat seeded with the summary', async ({
   await expect(screen(page)).toContainText('SUMMARY of')
 })
 
-test('Chat here and Shell here start in a folder of the project', async ({ page }) => {
+test('Chat here and Shell here start in a folder of the item', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await row(page, 'src').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Chat here' }).click()
   await expect(screen(page)).toContainText(`FAKE CLAUDE cwd=${ALPHA}/src`)
-  await tab(page, 'All files').click()
+  // The chat opens in the dock; the page stays on the files.
+  await expect(tab(page, 'All files')).toHaveAttribute('aria-selected', 'true')
   await row(page, 'src').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Shell here' }).click()
   await expect(screen(page)).toContainText(`FAKE SHELL cwd=${ALPHA}/src`)
   await expect(chatTabs(page)).toHaveText(['Shell', 'Fake Claude'])
 })
 
-test('a chat entry in the nav has its own page; New chat from the nav menu opens in the project', async ({ page }) => {
+test('a chat entry in the nav has its own page; New shell from the nav menu starts in the item’s folder', async ({ page }) => {
   await withWork(page, '        args: [hello]\n', '        args: [hello]\n      - { label: Scratch, type: chat, path: ~/alpha }\n')
   await entry(page, 'Scratch').click()
   await expect(page.locator('.page-title')).toHaveText('Scratch')
@@ -189,9 +195,9 @@ test('a chat entry in the nav has its own page; New chat from the nav menu opens
   await page.getByRole('menuitem', { name: 'New shell' }).click()
   await expect(page.locator('.page-title')).toContainText('Alpha')
   await expect(chatTabs(page)).toHaveText(['Shell', 'Scratch'])
-  await expect(screen(page)).toContainText('FAKE SHELL')
+  await expect(screen(page)).toContainText(`FAKE SHELL cwd=${ALPHA} `)
 
-  // A project whose folder is missing says so instead of starting anything.
+  // An item whose folder is missing says so instead of starting anything.
   await entry(page, 'Beta').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'New chat' }).click()
   await expect(page.locator('.toast')).toContainText('The folder ~/beta does not exist')

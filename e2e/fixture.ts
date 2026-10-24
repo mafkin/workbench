@@ -20,7 +20,6 @@ export const NOTES = path.join(WB, 'work')
 export const PNOTES = path.join(WB, 'personal')
 /** The profiles are wikis (part 11): their index.md holds the profile and the nav. */
 export const WORK_FILE = path.join(NOTES, 'index.md')
-export const PERSONAL_FILE = path.join(PNOTES, 'index.md')
 /** A page of the work wiki. */
 export const page = (rel: string) => path.join(NOTES, rel)
 export const ALPHA = path.join(HOME, 'alpha')
@@ -77,7 +76,7 @@ sections:
 /** The work profile as one drawer whose folder is Alpha's: the rail's Files, Git, Skills and MCP act on ~/alpha. */
 export const WORK_DRAWER = WORK.replace(/^sections:\n([\s\S]*)$/m, (_, body: string) => `drawers:\n  - name: Work\n    folder: ~/alpha\n    sections:\n${body.replace(/^(?=.)/gm, '    ')}`)
 
-// Personal has no notes folder, to show the hint.
+// Personal: one heading with one item, Tuohi.
 export const PERSONAL = `name: Personal
 accent: "#8fa58a"
 sections:
@@ -159,17 +158,12 @@ const ALPHA_FILES: Record<string, string | Buffer> = {
 
 export async function resetFixture() {
   await fsp.mkdir(path.join(DIR, 'profiles'), { recursive: true })
-  // Profiles a test added would linger in the switcher.
-  for (const f of await fsp.readdir(path.join(DIR, 'profiles'))) {
-    if (f !== 'work.yaml' && f !== 'personal.yaml') await fsp.rm(path.join(DIR, 'profiles', f), { force: true })
-  }
   // Tests create notes and files all over the fake home; start each one from a clean copy.
   // The Workbench folder and its settings.yaml stay in place: the service watches them
   // (a watch on a folder that is deleted and made anew goes quiet), and the rewrite below
   // is what tells it the fixture is back to its start.
   for (const name of await fsp.readdir(HOME).catch(() => [] as string[])) if (name !== 'workbench') await fsp.rm(path.join(HOME, name), { recursive: true, force: true })
   for (const name of await fsp.readdir(WB).catch(() => [] as string[])) if (name !== 'settings.yaml') await fsp.rm(path.join(WB, name), { recursive: true, force: true })
-  await fsp.rm(TRASH, { recursive: true, force: true })
   await fsp.rm(MANAGED, { recursive: true, force: true })
   await fsp.rm(THUMBS, { recursive: true, force: true })
   await fsp.mkdir(ALPHA, { recursive: true })
@@ -177,7 +171,7 @@ export async function resetFixture() {
     await fsp.mkdir(path.dirname(path.join(ALPHA, rel)), { recursive: true })
     await fsp.writeFile(path.join(ALPHA, rel), data)
   }
-  execFileSync('git', ['init', '-q'], { cwd: ALPHA })
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: ALPHA })
   await fsp.writeFile(path.join(DIR, 'settings.yaml'), 'activeProfile: work\nprofiles: [work, personal]\n')
   await fsp.writeFile(path.join(DIR, 'profiles/work.yaml'), WORK)
   await fsp.writeFile(path.join(DIR, 'profiles/personal.yaml'), PERSONAL)
@@ -211,8 +205,8 @@ const skill = (name: string, description: string, body: string) => `---\nname: $
 
 /**
  * A Claude setup in the fake home: your skills, agent, command, hook and MCP
- * servers, an enabled plugin, and Alpha's own (.mcp.json, .claude/). Only the
- * Claude setup tests write it, so other tests see Alpha as before.
+ * servers, an enabled plugin, and Alpha's own (.mcp.json, .claude/). Only
+ * setup.spec.ts and skills.spec.ts write it, so other tests see Alpha without it.
  */
 export async function writeClaudeSetup() {
   const claude = path.join(HOME, '.claude')

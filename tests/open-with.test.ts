@@ -43,7 +43,7 @@ beforeEach(async () => {
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(
     path.join(dir, 'cfg/profiles/work.yaml'),
-    'name: Work\nopenWith:\n  - { ext: [kra, .ORA], command: krita }\nsections:\n  - title: Projects\n    items:\n      - { label: Art, type: folder, path: ~/art }\n',
+    'name: Work\nopenWith:\n  - { ext: [kra, .ORA], command: ~/bin/krita }\nsections:\n  - title: Projects\n    items:\n      - { label: Art, type: folder, path: ~/art }\n',
   )
   await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, spawn: fakeSpawn as never, thumbsDir: path.join(dir, 'thumbs') })
@@ -76,7 +76,8 @@ describe('open with', () => {
     expect(JSON.parse(label.body)).toEqual({ label: 'Krita' })
     const res = await server.app.inject({ method: 'POST', url: '/api/files/open-with', headers, payload: { profile: 'work', path: '~/art/sketch.kra', command: 'rm', args: ['-rf', '/'] } })
     expect(res.statusCode).toBe(200)
-    expect(spawned).toEqual([{ command: 'krita', args: [path.join(home, 'art/sketch.kra')], cwd: path.join(home, 'art') }])
+    // A rule of yours runs as written, installed or not (here it is not, wherever the tests run).
+    expect(spawned).toEqual([{ command: path.join(home, 'bin/krita'), args: [path.join(home, 'art/sketch.kra')], cwd: path.join(home, 'art') }])
     expect((await server.app.inject({ method: 'POST', url: '/api/files/open-with', headers, payload: { profile: 'work', path: '~/art/readme.txt' } })).statusCode).toBe(422)
     expect((await server.app.inject({ method: 'POST', url: '/api/files/open-with', headers, payload: { profile: 'work', path: '~/outside/secret.txt' } })).statusCode).toBe(403)
   })

@@ -77,7 +77,7 @@ describe('chat routes', { timeout: 15_000 }, () => {
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
     expect(adhoc.status).toBe(200)
     expect(adhoc.body).toMatchObject({ host: 'project:~/alpha', slot: null, agent: 'claude', cwd: '~/alpha', state: 'running' })
-    // Alpha has no steps: of its own: All files comes before the workflow.
+    // Alpha was written without steps of its own: its page has All files, then the profile's workflow.
 
     const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     expect(step.body).toMatchObject({ host: 'project:~/alpha', slot: 'step:~/alpha|agent', cwd: '~/alpha' })
@@ -160,14 +160,15 @@ describe('chat routes', { timeout: 15_000 }, () => {
     expect((await call('POST', '/api/chats', { profile: 'work', rev: rev(), drawer: 4 })).status).toBe(404)
   })
 
-  test('an item without a folder: its chats run in home, keyed by its id; marks and servers skip it', async () => {
+  test('an item without a folder: its chats run in its drawer’s folder, keyed by its id; marks and servers leave it out', async () => {
     const loose = { section: 0, index: 3 }
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose })
     expect(adhoc.body).toMatchObject({ host: 'project:id:abc12345', slot: null, cwd: '~/wb/work/drawers/Work' })
     const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose, step: 0 })
     expect(step.body).toMatchObject({ host: 'project:id:abc12345', slot: 'step:id:abc12345|talk', cwd: '~/wb/work/drawers/Work' })
-    expect((await call('GET', '/api/git/marks?profile=work')).status).toBe(200)
-    expect((await call('GET', '/api/servers?profile=work')).status).toBe(200)
+    expect(await call('GET', '/api/git/marks?profile=work')).toEqual({ status: 200, body: [] })
+    const servers = await call<{ projects: { label: string }[] }>('GET', '/api/servers?profile=work')
+    expect(servers.body.projects.map((p) => p.label)).toEqual(['Alpha'])
   })
 
   test('requests name entries, never commands; paths stay in the profile folders; resume takes only a session id', async () => {
@@ -259,8 +260,12 @@ describe('chat terminal socket', { timeout: 15_000 }, () => {
     expect(frames[0].startsWith('r')).toBe(true)
     ws.send('ihello socket\r')
     await until(() => frames.some((f) => f.startsWith('o') && f.includes('you said: hello socket')), 'the echo')
-    // The args line (with the session hook's --settings) is longer than any width.
-    await until(() => server.chats.text(chat.id).split('\n').every((l) => l.length <= 90 || l.startsWith('args=') || l.startsWith('FAKE CLAUDE cwd=')), 'the size')
+    // The program's terminal takes the view's size: first from the socket's address, then from a resize.
+    ws.send('isize\r')
+    await until(() => server.chats.text(chat.id).includes('size=90x20'), 'the size from the address')
+    ws.send('s70,24')
+    ws.send('isize\r')
+    await until(() => server.chats.text(chat.id).includes('size=70x24'), 'the size after a resize')
     ws.close()
   })
 
