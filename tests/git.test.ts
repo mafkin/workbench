@@ -7,6 +7,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseCommitFiles, parseDiff, parseStatus } from '../server/git.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
@@ -145,8 +146,9 @@ sections:
       - { label: Web, type: folder, path: ~/mono/web }
 `,
   )
+  await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({
-    configDir: path.join(dir, 'cfg'),
+    dir: path.join(home, 'wb'),
     port: 7420,
     distDir: null,
     home,

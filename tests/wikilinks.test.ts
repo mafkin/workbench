@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { describe, expect, it } from 'vitest'
 import { noteFileName, type NoteSummary } from '../shared/config-schema.ts'
-import { normalizePath, parseWiki, remarkWikiLinks, resolveHref, resolveWiki, slug, WIKI_HREF } from '../src/lib/wikilinks.ts'
+import { blankFrontmatter, linkPath, linksIn, normalizePath, parseWiki, relativePath, remarkWikiLinks, resolveHref, resolveProject, resolveWiki, rewriteLinks, slug, tagsIn, WIKI_HREF } from '../src/lib/wikilinks.ts'
 
 const render = (md: string) => renderToStaticMarkup(createElement(ReactMarkdown, { remarkPlugins: [remarkGfm, remarkWikiLinks] }, md))
 
@@ -107,5 +107,95 @@ describe('names', () => {
     expect(noteFileName('..hidden')).toBe('hidden.md')
     expect(noteFileName('Notes.md')).toBe('Notes.md')
     expect(noteFileName('  ...  ')).toBeNull()
+  })
+})
+
+describe('frontmatter in the view', () => {
+  it('blanks the block but keeps the line numbers of what follows', () => {
+    const text = '---\ntitle: x\ntags: [a]\n---\n# Head\n- [ ] task\n'
+    expect(blankFrontmatter(text)).toBe('\n\n\n\n# Head\n- [ ] task\n')
+    expect(blankFrontmatter('# No block\n---\nnot front\n')).toBe('# No block\n---\nnot front\n')
+    expect(blankFrontmatter('---\r\na: 1\r\n---\r\nbody')).toBe('\n\n\nbody')
+  })
+})
+
+describe('links in text', () => {
+  it('finds wiki links and relative Markdown links with their lines and offsets', () => {
+    const found = linksIn('See [[A]] and [b](b.md "t").\n\n![img](pics/x.png) [[C|see]] <https://x.y>')
+    expect(found).toEqual([
+      { line: 1, start: 4, length: 5, kind: 'wiki', inner: 'A' },
+      { line: 1, start: 14, length: 13, kind: 'md', inner: 'b.md' },
+      { line: 3, start: 0, length: 18, kind: 'md', inner: 'pics/x.png' },
+      { line: 3, start: 19, length: 9, kind: 'wiki', inner: 'C|see' },
+    ])
+  })
+
+  it('resolves a found link to a note path, or null', () => {
+    const from = '~/notes/work/Ideas.md'
+    expect(linkPath({ line: 1, start: 0, length: 0, kind: 'wiki', inner: 'Deploy plan#x' }, from, NOTES)).toBe('~/notes/work/Deploy plan.md')
+    expect(linkPath({ line: 1, start: 0, length: 0, kind: 'md', inner: '../Ideas.md' }, from, NOTES)).toBe('~/notes/Ideas.md')
+    expect(linkPath({ line: 1, start: 0, length: 0, kind: 'md', inner: 'https://x.y' }, from, NOTES)).toBeNull()
+    expect(linkPath({ line: 1, start: 0, length: 0, kind: 'wiki', inner: 'Nope' }, from, NOTES)).toBeNull()
+  })
+})
+
+describe('rewriting links for a rename', () => {
+  const old = NOTES[2] // ~/notes/work/Deploy plan.md
+  const next = { path: '~/notes/work/Release plan.md', name: 'Release plan', rel: 'work/Release plan.md' }
+
+  it('rewrites every form and keeps headings, aliases and spacing', () => {
+    const text = 'See [[Deploy plan]], [[ work/Deploy plan |the plan]], [[Deploy plan#Steps]] and [[deploy plan.md]].'
+    const out = rewriteLinks(text, '~/notes/work/Ideas.md', NOTES, old, next)
+    expect(out).toEqual({
+      text: 'See [[Release plan]], [[work/Release plan|the plan]], [[Release plan#Steps]] and [[Release plan]].',
+      count: 4,
+    })
+  })
+
+  it('rewrites relative Markdown links, encoded like the original, from any folder', () => {
+    const near = rewriteLinks('[p](Deploy%20plan.md#steps) and ![i](Deploy%20plan.md)', '~/notes/work/Ideas.md', NOTES, old, next)
+    expect(near.text).toBe('[p](Release%20plan.md#steps) and ![i](Release%20plan.md)')
+    const far = rewriteLinks('[p](../../work/Deploy%20plan.md)', '~/notes/archive/old/X.md', NOTES, old, next)
+    expect(far).toEqual({ text: '[p](../../work/Release%20plan.md)', count: 1 })
+  })
+
+  it('leaves other links alone: another note with the same name, URLs, missing notes', () => {
+    // From the archive folder, the bare name resolves to the archive's own Deploy plan.
+    const text = '[[Deploy plan]] [[Ideas]] [x](https://x.y/Deploy%20plan.md) [[Nope]]'
+    expect(rewriteLinks(text, '~/notes/archive/old/X.md', NOTES, old, next)).toEqual({ text, count: 0 })
+  })
+
+  it('computes relative paths', () => {
+    expect(relativePath('~/notes/a/b.md', '~/notes/a/c.md')).toBe('c.md')
+    expect(relativePath('~/notes/a/b.md', '~/notes/c.md')).toBe('../c.md')
+    expect(relativePath('~/notes/b.md', '~/notes/a/c.md')).toBe('a/c.md')
+    expect(relativePath('~/notes/a/x/b.md', '~/notes/c/d.md')).toBe('../../c/d.md')
+  })
+})
+
+describe('links into projects', () => {
+  const projects = [
+    { label: 'Tuohi', path: '~/Projects/tuohi' },
+    { label: 'IFC Checker', path: '~/ifc' },
+  ]
+
+  it('reaches a file in a project by the project label, case ignored', () => {
+    expect(resolveProject('Tuohi/docs/design.md', projects)).toEqual({ path: '~/Projects/tuohi/docs/design.md', note: true })
+    expect(resolveProject('ifc checker/renders/a.png', projects)).toEqual({ path: '~/ifc/renders/a.png', note: false })
+    expect(resolveProject('Tuohi/', projects)).toEqual({ path: '~/Projects/tuohi', note: false })
+  })
+
+  it('is null for bare names and unknown projects', () => {
+    expect(resolveProject('Tuohi', projects)).toBeNull()
+    expect(resolveProject('Nope/x.md', projects)).toBeNull()
+  })
+})
+
+describe('tagsIn', () => {
+  it('reads tags: from the frontmatter and #tags from the text, once each, lower-cased', () => {
+    const text = '---\ntags: [Game, art]\n---\n# Heading\n\nAbout #game and #Art/2d, see #wip-idea. Not #1 or https://x.io/#top.\n`#code` is not one, and neither is\n\n```\n#fenced\n```\n\n(#paren) and #end.\n'
+    expect(tagsIn(text, { tags: ['Game', 'art'] })).toEqual(['game', 'art', 'art/2d', 'wip-idea', 'paren', 'end'])
+    expect(tagsIn('tags as a string', { tags: 'one, two #three' })).toEqual(['one', 'two', 'three'])
+    expect(tagsIn('# Title\n\nno tags here\n')).toEqual([])
   })
 })

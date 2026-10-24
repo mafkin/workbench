@@ -2,19 +2,19 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseDocument } from 'yaml'
-import { applyOps } from '../server/config-ops.ts'
 import { buildServer } from '../server/main.ts'
-import { Profile } from '../shared/config-schema.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 // A 1×1 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
 
 const WORK = `name: Work
-home: ~/stuff
 # The look
 accent: "#7d93ab"
-sections: []
+sections:
+  - title: Stuff
+    items:
+      - { label: Stuff, type: folder, path: ~/stuff }
 `
 
 let dir: string
@@ -40,34 +40,19 @@ beforeEach(async () => {
   await fsp.writeFile(path.join(home, 'elsewhere/secret.png'), PNG)
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state') })
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state') })
 })
 
 afterEach(async () => {
   await server.app.close()
   await fsp.rm(dir, { recursive: true, force: true })
 })
-
-describe('theme and background in the profile', () => {
-  const run = (source: string, key: 'theme' | 'background', value: string) => {
-    const doc = parseDocument(source)
-    applyOps(doc, [{ op: 'setProfileField', key, value }], source)
-    return doc.toString()
-  }
-
-  it('are set after the accent, keep comments, and are removed by an empty value', () => {
-    const text = run(run(WORK, 'theme', 'fjord'), 'background', 'lake.png')
-    expect(text).toContain('# The look\naccent: "#7d93ab"\ntheme: fjord\nbackground: lake.png\nsections:')
-    expect(run(text, 'theme', '')).not.toContain('theme:')
-    expect(Profile.parse(parseDocument(text).toJS())).toMatchObject({ theme: 'fjord', background: 'lake.png' })
-  })
-})
-
 describe('background pictures', () => {
   it('copies a picture from the profile’s folders, under a safe and unique name', async () => {
     const first = await call('POST', '/api/backgrounds', { profile: 'work', path: '~/stuff/pics/Lake view.png' })
     expect(first).toMatchObject({ status: 200, body: { name: 'Lake-view.png' } })
-    expect(await fsp.readFile(path.join(dir, 'cfg/backgrounds/Lake-view.png'))).toEqual(PNG)
+    expect(await fsp.readFile(path.join(home, 'wb/backgrounds/Lake-view.png'))).toEqual(PNG)
     // The same picture again is the same file; a different one with the same name gets a number.
     expect((await call('POST', '/api/backgrounds', { profile: 'work', path: '~/stuff/pics/Lake view.png' })).body).toEqual({ name: 'Lake-view.png' })
     await fsp.copyFile(path.join(home, 'stuff/pics/other.png'), path.join(home, 'stuff/pics/Lake view.png'))
@@ -88,8 +73,13 @@ describe('background pictures', () => {
     expect(pic.status).toBe(200)
     expect(pic.type).toBe('image/png')
     expect(pic.raw).toEqual(PNG)
-    await fsp.writeFile(path.join(dir, 'cfg/settings.yaml'), 'profiles: []\n')
-    expect((await call('GET', `/api/backgrounds/${encodeURIComponent('../settings.yaml')}`)).status).toBe(404)
+    // A name that is not plain, a picture beside the folder, a link out of it, a file that is no picture, one that is not there.
+    await fsp.writeFile(path.join(home, 'wb/backgrounds/.hidden.png'), PNG)
+    expect((await call('GET', '/api/backgrounds/.hidden.png')).status).toBe(404)
+    await fsp.writeFile(path.join(home, 'wb/beside.png'), PNG)
+    expect((await call('GET', `/api/backgrounds/${encodeURIComponent('../beside.png')}`)).status).toBe(404)
+    await fsp.symlink(path.join(home, 'elsewhere/secret.png'), path.join(home, 'wb/backgrounds/link.png'))
+    expect((await call('GET', '/api/backgrounds/link.png')).status).toBe(404)
     expect((await call('GET', '/api/backgrounds/settings.yaml')).status).toBe(404)
     expect((await call('GET', '/api/backgrounds/nope.png')).status).toBe(404)
     const bare = await server.app.inject({ method: 'GET', url: '/api/backgrounds/Lake-view.png', headers: { host: '127.0.0.1:7420' } })

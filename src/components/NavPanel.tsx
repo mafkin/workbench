@@ -1,3 +1,4 @@
+import type { ContextStatus } from '../../shared/config-schema.ts'
 import {
   closestCenter,
   DndContext,
@@ -13,9 +14,11 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Blocks, BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
+import { BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Search, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, projectRef, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section } from '../../shared/config-schema.ts'
+import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, projectRef, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section,
+  profileFile,
+} from '../../shared/config-schema.ts'
 import type { GitMark } from '../../shared/git.ts'
 import { useContextFolders } from '../lib/context.ts'
 import type { Connection } from '../lib/events.ts'
@@ -52,11 +55,13 @@ interface Props extends NavActions {
   onSwitch: (id: string) => void
   onResizeStart: (e: React.PointerEvent) => void
   onHome: () => void
+  /** The notes search: typing opens the search view in the main pane; Enter opens its first hit. */
+  search: { open: boolean; query: string }
+  setSearch: (s: { open: boolean; query: string }) => void
+  searchRef: React.RefObject<HTMLInputElement | null>
+  firstHit: React.RefObject<string | null>
   /** Open the theme and background panel. */
   onLook: () => void
-  /** Open the Claude setup page; `setupActive` while it shows. */
-  onSetup: () => void
-  setupActive: boolean
   onProfileSettings: () => void
   /** Profile settings with the add-profile form focused. */
   onAddProfile: () => void
@@ -160,7 +165,8 @@ function dropTarget(over: DropData, sections: Section[], drawer: number): { to: 
 }
 
 export function NavPanel(props: Props) {
-  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook, onSetup, setupActive } = props
+  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook, search, setSearch, searchRef, firstHit } = props
+  const notesApi = useNotes()
   const profile = active.profile
   const drawers = profile ? drawersOf(profile) : []
   const drawer = Math.min(props.drawer, Math.max(0, drawers.length - 1))
@@ -257,7 +263,7 @@ export function NavPanel(props: Props) {
       <div className="nav-top">
         <div className="brand">
           <span className="brand-mark" />
-          <button className="btn ghost" style={{ height: 22, padding: '0 4px', fontWeight: 600 }} onClick={onHome}>
+          <button className="btn ghost" style={{ height: 22, padding: '0 4px', fontWeight: 600 }} onClick={onHome} title="Home: recent work and today" aria-label="Home">
             WORKBENCH
           </button>
           <span className="spacer" />
@@ -267,17 +273,14 @@ export function NavPanel(props: Props) {
           <button className="icon-btn" onClick={onLook} title="Theme and background" aria-label="Theme and background">
             <Palette size={13} />
           </button>
-          <button className={cx('icon-btn', props.serversActive && 'on')} onClick={props.onServers} title="Servers running in your projects" aria-label="Servers" aria-pressed={props.serversActive}>
+          <button className={cx('icon-btn', props.serversActive && 'on')} onClick={props.onServers} title="Servers running in your folders" aria-label="Servers" aria-pressed={props.serversActive}>
             <Server size={13} />
-          </button>
-          <button className={cx('icon-btn', setupActive && 'on')} onClick={onSetup} title="Claude setup: skills, MCP servers, agents…" aria-label="Claude setup" aria-pressed={setupActive}>
-            <Blocks size={13} />
           </button>
           <button
             className={cx('icon-btn', editing && 'on')}
             onClick={() => setEditing(!editing)}
             disabled={!!active.error}
-            title={active.error ? `Fix ${active.id}.yaml first: editing is paused while it has an error` : editing ? 'Done editing (Esc)' : 'Edit navigation'}
+            title={active.error ? `Fix ${profileFile(active)} first: editing is paused while it has an error` : editing ? 'Done editing (Esc)' : 'Edit navigation'}
             aria-pressed={editing}
             aria-label="Edit navigation"
           >
@@ -291,14 +294,44 @@ export function NavPanel(props: Props) {
             <ChevronDown size={13} className="chev" />
           </button>
         )}
+        <label className="search-box nav-search">
+          <Search size={13} />
+          <input
+            ref={searchRef}
+            value={search.query}
+            placeholder="Search notes"
+            aria-label="Search notes"
+            onFocus={() => !search.open && setSearch({ ...search, open: true })}
+            onChange={(e) => setSearch({ open: true, query: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setSearch({ ...search, open: false })
+                e.currentTarget.blur()
+              } else if (e.key === 'Enter' && firstHit.current) {
+                notesApi.open(firstHit.current)
+                e.currentTarget.blur()
+              }
+            }}
+          />
+          {!search.open && <span className="kbd">Ctrl+Shift+F</span>}
+        </label>
       </div>
 
       {active.error && (
         <div className="banner" role="alert">
-          <strong>{active.id}.yaml has an error</strong>
+          <strong>A page has an error</strong>
           {active.error.line ? ` on line ${active.error.line}` : ''}. Showing the last good version; editing is paused until
           the file is fixed.
           <span className="mono">{active.error.message}</span>
+        </div>
+      )}
+      {!!active.problems?.length && (
+        <div className="banner soft" role="status" title={active.problems.join('\n')}>
+          <strong>
+            {active.problems.length} {active.problems.length === 1 ? 'line' : 'lines'} of this wiki could not be read as written.
+          </strong>
+          <span className="mono">{active.problems[0]}</span>
         </div>
       )}
 
@@ -385,7 +418,7 @@ export function NavPanel(props: Props) {
               ? 'Connecting'
               : editing
                 ? 'Drag to reorder · right-click for more · Esc when done'
-                : `${active.id}.yaml`}
+                : profileFile(active)}
         </span>
       </div>
 
@@ -482,6 +515,8 @@ function SectionBlock({ index, title, items, collapsedDefault }: { index: number
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cx('section', isDragging && 'dragging', hint)}
+      role="group"
+      aria-label={title}
     >
       <div className="section-head" onContextMenu={menu}>
         {editing && (
@@ -538,9 +573,10 @@ function ContextBlock({
   toggleCollapsed: Props['toggleCollapsed']
 }) {
   const ctx = useContextFolders()
-  const notes = useNotes()
   const status = ctx?.status
   if (!ctx || !status) return null
+  // Once set up, the folders are entries of the nav (a Context heading in the page); only the offer to set up stays here.
+  if (status.ready) return null
   const open = !isCollapsed('context', false)
   const toggle = () => toggleCollapsed('context', false)
   return (
@@ -582,7 +618,7 @@ function ContextBlock({
           ) : (
             <button className="item context-setup" onClick={() => ctx.setup()} title="Creates context, knowledge, processes and inbox with starter notes">
               <FolderPlus size={15} className="icon" />
-              <span className="label">Set up context in {status.notes ?? notes.suggestedRoot}</span>
+              <span className="label">Set up context in {status.notes}</span>
             </button>
           )}
         </div>
@@ -613,8 +649,8 @@ function SharedBlock({
   const all = drawersOf(profile)
   const own = all[drawer]
   if (!own) return null
+  // The drawer's own folder is the rail's Files (part 13); Shared lists the folders it uses from other drawers.
   const rows: { name: string; folder: string; mine: boolean }[] = []
-  if (own.folder) rows.push({ name: own.name, folder: own.folder, mine: true })
   for (const use of own.uses ?? []) {
     const other = all[drawerIndex(profile, use)]
     if (other?.folder && other !== own && !rows.some((r) => r.folder === other.folder)) rows.push({ name: other.name, folder: other.folder, mine: false })
@@ -747,6 +783,7 @@ function RowActions({ addr, item }: { addr: ItemAddr; item: NavItem }) {
 
 function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
   const ctx = useContext(Ctx)
+  const folders = useContextFolders()
   const { setNodeRef, attributes, listeners, isDragging, hint, style } = useItemSortable(addr, item)
   // A shared entry looks and opens like its original, marked with the drawer it comes from.
   const original = item.type === 'shared' ? (findShared(ctx.profile, item)?.item ?? null) : item
@@ -786,6 +823,11 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       )}
       <EntryIcon type={shown.type} icon={shown.icon} agent={shown.type === 'chat' ? chatProgram(shown.agent) : undefined} />
       <span className="label">{item.label}</span>
+      {inboxCount(shown, folders?.status) > 0 && (
+        <span className="count inbox-count" title="In the inbox">
+          {inboxCount(shown, folders?.status)}
+        </span>
+      )}
       {item.type === 'shared' && (
         <span className="shared-tag" title={`Also in ${item.drawer}`}>
           ⇄ {item.drawer}
@@ -805,10 +847,11 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
         </button>
       )}
       {!ctx.editing && <ChatMark item={shown} />}
-      {!ctx.editing && <ServerMark item={shown} />}
-      {!ctx.editing && <GitMarkView item={shown} />}
-      {!ctx.editing && shown.type === 'folder' && (
-        <span className="project-marks">
+      {/* A plain folder link is just the file browser: no card, so no status, server or git marks. */}
+      {!ctx.editing && shown.type === 'folder' && !!shown.page && <ServerMark item={shown} />}
+      {!ctx.editing && shown.type === 'folder' && !!shown.page && <GitMarkView item={shown} />}
+      {!ctx.editing && shown.type === 'folder' && !!shown.page && (
+        <span className="item-marks">
           {shown.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
           <span className={cx('status-dot', shown.status ?? 'active')} title={shown.status ?? 'active'} />
         </span>
@@ -816,6 +859,12 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       <RowActions addr={addr} item={item} />
     </div>
   )
+}
+
+/** What the inbox holds, on the entry that opens it (a folder link to the wiki's inbox/). */
+function inboxCount(item: NavItem, status: ContextStatus | null | undefined): number {
+  if (!status || item.type !== 'folder' || item.page || !item.path) return 0
+  return status.folders.find((f) => f.name === 'inbox')?.path === item.path ? status.inbox : 0
 }
 
 /** A spark on a project or chat entry with running chats (with a count past one); the accent colour when one needs you. */

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, closeChats, NOTES, PORT, resetFixture, TRASH, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, closeChats, NOTES, PORT, resetFixture, TRASH, WORK_FILE } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -35,7 +35,7 @@ test('notes: tick a task in View, coloured code, and a link to another note’s 
   await page.screenshot({ path: 'test-results/gaps-notes.png' })
 
   await md.getByRole('link', { name: /Deploy plan › Rollback/ }).click()
-  await expect(page.locator('.crumbs')).toContainText('Deploy plan')
+  await expect(page.locator('.page-title')).toHaveText('Deploy plan')
   await expect(page.locator('#h-rollback')).toBeInViewport()
 })
 
@@ -98,18 +98,6 @@ test('files: a huge folder draws only the rows in view', async ({ page }) => {
   await expect(row(page, 'file-1499.txt')).toBeVisible()
 })
 
-test('cards: a category’s colour from the card, and the project’s dates', async ({ page }) => {
-  await fsp.writeFile(WORK_FILE, WORK.replace('        path: ~/alpha\n', '        path: ~/alpha\n        category: Games\n'))
-  await page.reload()
-  await entry(page, 'Alpha').click()
-  await expect(page.locator('.card-dates')).toContainText(/Created .* · Updated/)
-  await page.locator('.category-chip').click()
-  await menu(page, 'Colour of Games…').click()
-  await menu(page, 'Sand').click()
-  await expect.poll(() => fs.readFileSync(WORK_FILE, 'utf8')).toMatch(/categories:\n\s+Games: "#b39b78"/)
-  await expect(page.locator('.category-chip')).toHaveAttribute('style', /#b39b78/)
-})
-
 test('nav: a broken file pauses the pencil; chats follow /clear', async ({ page }) => {
   await entry(page, 'Alpha').click()
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
@@ -126,7 +114,7 @@ test('nav: a broken file pauses the pencil; chats follow /clear', async ({ page 
     })
     .toBe(cleared)
 
-  await fsp.writeFile(WORK_FILE, 'name: Work\nsections: [oops\n')
+  await fsp.writeFile(WORK_FILE, '---\nname: [oops\n---\n')
   await expect(nav(page).getByRole('alert')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Edit navigation' })).toBeDisabled()
 })

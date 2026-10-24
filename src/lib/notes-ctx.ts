@@ -4,17 +4,21 @@ import type { NoteSummary } from '../../shared/config-schema.ts'
 /** What note views need from the app; provided by App for the active profile. */
 export interface NotesApi {
   profile: string
-  /** The profile's notes folder as written in its config, if set. */
-  root?: string
-  /** Offered when no notes folder is set: `<home>/notes`. */
-  suggestedRoot: string
-  /** Write `notes:` into the profile file. */
-  setRoot: (value: string) => void
+  /** The profile's folder (part 13): where new notes, daily notes, search and wiki links live. */
+  root: string
   /** Every note the profile can reach, newest first; resolves wiki links. */
   list: NoteSummary[]
+  /** The profile's projects, for `[[Project/path]]` links to files in them. */
+  projects: { label: string; path: string }[]
   open: (path: string) => void
-  /** Clicked a [[wiki link]] to a note that does not exist yet. */
+  /** A folder (or a file's folder) in the file browser, for links to files that are not notes. */
+  openFolder: (path: string) => void
+  /** Clicked a [[wiki link]] to a note that does not exist yet: offers to create it. */
   missing: (name: string) => void
+  /** Create the note `name` (a `[[link]]` target, folders allowed) from the page template and open it. */
+  create: (name: string) => Promise<void>
+  /** Open the search box with this query (`#tag` finds notes carrying the tag). */
+  search: (query: string) => void
   /** A note was created or saved; refreshes the list. */
   changed: () => void
   notify: (message: string, kind?: 'info' | 'error') => void

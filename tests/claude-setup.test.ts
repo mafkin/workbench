@@ -125,6 +125,17 @@ describe('reading the Claude setup for a folder', () => {
     expect(setup.problems.map((p) => p.path)).toContain('~/.claude/skills/broken/SKILL.md')
   })
 
+  it('lists the wiki’s skills as scope wiki, overriding nothing', async () => {
+    const wiki = path.join(home, 'notes')
+    await write(path.join(wiki, 'skills/concept-art/SKILL.md'), '---\nname: concept-art\ndescription: Prompts for concept art\n---\n# Concept art\n')
+    await write(path.join(wiki, 'skills/review/SKILL.md'), '---\ndescription: The wiki’s review\n---\n')
+    await write(path.join(wiki, 'skills/notes.md'), 'not a skill')
+    const { setup } = await readSetup({ home, managedDir: managed, folder: alpha, wiki })
+    expect(names(setup.skills).filter((n) => n.startsWith('wiki:'))).toEqual(['wiki:concept-art', 'wiki:review'])
+    expect(setup.skills.find((s) => s.scope === 'user' && s.name === 'review')!.overriddenBy).toBeUndefined()
+    expect(setup.skills.find((s) => s.scope === 'wiki' && s.name === 'review')!.path).toBe('~/notes/skills/review/SKILL.md')
+  })
+
   it('lists commands with namespaces, and a skill of the same name wins', async () => {
     const { setup } = await read()
     expect(names(setup.commands)).toEqual(['plugin:data:report', 'project:build', 'user:deploy (overridden)', 'user:frontend:component'])

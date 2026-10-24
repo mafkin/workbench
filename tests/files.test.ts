@@ -5,24 +5,24 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ConfigStore } from '../server/config-store.ts'
+import { Wiki } from '../server/wiki.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 import { Files } from '../server/files.ts'
 import { buildServer } from '../server/main.ts'
 
 let dir: string
 let home: string
-let store: ConfigStore
+let store: Wiki
 let files: Files
 let spawned: { command: string; args: string[] }[]
 let gioFails: string | null
 let clock: number
 
 const WORK = `name: Work
-home: ~/work
-notes: ~/notes
 sections:
   - title: Projects
     items:
+      - { label: Work, type: folder, path: ~/work }
       - { label: Proj, type: folder, path: ~/proj }
       - label: Group
         type: group
@@ -31,8 +31,10 @@ sections:
 `
 
 const PERSONAL = `name: Personal
-home: ~/personal
-sections: []
+sections:
+  - title: Mine
+    items:
+      - { label: Personal, type: folder, path: ~/personal }
 `
 
 /** Spawn that records calls; `gio trash` succeeds (doing nothing) unless `gioFails` is set. */
@@ -90,14 +92,14 @@ beforeEach(async () => {
   await write('secret/key.txt', 'top secret\n')
   await fsp.symlink(path.join(home, 'secret'), path.join(home, 'proj/link-out'))
   await write('work/w.txt', 'w')
-  await write('notes/n.md', 'n')
   await write('deep/folder/d.txt', 'd')
   await write('personal/p.txt', 'p')
   execFileSync('git', ['init', '-q'], { cwd: path.join(home, 'proj') })
   spawned = []
   gioFails = null
   clock = 1_000_000
-  store = new ConfigStore(path.join(dir, 'cfg'))
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  store = new Wiki(path.join(home, 'wb'), home)
   await store.init({ watch: false })
   files = new Files(store, home, { spawn: fakeSpawn as any, now: () => clock })
 })
@@ -109,8 +111,8 @@ afterEach(async () => {
 })
 
 describe('which folders the browser may open', () => {
-  it('opens home, the notes folder and every folder entry, also inside groups', async () => {
-    for (const p of ['~/work', '~/notes', '~/proj', '~/proj/src', '~/deep/folder']) {
+  it('opens the Workbench folder (the profile’s own inside it) and every folder entry, also inside groups', async () => {
+    for (const p of ['~/wb', '~/wb/work', '~/wb/work/drawers/Work', '~/work', '~/proj', '~/proj/src', '~/deep/folder']) {
       expect(await status(files.list('work', p))).toBe(200)
     }
   })
@@ -128,7 +130,7 @@ describe('which folders the browser may open', () => {
     expect(await status(files.text('work', '~/proj/link-out/key.txt'))).toBe(403)
   })
 
-  it("keeps each profile to its own folders", async () => {
+  it('lets each profile open its own folder entries', async () => {
     expect(await status(files.list('personal', '~/personal'))).toBe(200)
     expect(await status(files.list('personal', '~/proj'))).toBe(403)
   })
@@ -167,6 +169,8 @@ describe('listing', () => {
   })
 
   it('ignores nothing outside a git repository', async () => {
+    // The same rule that dims debug.log in ~/proj, without a repository around it.
+    await write('work/.gitignore', '*.log\n')
     await write('work/x.log', '')
     const { entries } = await files.list('work', '~/work')
     expect(entries.every((e) => !e.ignored)).toBe(true)
@@ -205,9 +209,11 @@ describe('operations', () => {
   })
 
   it('never renames, moves or trashes a root or a folder holding one', async () => {
-    expect(await status(files.op('work', { op: 'rename', path: '~/proj', name: 'x' }))).toBe(403)
-    expect(await status(files.op('work', { op: 'trash', paths: ['~/notes'] }))).toBe(403)
-    expect(await status(files.op('work', { op: 'move', paths: ['~/proj'], to: '~/work' }))).toBe(403)
+    // All inside the Workbench folder, so it is the root rule that refuses them, not "outside".
+    const refusal = (p: Promise<unknown>) => p.then(() => null, (e: { status: number; message: string }) => `${e.status} ${e.message}`)
+    expect(await refusal(files.op('work', { op: 'rename', path: '~/wb/work', name: 'x' }))).toBe("403 ~/wb/work is one of this profile's folders or holds one")
+    expect(await refusal(files.op('work', { op: 'trash', paths: ['~/wb/work/drawers'] }))).toBe("403 ~/wb/work/drawers is one of this profile's folders or holds one")
+    expect(await refusal(files.op('work', { op: 'move', paths: ['~/wb/work/drawers/Work'], to: '~/wb' }))).toBe("403 ~/wb/work/drawers/Work is one of this profile's folders or holds one")
     expect(spawned).toEqual([])
   })
 
@@ -286,7 +292,7 @@ describe('report tickets', () => {
     expect(await files.rawFile(token, 'missing.css')).toBeNull()
   })
 
-  it('gives folder tickets only for HTML', async () => {
+  it('gives folder tickets only for HTML reports and 3D models', async () => {
     expect(await status(files.ticket('work', '~/proj/README.md', { folder: true }))).toBe(415)
   })
 })
@@ -344,7 +350,7 @@ describe('HTTP routes', () => {
   const q = (p: string) => encodeURIComponent(p)
 
   beforeEach(async () => {
-    server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, spawn: fakeSpawn as any })
+    server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, spawn: fakeSpawn as any })
   })
 
   afterEach(() => server.app.close())

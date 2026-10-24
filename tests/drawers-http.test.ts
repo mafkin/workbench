@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -5,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import type { Chat } from '../shared/config-schema.ts'
 import { buildServer } from '../server/main.ts'
 import { encodePng } from '../server/thumbs.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
 
 const WORK = `name: Work
-notes: ~/notes
 drawers:
   - name: Game dev
     folder: ~/shared/game
@@ -54,11 +55,12 @@ async function sees(id: string, text: string, timeout = 5000) {
 beforeEach(async () => {
   dir = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'wb-drawers-http-')))
   home = path.join(dir, 'home')
-  for (const d of ['tower', 'lab', 'notes', 'shared/game', 'shared/research']) await fsp.mkdir(path.join(home, d), { recursive: true })
+  for (const d of ['tower', 'lab', 'shared/game', 'shared/research']) await fsp.mkdir(path.join(home, d), { recursive: true })
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
+  await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({
-    configDir: path.join(dir, 'cfg'),
+    dir: path.join(home, 'wb'),
     port: 7420,
     distDir: null,
     home,
@@ -79,17 +81,28 @@ describe('drawers in the service', { timeout: 15_000 }, () => {
     const { body: chat } = await start({ section: 0, index: 0 })
     const game = path.join(home, 'shared/game')
     const research = path.join(home, 'shared/research')
-    await sees(chat.id, `"--add-dir","${game}","${research}","--session-id"`)
+    await sees(chat.id, `"--add-dir","${path.join(home, 'wb/work')}","${game}","${research}","--session-id"`)
     expect(server.chats.text(chat.id)).toContain('# Shared folders (Workbench, drawer Game dev)')
   })
 
-  test("a shared entry starts its original's chat, with the original drawer's folders", async () => {
+  test("a page linked from two drawers starts its chat with the folders of the drawer it is opened in", async () => {
     const { body: chat } = await start({ drawer: 1, section: 0, index: 0 })
     expect(chat).toMatchObject({ host: 'project:~/tower' })
-    await sees(chat.id, `"--add-dir","${path.join(home, 'shared/game')}","${path.join(home, 'shared/research')}"`)
+    await sees(chat.id, `"--add-dir","${path.join(home, 'wb/work')}","${path.join(home, 'shared/research')}","--session-id"`)
     // Research uses nothing: its own project gets only its own folder.
     const { body: lab } = await start({ drawer: 1, section: 0, index: 1 })
-    await sees(lab.id, `"--add-dir","${path.join(home, 'shared/research')}","--session-id"`)
+    await sees(lab.id, `"--add-dir","${path.join(home, 'wb/work')}","${path.join(home, 'shared/research')}","--session-id"`)
+  })
+
+  test('the git routes may open a drawer folder that is a repository', async () => {
+    const game = path.join(home, 'shared/game')
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: game, env: { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: '/dev/null' } })
+    const status = await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/shared/game')}`)
+    expect(status.status, JSON.stringify(status.body)).toBe(200)
+    expect(status.body.branch).toBe('main')
+    // A drawer folder outside a repository, and a folder that is no drawer's and no item's: each for its own reason.
+    expect(await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/shared/research')}`)).toMatchObject({ status: 404, body: { error: 'This project is not in a git repository' } })
+    expect(await call('GET', `/api/git/status?profile=work&path=${encodeURIComponent('~/wb/work')}`)).toMatchObject({ status: 404, body: { error: 'Not a project of this profile' } })
   })
 
   test('the file routes may open drawer folders', async () => {
@@ -109,15 +122,9 @@ describe('drawers in the service', { timeout: 15_000 }, () => {
 
     expect((await call('PUT', '/api/logos', encodePng(65, 64, Buffer.alloc(65 * 64 * 4)), 'image/png')).status).toBe(422)
     expect((await call('PUT', '/api/logos', Buffer.from('RIFF0000WEBPVP8 '), 'image/webp')).status).toBe(415)
-    expect((await call('GET', '/api/logos/..%2Fprofiles%2Fwork.yaml')).status).toBe(404)
-  })
-
-  test('a drawer folder in one click: <notes>/drawers/<name>', async () => {
-    const res = await call<{ folder: string }>('POST', '/api/drawers/folder', { profile: 'work', name: 'Game dev' })
-    expect(res.body).toEqual({ folder: '~/notes/drawers/game-dev' })
-    expect((await fsp.stat(path.join(home, 'notes/drawers/game-dev'))).isDirectory()).toBe(true)
-    // Only a drawer name: no paths.
-    expect((await call('POST', '/api/drawers/folder', { profile: 'work', name: '../../etc' })).body).toEqual({ folder: '~/notes/drawers/etc' })
-    expect((await call('POST', '/api/drawers/folder', { profile: 'work', name: '' })).status).toBe(400)
+    // Only names put gave, inside the folder.
+    expect((await call('GET', '/api/logos/..%2Fsettings.yaml')).status).toBe(404)
+    await fsp.writeFile(path.join(home, 'wb/logos/notes.png'), png)
+    expect((await call('GET', '/api/logos/notes.png')).status).toBe(404)
   })
 })

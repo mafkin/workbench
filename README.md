@@ -12,6 +12,8 @@ bin/workbench              # starts the service if needed, then opens the window
 
 `bin/workbench` builds the UI on first use and logs to `~/.local/state/workbench/server.log`. `npm install` also builds `node-pty` for chats, which needs `gcc`, `make` and `python3`.
 
+The first time, the app shows a **setup screen**: pick the folder Workbench works in (`~/Workbench` by default) and name the first profile. The folder is made with that profile and one drawer, nothing in it points at any folder of yours, and the choice is remembered in `~/.config/workbench/dir`. `bin/workbench --dir PATH` sets the folder from a terminal instead; `WORKBENCH_DIR` in the environment overrides both. A folder that already is a Workbench (it has a `settings.yaml`) is used as it is.
+
 For a window without browser chrome:
 
 1. Start Workbench once, so the service is running.
@@ -35,118 +37,133 @@ This writes three user units to `~/.config/systemd/user/` and starts the service
 
 ## Configuration
 
-Config lives in `~/.config/workbench/`. Set `WORKBENCH_CONFIG_DIR` to use another location.
+Everything Workbench keeps lives in **one folder**, the one you pick at setup (part 13). Nothing in it is tied to the rest of your machine, so it can be put in git or synced. Running chats, the MCP ledger, skill bundles and logs stay in `~/.local/state/workbench/`, thumbnails in `~/.cache/workbench/`.
+
+```
+~/Workbench/                    # the folder you picked (WORKBENCH_DIR, or ~/.config/workbench/dir)
+  settings.yaml                 # the active profile and the profiles in switcher order
+  backgrounds/  logos/          # pictures the app copied
+  main/                         # a profile = a wiki = its notes folder (the id is the folder name)
+    index.md                    # the profile and its drawer list
+    drawers/Main.md             # a drawer: its nav
+    drawers/Main/               # the drawer's own folder: its pages, references, assets
+    Workflow.md  agents/  templates/  skills/
+    context/  knowledge/  processes/  inbox/   # Set up context makes these
+```
 
 | File | Holds |
 | --- | --- |
-| `settings.yaml` | active profile and profile order |
-| `profiles/<id>.yaml` | one file per profile; add a file (or use **Profile settings**) to add a profile |
+| `settings.yaml` | the active profile and, in order, the profile ids (each a subfolder) |
+| `backgrounds/`, `logos/` | pictures the app copied for backgrounds and drawer logos |
 
-You can edit the files by hand or through the app (the pencil at the top of the nav panel). App edits keep your comments, key order and formatting. Hand edits show up live. If a file stops parsing, the app shows the error and line, keeps showing the last good version, and won't write over your file until it is fixed.
+A profile is a **wiki**: a folder of Markdown pages. The pages are the configuration, and they are notes too, so search, `[[wiki links]]`, Mentions and the editor work on them. Edit them in Workbench or in any editor: hand edits show up live, and app edits touch only the lines they must, so prose around a list stays as you wrote it. A page that will not parse is reported in a banner (with the line) and never written over; a line that cannot be read as an entry shows up as a note that opens the page, so you can fix it.
 
 ```yaml
+# settings.yaml
+activeProfile: work
+profiles:
+  - work
+  - personal
+```
+
+Inside a wiki:
+
+| Page | Holds |
+| --- | --- |
+| `index.md` | The profile in its frontmatter (`name`, `accent`, `theme`, `background`, `categories`, `openWith`, `skills`). Its body is the nav: `##` headings with link lists, one nested list level for groups. With drawers, the body is a `## Drawers` list of drawer pages instead. |
+| `drawers/<Name>.md` | A drawer: frontmatter `logo`, `uses`, `skills`, `mcpOff`, and `folder` only to work in a folder elsewhere (a repository) instead of its own `drawers/<Name>/`; the body is its nav, as in `index.md`. |
+| `pages/<Name>.md` (`drawers/<Drawer>/<Name>.md` in a drawer with a page; `projects/<Name>.md` in wikis made before the rename, still read), or any page linked as `[[Name]]` from the nav | An item. "Projects" is only a heading in the nav, not a kind of thing. The frontmatter is its card: `folder`, `status` (paused, done, archived), `category`, `pinned`, `agent`, `icon`, `description`, `servers`, and `id` for an item without a folder. `## Workflow` lists its tabs. The rest of the page is yours: the page itself shows when it has no tabs. |
+| `Workflow.md` | The profile steps: the list **Add profile steps** copies into a page and **Save as profile steps** writes here. |
+| `agents/<Name>.md` | An agent profile: frontmatter `model`, `effort`, `permission`, `prompt`, `folders`, `allowedTools`, `disallowedTools`, `mcp` (or `agent` for a Claude Code agent); the body is the instructions. |
+| `templates/page.md`, `templates/daily.md` | Templates for new notes and daily notes; `{{title}}` and `{{date}}` are filled in. |
+| `context/`, `knowledge/`, `processes/`, `inbox/` | The context folders (see Context). |
+
+A list item is a link, and what it opens follows from the target, so there is no type to name:
+
+| Target | Opens as |
+| --- | --- |
+| `[[Page]]`, `[[Page\|shown as]]`, `[[folder/Page]]` | the page, as an item (its card, its tabs; the page itself without tabs). A page that does not exist yet opens as a note to create. |
+| `folder/`, `~/Downloads`, a path without an extension | a folder in the file browser |
+| `x.md` | a note; `x.html` a report in its tab; any other file is shown large |
+| `https://…` | a link, opened in your browser |
+| `run:godot --editor --path .` | a launcher (no shell; `cd <folder> && …` sets its working folder). Spaces put the target in angle brackets: `[Godot](<run:godot --editor>)` |
+| `chat:`, `chat:shell`, `chat:Reviewer`, `chat:shell src/`, `chat:claude ~ -- --model opus` | a chat: the agent (`claude`, `shell` or an agent profile; none means the item's default), a folder, and arguments after `--` |
+| `daily:` | today's note (`daily:journal templates/j.md` picks the folder and template) |
+| `files:`, `git:`, `setup:` | in a `## Workflow` only: the item's folder in the file browser, its Git tab, its Claude setup |
+| `note:plan.txt`, `folder:…`, `report:…`, `file:…` | the kind spelled out, when the target's shape would say otherwise |
+
+A link's title is its icon (`[Docs](https://example.com "book")`, any name from [lucide.dev/icons](https://lucide.dev/icons)); a page carries `icon:` in its frontmatter.
+
+```md
+---
 name: Work
 accent: "#7d93ab"
 theme: fjord                    # slate (default) | fjord | moss | ember | dusk | graphite
-background: theme               # theme (default) | none | a picture in ~/.config/workbench/backgrounds/
-home: ~/Documents/work
-notes: ~/Documents/work/notes   # new notes, daily notes, search and [[wiki links]]
-workflow:                       # profile steps: a template (Add profile steps), and the tabs of older projects without steps:
-  - { label: assets, type: folder, path: assets }                                  # paths are inside the item's folder
-  - { label: modeling, type: launch, command: blender, args: [models/main.blend] }  # runs in the project folder
-  - { label: design, type: note, path: docs/design.md }
-  - { label: agent, type: chat }                                                   # claude in the project folder
-  - { label: shell, type: chat, agent: shell, path: src }                          # your login shell, in src/
+background: theme               # theme (default) | none | a picture in <Workbench>/backgrounds/
+categories: { game: "#8fa58a" } # optional colours for project categories
 openWith:                       # optional: programs files open in (before the built-in Blender and Godot)
-  - { ext: [kra], command: krita }                                       # args default to ["{file}"]
-  - { ext: [tscn, gd], command: godot, args: [--editor, --path, "{godot}"] }  # {file}, {dir}, {godot}: the project folder
-mcpOff: [plugin:productivity:slack, plugin:product-management:gmail]   # MCP servers off by default (names as /mcp writes them)
-categories:                     # optional colours for project categories
-  game: "#8fa58a"
-agents:                         # agent profiles: how claude starts when you pick one
-  Reviewer:
-    model: opus                 # optional, like effort: low | medium | high | xhigh | max
-    permission: plan            # acceptEdits | auto | plan | dontAsk | bypassPermissions
-    instructions: |             # added to claude's system prompt
-      You review code. Don't edit files.
-    prompt: Review the latest changes   # first prompt of a new session
-    folders: [~/Projects/shared-assets] # extra folders (--add-dir)
-    allowedTools: [Read, Grep]
-    disallowedTools: [Bash]
-    mcp: ~/mcp/review.json              # an MCP config file
-  Orchestrator:
-    agent: orchestrator         # a Claude Code agent; it decides model and effort
-sections:
-  - title: Projects
-    collapsed: false
-    items:
-      - { label: IFC Checker, type: folder, path: ~/ifc_checker_project }
-      - label: Ideas board      # a new entry: an item, blank until you add steps
-        type: item
-        id: i3f9c2a1            # an item without a folder gets an id (written by the app)
-        steps:
-          - { label: ideas, type: note, path: ~/notes/ideas.md }
-          - { label: board, type: link, url: "https://example.com/b" }
-      - label: Tuohi
-        type: folder
-        path: ~/Projects/tuohi
-        description: Card game about birch-bark crafts   # the project card
-        status: paused          # active (the default) | paused | done | archived
-        category: game
-        pinned: true
-        agent: Reviewer         # what New chat starts here (default: plain Claude)
-        servers:                # optional: servers to check even when they're not running
-          - { name: web, port: 5173 }
-          - { name: api, url: "http://127.0.0.1:9000/health" }
-        steps:                  # its tabs, in order (without steps: an older project shows All files, Git, Claude setup and the workflow)
-          - { label: All files, type: files }        # the item's folder in the file browser
-          - { label: Git, type: git }                # its repository
-          - { label: Claude setup, type: setup }     # what claude loads there
-          - { label: sprites, type: folder, path: assets/sprites }
-          - { label: Godot, type: launch, command: godot, args: [--editor, --path, .] }
-          - { label: tests, type: report, path: reports/index.html }   # an HTML page shown in the tab
-          - { label: render, type: file, path: renders/latest.png }    # one file shown large
-          - { label: board, type: link, url: "https://example.com/b" } # opens in your browser
-      - { label: Runbook, type: note, path: ~/deploy-tools/RUNBOOK.md }
-      - { label: Today, type: daily }   # optional: folder (default daily), template (default templates/daily.md)
-      - { label: Docs, type: link, url: "https://example.com" }
-      - { label: Scratch, type: chat, path: "~", args: [--model, opus] }  # a chat outside projects
-      - label: Claude here
-        type: launch
-        command: gnome-terminal
-        args: ["--working-directory=~/ifc_checker_project", "--", "claude"]
-        cwd: ~                  # optional
-      - label: Deploy           # a group: one level of entries inside
-        type: group
-        items: []
+  - { ext: [kra], command: krita }
+mcpOff: [plugin:toolkit:slack]  # MCP servers off by default (see Claude setup); with drawers, on each drawer's page
+skills: [review]                 # skills pinned for every chat (see Claude setup); drawer and item pages take their own
+---
+## Projects
+- [[Tuohi]]
+- [[IFC Checker|IFC]]
+- [Downloads](~/Downloads)
+
+## Reference
+- [Runbook](~/deploy-tools/RUNBOOK.md)
+- [Docs](https://example.com "book")
+- [Today](daily:)
+- [Scratch](<chat:claude ~>)
+- Deploy
+  - [Claude here](<run:cd ~/ifc_checker_project && gnome-terminal -- claude>)
 ```
 
-Any entry can have an `icon`, which is any name from [lucide.dev/icons](https://lucide.dev/icons). Keys the app doesn't know about are kept.
+```md
+---
+folder: ~/Projects/tuohi
+status: paused
+category: game
+pinned: true
+agent: Reviewer
+servers:
+  - { name: web, port: 5173 }
+---
+# Tuohi
 
-A profile can hold several **drawers**, each a nav of its own. Then `drawers:` takes the place of `sections:` (a file has one or the other):
+Card game about birch-bark crafts.
 
-```yaml
-drawers:
-  - name: Game dev
-    logo: 3fa2c19e04b1.png        # a 64×64 PNG in ~/.config/workbench/logos/ (set from the app)
-    folder: ~/notes/drawers/game-dev   # its shared folder
-    uses: [Research]              # drawers whose shared folders it uses; unknown names are ignored
-    sections:
-      - title: Projects
-        items:
-          - { label: Tower, type: folder, path: ~/dev/tower }
-  - name: Research
-    sections:
-      - title: Projects
-        items:
-          # Tower from Game dev, shown here too: found by drawer, label and path
-          - { label: Tower, type: shared, drawer: Game dev, path: ~/dev/tower }
+## Workflow
+
+- [All files](files:)
+- [Git](git:)
+- [sprites](assets/sprites/)
+- [Godot](<run:godot --editor --path .>)
+- [tests](reports/index.html)
+- [render](renders/latest.png)
+- [design](docs/design.md)
+- [agent](chat:)
+- [board](https://example.com/b)
 ```
+
+```md
+---
+model: opus
+permission: plan
+prompt: Review the latest changes
+folders: [~/Projects/shared-assets]
+allowedTools: [Read, Grep]
+---
+You review code. Don't edit files.
+```
+
+**Older setups:** profiles from before part 13 (wikis anywhere, named in `~/.config/workbench/settings.yaml`) are not read. Copy a wiki's pages into `<Workbench>/<id>/` and add the id to `settings.yaml`; pages still in `projects/` are found there.
 
 ## Using it
 
 - **Profiles:** the person icon at the top of the sidebar lists them, with Profile settings… and Add profile…. **Ctrl+1 / Ctrl+2** (and on, in profile order) switch profiles. **Esc** leaves edit mode.
-- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Claude setup, Servers), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile or a drawer, New drawer…, Drawer settings…). With several drawers it searches all of them; picking an entry of another drawer shows that drawer. Letters match in order, word starts first; with an empty box, your recent picks come first.
+- **Ctrl+K** finds anything: entries, project steps (`Alpha › readme`), notes, context folders, open chats and pages (Home, Servers, the drawer's Files, Git, Skills, MCP servers and Drawer settings), plus actions (New note…, New chat in a project, Theme and background, Agent profiles, Profile settings, Edit navigation, Switch to a profile or a drawer, New drawer…). With several drawers it searches all of them; picking an entry of another drawer shows that drawer. Letters match in order, word starts first; with an empty box, your recent picks come first.
 - **Profile settings** (in the profile menu, or Ctrl+K) edits the profile's name, accent, home and notes folder, keeping your YAML comments; Undo works. **Add a profile** makes a blank one or a copy of the current one's headings and workflow. **Remove** asks first and moves the file to the Trash; the last profile stays.
 - The selected entry and **Recent work** follow an entry you move or rename, in the app or by hand.
 - **Edit mode** (pencil):
@@ -155,18 +172,26 @@ drawers:
   - Deletes can be undone from the toast that appears.
 - **Right-click** any heading or entry for the same actions.
 - **Launchers** and **links** start or open from the small button at the end of their row (▶ or ↗), without a shell; their names are just text. Folders and notes open in the main pane when you click them.
-- **Alt+←** or the back arrow in the top bar goes back to the previous page.
-- **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
+- **Alt+←** or the small arrow in the page's top-left corner goes back to the previous page. The **WORKBENCH** label in the sidebar is Home.
+- **Home** shows what you opened last (items and their tabs, notes, folders) and today's note. It doesn't repeat the nav.
 
 ### Drawers
 
-- A **drawer** is a nav of its own inside a profile: its own headings, entries, groups and projects, and a small logo. The button under the header row shows the drawer and switches between them; **New drawer…** and **Drawer settings…** are in its menu. Context stays at the top of every drawer.
+- A **drawer** is a nav of its own inside a profile: its own headings, entries, groups and projects, and a small logo. The button under the header row shows the drawer and switches between them; **New drawer…** and **Drawer settings…** are in its menu. The Context links live in the first drawer's page.
+- **The rail** on the right edge is the drawer's toolbox (part 12): **Files** and **Git** for the drawer's folder (once it has one), **Skills** and **MCP** (what claude loads there, and the drawer's MCP defaults), and **Settings** (the same form as Drawer settings…, in the main pane). Pages you add in a drawer go under `drawers/<Name>/` in the wiki, so a drawer is a workspace: its folder, its repository, its chapters.
 - The first **New drawer…** turns your headings into the first drawer, named after the profile (rename it in Drawer settings). Until then the file keeps `sections:` as it was.
 - The drawer you were in is remembered per profile in this browser. Back, Recent work and Ctrl+K bring an entry's drawer along.
 - **Logo:** **Choose picture…** in Drawer settings, or right-click a picture in the file browser and choose **Use as drawer logo**. Its middle is scaled to 64 × 64 and kept in `~/.config/workbench/logos/`. Without one, the drawer's initials on a tinted square.
 - **Show in drawers:** right-click an entry and tick **Show in <drawer>**. The same entry shows there too, under a heading of the same name, marked ⇄ with its own drawer; it opens the same page, chats and all. Renaming the original updates it; deleting the original asks first and removes it everywhere (Undo brings it back). Right-click a shared entry for **Go to <drawer>** or **Remove from this drawer**.
-- **Shared folder:** a drawer can have a folder of its own (Drawer settings offers `<notes>/drawers/<name>` in one click) and use other drawers' folders. They're listed under a fixed **Shared** heading, open in the file browser, and claude chats started in the drawer can read them (`--add-dir`, with a line in the system prompt). A project's chats get the folders of the drawer it lives in.
+- **Folders:** every drawer works in `drawers/<Name>/` inside its profile, made with the drawer: its pages, references and assets go there, and the rail's Files and Git show it. Drawer settings can point it at a folder elsewhere (a repository) instead. A drawer can use other drawers' folders; those are listed under a fixed **Shared** heading, open in the file browser, and claude chats started in the drawer can read them (`--add-dir`, with a line in the system prompt). A project's chats get the folders of the drawer it lives in.
 - Entries move between headings within their drawer only.
+
+### Workspaces (part 12)
+
+- **A drawer is a workspace.** It has a folder from the start (`drawers/<Name>/` in the profile, or one you point it at in its settings) and the rail shows **Files** and **Git** for it; its nav lists the pages of the work (chapters, references, projects), which land under `drawers/<Name>/` in the wiki. A page without a folder of its own starts its chats in the drawer's folder, so a chapter page is a place to work from, not just to read.
+- **Pinned skills** tie skills to places: the profile (`skills:` on `index.md`), a drawer (its page) or one page. Chats started there are told to use them; the wiki's own skills (`<wiki>/skills/<name>/SKILL.md`) load only where pinned. See Claude setup.
+- **The chats dock** keeps every chat beside the page you're reading, and a new chat starts where you are, with that page's text in its instructions. See Chats.
+- A good day looks like this: open the chapter you're on, pin the skill the task needs, **New chat**, and claude starts with the page, the drawer's folders, the context notes and the right skills.
 
 ### Themes and backgrounds
 
@@ -177,44 +202,41 @@ drawers:
 
 ### Items: cards and steps
 
-- **Add entry…** makes an **item**: a name, and optionally a folder. It starts blank, with buttons for **File browser**, **Note**, **Git**, **Claude setup** and **More…** (every kind of step). You add what it needs, and each step is a tab.
+- **Add entry…** makes an **item**: a name, and optionally a folder. It starts blank, with buttons for **File browser**, **Note** and **More…** (every kind of step). You add what it needs, and each step is a tab.
   - An item with one step shows it on the whole page, without a tab row; **+** by the title adds the next one. From two tabs on (steps or chats) the tab row is back.
-  - File browser, Git and Claude setup show the item's folder. An item without one asks for it the first time you add one of these, and keeps it.
+  - The file browser shows the item's folder. An item without one asks for it the first time you add it, and keeps it. Git and Claude setup are the drawer's tools on the rail, not tabs.
   - **Remove tab** (right-click a tab, or Delete on it) takes away only the tab. Its folder or file stays on disk, and the toast has Undo. With no steps left the item is blank again.
   - Entries made before items (folders, notes, launchers, links, chats, daily) keep working as they are. A `type: folder` entry is an item too.
-- The top of an item's page is its card:
-  - a **category** chip (pick one or make a new one),
-  - a **status** (active, paused, done, archived),
-  - a **pin**,
-  - a **description** you click to edit.
-- **Under the description:** when the folder was created and last updated (the last commit in a git repository, else the newest file), and how many servers are running there.
-- **Categories** get colours from the category menu (**Colour of …**: a palette or any colour), saved in `categories:`.
-- **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, mark it or archive it.
-- Below the card are its steps:
-  - **File browser** (`files`), **Git** (`git`) and **Claude setup** (`setup`) show the item's folder, its repository and what claude loads there.
+- The top of an item's page is its card: the heading it sits under, the agent and skills chips for its chats, the title with a **pin** and the folder, and a **description** you click to edit. Nothing else: no status, category, dates or git line (they went in part 12's cleanup).
+- **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, **Mark** it paused or done, or archive it; that is where status lives. `category:` and `categories:` are still read from the files but no longer shown.
+- Below the card are its tabs. The first is **Page**: the item's own page (`pages/<Name>.md`), with its properties, its text (a log, links, anything) and the pages that mention it, editable in place. An item with one tab shows that tab on the whole page and no row, so the Page tab appears from two on.
+- The steps:
+  - **File browser** (`files`) shows the item's folder. `git:` and `setup:` lines from before part 12 are kept in the page but get no tab: Git and Claude setup are on the rail.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
   - A **note** step shows the note in place, with Edit and autosave.
   - A **report** step shows an HTML page (a test or analysis report) with its own styles and scripts. It runs in a sandbox, cut off from Workbench.
   - A **file** step shows one image, PDF, video or text file large.
   - A **launcher** step starts its program in the item's folder (or home), and a **link** step opens its address in your browser.
 - Steps are yours to name: **+** adds one (relative paths are inside the item's folder, else home). Right-click a tab to edit or remove it, and drag tabs to reorder them.
-- The profile's `workflow:` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, and **Save as profile steps** makes this item's steps the template.
+- The profile's `Workflow.md` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, **Save as profile steps** makes this item's steps the template, and **Open Workflow.md** opens the template as a note.
+- A `<notes>/templates/item.md` (or `project.md`, its old name), when you make one, is the start of every new item's page (`{{title}}` and `{{date}}` filled in; its frontmatter is kept under the card's fields, and the steps you picked go under its `## Workflow`, added at the end when the template has none).
 - An older project without `steps:` shows All files, Git (in a repository), Claude setup and the workflow. Its first step change writes those tabs as its own `steps:`.
 - Note steps also count as notes, so they show up in search and wiki links.
 
 ### Chats
 
 - A chat is the real `claude` CLI (or your login shell) in a terminal inside the app, so everything claude does works as in GNOME Terminal, including `/remote-control` for your phone.
+- **The chats dock** (part 12) is the column to the right of the page: every chat of the profile as a vertical list (pinned first, then the newest), with the active one's terminal under it. **Ctrl+J**, or the arrows in its corner, folds it to a strip showing the count and a dot when a chat needs you. A chat started from an item remembers that page: the chat's instructions carry the page's text, and its tooltip says where it came from.
 - Start one:
-  - **New chat** at the end of a project's tab row (the arrow next to it offers **Shell**), or **New chat** / **New shell** when you right-click a project in the nav.
+  - **New chat** in the dock's header (the arrow next to it offers the agent profiles and **Shell**) starts in the item you're looking at (its folder, or its drawer's folder for a page without one), else in the drawer's folder. **New chat** / **New shell** when you right-click a project in the nav do the same for that project and show it.
   - A **chat step** (`type: chat`) is a fixed tab in every project that uses the workflow. It starts the first time you open it. `agent: shell` makes it a shell, `path:` a folder inside the project, `args:` extra arguments for claude.
   - **Chat here** / **Shell here** when you right-click a folder in the file browser.
   - A **chat entry** in the nav (`type: chat`, `path:` defaults to home) has a page of its own, for chats outside projects.
 - Chats keep running when you switch tabs or projects, reload or close the window; the screen comes back as you left it. After the service restarts (a pull, a reboot), they show **Stopped** with **Resume** and **New session**. Nothing starts by itself.
-- **History** (end of the tab row) lists the Claude sessions in the project folder and below it; pick one to resume it in a new tab. A stopped chat step or entry also offers its folder's earlier sessions.
-- A tab's right-click menu: **Rename…**, **Colour…**, **Pin** (pinned tabs come first and have no ×), **Summarize and continue**, **Close**. Closing a running chat asks first; claude's conversation stays in History.
+- **History** (in the dock's header) lists the Claude sessions in the folder New chat would start in, and below it; pick one to resume it in the dock. A stopped chat step or entry also offers its folder's earlier sessions.
+- A chat's right-click menu in the dock: **Rename…**, **Colour…**, **Pin** (pinned chats come first and have no ×), **Summarize and continue**, **Close**. Closing a running chat asks first; claude's conversation stays in History. A step's or entry's chat is listed under its step's name.
 - **Summarize and continue** asks claude (in the background, on a copy of the session) for a handoff summary, then starts a new chat with it. After 40 messages the button says so.
-- When a chat goes quiet after working (claude finished or is asking for permission), or rings the bell, while you're not looking at it, its tab gets a dot and the project's spark in the nav turns the accent colour. If the window isn't focused, you also get a desktop notification (the browser asks for permission on your first chat).
+- When a chat goes quiet after working (claude finished or is asking for permission), or rings the bell, while you're not looking at it (the dock folded, another chat shown, the window elsewhere), its row gets a dot, the folded dock too, and the project's spark in the nav turns the accent colour. If the window isn't focused, you also get a desktop notification (the browser asks for permission on your first chat).
 - Drag files or folders from the browser, or a step tab, onto a chat or its tab: their paths are typed into the prompt.
 - In the terminal, **Ctrl+C** interrupts as usual, **Ctrl+Shift+C** copies the selection and **Ctrl+Shift+V** pastes. Links open in your browser.
 - Tab names, colours and pins live with the service's chat list (`~/.local/state/workbench/chats.json`), not in your YAML: they belong to a running session. A chat you want in every project is a chat step.
@@ -224,7 +246,7 @@ drawers:
 - An agent profile is a way to start claude: model and effort, permission mode, instructions added to its system prompt, a first prompt, extra folders, allowed and blocked tools, and an MCP config file. Prepare them in **New chat ▾ › Agent profiles…**; they're saved under `agents:` in the profile's YAML (comments kept), and you can write them by hand too.
 - A profile can name one of your **Claude Code agents** (`~/.claude/agents` or the project's `.claude/agents`), such as an orchestrator. Then its model and effort are left to that agent.
 - Pick one when you start a chat: **New chat ▾** lists Claude, your agent profiles and Shell; **Chat here as…** in the file browser and **New chat as…** in the nav menu do the same for a folder or a project.
-- **New chat** itself starts the project's default: click the agent chip next to the category in the project header to set it (`agent:` on the folder entry). Chat steps and chat entries name theirs in `agent:` (`claude`, `shell` or a profile's name).
+- **New chat** itself starts the project's default: click the agent chip in the project header to set it (`agent:` on the folder entry). Chat steps and chat entries name theirs in `agent:` (`claude`, `shell` or a profile's name).
 - The chat's bar shows the profile it started with (`Reviewer · opus · plan`). **Bypass permissions** shows a warning in the editor and a shield on its chats' tabs and bar.
 - A chat keeps the settings it started with: **Resume** uses them, **New session** uses the profile as it is now (and sends its first prompt again), and Summarize and continue keeps the flags but not the first prompt.
 - Renaming a profile updates everything that names it. A profile still in use can't be deleted; the message says where it's used.
@@ -237,15 +259,14 @@ drawers:
   - `processes/`: workflows you repeat.
   - `inbox/`: handoffs and files to look at later.
 - **Setting it up:**
-  - The **Context** heading at the top of the sidebar starts with **Set up context in ~/notes**. It creates the folders and starter notes, never overwriting a file.
-  - A profile without `notes:` gets `notes: ~/notes` (or `<home>/notes`) at the same time.
-  - After that, the heading lists **Context**, **Knowledge**, **Processes** and **Inbox**.
+  - The **Context** heading at the top of the sidebar starts with **Set up context in <the profile's folder>**. It creates the folders and starter notes, never overwriting a file, and writes a `## Context` heading at the top of `index.md` (or of the first drawer's page) with links to the four folders, unless an entry already opens `context/`.
+  - After that, **Context**, **Knowledge**, **Processes** and **Inbox** are ordinary nav entries: move, rename or delete them like any other; the fixed heading is gone. The Inbox entry shows the count.
 - **Context** opens with tabs for its notes (Identity, Preferences, Goals, **Where things go**), editable in place, beside All files. The other three open their folder in the file browser. They're ordinary notes, so search and `[[wiki links]]` find them.
 - **Every claude chat** (not shells) starts with the context:
-  - `--add-dir` for the four folders, so claude can read and update them.
-  - Appended to its system prompt: where the folders are, the routing note, and the text of identity, preferences and goals (up to 16 KB).
+  - `--add-dir` for the four folders and for the wiki itself, so claude can read and update them.
+  - Appended to its system prompt: where the folders are, the routing note, the text of identity, preferences and goals (up to 16 KB), and what the wiki's pages are. In a project, claude is told its page (`projects/<Name>.md`) and asked to add to its `## Log` when it finishes something, leaving the frontmatter and `## Workflow` alone.
   - Agent profiles keep their own instructions and folders, and the context is added after them.
-  - The chat bar shows **context**.
+  - The chat bar shows **context · wiki**.
   - A chat keeps what it started with; a new chat picks up your edits.
 - **Inbox:**
   - The nav shows how many things are in it.
@@ -260,9 +281,9 @@ drawers:
   - **Local** (only you, in that folder),
   - **Managed** (`/etc/claude-code`),
   - or the **plugin** that brings it.
-- Two places show it, so you can keep the one you like:
-  - **The page** opens from the blocks button at the top of the sidebar. **For** picks Everywhere or one of the profile's projects.
-  - **The tab:** an item's **Claude setup** step (an older project has one after All files) shows what applies in its folder.
+- Two places show it:
+  - **The rail** on the right edge (part 12) has **Skills** and **MCP** for the drawer you're in: what claude loads in the drawer's folder (everywhere, when the drawer has no folder). The rail also has **Files** and **Git** for that folder and the drawer's **Settings**.
+  - **The rail's Skills view** also holds agents, commands, hooks and plugins behind its kind tabs, for the drawer's folder.
 - **Overridden** items are dimmed and say what claude uses instead: a skill of the same name in a nearer scope, or a local MCP server over a project or user one. A skill also wins over a command of the same name.
 - **MCP servers** show their state:
   - **On**,
@@ -271,8 +292,8 @@ drawers:
   - **Blocked** (managed policy),
   - **Broken**.
 - **Switches** turn MCP servers on and off, the way `/mcp` does: the folder's `disabledMcpServers` list in `~/.claude.json`, so the app and `/mcp` always agree.
-  - In a project (its tab, or the page's For), a switch acts in that folder. A folder inside a repository shares the repository's list, as in claude.
-  - On the page's **Everywhere**, a switch is the profile's default (`mcpOff:`): off turns it off now in every project of the profile, and the first chat the app starts in any other folder turns it off there too. Switch it back on in one project and it stays on there. On, everywhere, takes it out of `mcpOff:` and turns it on in every project.
+  - In a folder (a project's tab, or the rail of a drawer with a folder), a switch acts in that folder. A folder inside a repository shares the repository's list, as in claude.
+  - In the rail of a drawer **without a folder**, a switch is the drawer's default (`mcpOff:` on the drawer's page; on `index.md` for a profile without drawers): off turns it off now in every project of the drawer, and the first chat the app starts in any other folder of the drawer turns it off there too. Switch it back on in one project and it stays on there. On again takes it out of `mcpOff:` and turns it on in every project.
   - A plugin's details have **Turn all off** / **Turn all on** for its servers.
   - Servers that are off fold behind **N off · Show**. The filter still finds them.
   - New chats use the change. Running chats keep their servers until they restart (or use `/mcp` in them). Undo is in the toast.
@@ -280,6 +301,9 @@ drawers:
   - A server that wants a sign-in says so; signing in is done in claude (`/mcp`).
   - A project server that claude hasn't approved asks before it runs.
 - **Plugins** show their marketplace, version, where they're turned on, and what they bring; click a count to see those items.
+- **Pinned skills** (part 12): `skills:` in the frontmatter of `index.md` (every chat), a drawer's page (its chats) or an item's page (chats started there) names the skills to use. A chat gets the three lists merged, and its instructions name each one with its description, so claude reaches for them.
+  - Skills of your own for this wiki go in `<wiki>/skills/<name>/SKILL.md`. They show in Skills with a **Wiki** badge and load **only** in chats where they are pinned (claude gets them as a session plugin, `--plugin-dir`, so they are `/wiki:<name>` there).
+  - Pinning: in the rail's **Skills**, pick a skill and **Pin to <drawer>** (the strip at the top shows the profile's, the drawer's and, on a project's tab, the page's lists; × unpins). On an item's card, the **Skills** chip ticks skills on or off for that page. A name nothing resolves is marked *not found*.
 - **Secret values are hidden everywhere:** env values, headers, passwords and keys in URLs, values after flags like `--token`, and known token shapes. `${VAR}` references stay readable.
 - To change anything, use claude (`claude mcp`, `/plugin`, `/mcp`) or edit its files, then **Refresh**.
 
@@ -315,7 +339,7 @@ An item's **Git** step shows its folder's repository, with its count of changed 
   - **Abort merge** goes back to how things were.
 - **Stashes:** **Stash…** in Changes. Each stash has **Pop**, and right-click for Apply and Drop.
 - **History:** the branch's last 200 commits, with **Load more**. Click a commit for its message, files and diffs; right-click it to copy its hash.
-- **In the nav,** a project shows a small dot for uncommitted changes, ↑ for commits to push and ↓ for commits to pull, in red when there are conflicts. The card shows the branch and the same counts; click it to open the Git tab. **Ctrl+K** has "<project> › Git".
+- **In the nav,** a project shows a small dot for uncommitted changes, ↑ for commits to push and ↓ for commits to pull, in red when there are conflicts. **Git** on the rail opens the drawer folder's repository; **Ctrl+K** has it too.
 
 ### Notes
 
@@ -324,11 +348,18 @@ An item's **Git** step shows its folder's repository, with its count of changed 
 - A note changed on disk (another editor, `git pull`) reloads while it's open. If you have unsaved edits at that moment, autosave pauses and a banner offers **Reload from disk** or **Keep mine**.
 - **New note…** in the right-click menu of a heading or group creates `<notes>/<Title>.md` and its entry in one step.
 - `[[Name]]` links to the note with that file name in the notes folder (`[[folder/Name]]`, `[[Name|shown text]]` and `[[Name#Heading]]`, which scrolls to the heading, work too). A link to a note that doesn't exist yet looks faint; clicking it offers to create the note. Relative links like `[x](other.md)` open in the app too.
-- **Search** (the box in the top bar, **Ctrl+Shift+F**) finds notes containing every word you type, across the notes folder and your note entries. With no words it lists notes by date. **Enter** opens the first result.
+- **Search** (the box in the sidebar under the drawer picker, **Ctrl+Shift+F**) finds notes containing every word you type, across the notes folder and your note entries. With no words it lists notes by date. **Enter** opens the first result.
 - A **daily** entry opens today's note, `<notes>/daily/YYYY-MM-DD.md`, creating it from `<notes>/templates/daily.md` the first time (`{{date}}` and `{{title}}` are filled in). The arrows step to other days. Left open past midnight, it moves to the new day.
 - **Task boxes** (`- [ ]`) tick in the formatted view too; the change saves like an edit.
 - **Code blocks** are coloured for JavaScript and TypeScript (with JSX), JSON, CSS, HTML and Markdown; other languages stay plain.
-- Without `notes:` in a profile, the app offers to set it to `<home>/notes` with one click. The folder is created with the first note.
+- A profile's notes folder is its own folder in the Workbench (`<Workbench>/<id>/`): new notes, daily notes, search and `[[wiki links]]` live there.
+- **Properties:** YAML frontmatter at the top of a note (`---` … `---`) shows as a row of properties above it instead of as text. Broken frontmatter says so there; the note still opens.
+- **Mentions:** under every note, the notes that link to it, with the lines that do. Click one to open it.
+- **Rename** (or **F2**) renames a note in the notes folder and rewrites the links to it in your other notes: `[[Old]]`, `[[folder/Old]]`, with headings and aliases kept, and relative links like `[x](Old.md)`. Renaming a `.md` in the file browser does the same. Notes outside the notes folder are named by your config, so they are renamed there.
+- `[[Project/docs/design.md]]` links to a file inside a project (a folder entry) by the project's name: Markdown opens as a note, anything else opens its folder.
+- A `<notes>/templates/page.md` is used for new notes (New note…, or created from a wiki link), with `{{title}}` and `{{date}}` filled in.
+- **Tags:** `tags: [game, art]` in a note's frontmatter, or `#game` in its text (outside code; a heading's `#` and a URL's `#anchor` don't count). The properties strip shows them as links, and a `#tag` word in the search box finds the notes carrying the tag (`#game sprites` combines a tag with words).
+- **Before you type a query,** the search page lists the wiki's **Tags** with counts, and **Pages to write**: the `[[names]]` your notes link to that have no note yet, with who links to them. Click one to create it from the page template and open it.
 
 ### Files
 
@@ -376,11 +407,11 @@ Other websites therefore cannot call it. Launch requests name an entry's (or a s
 
 Notes can only touch:
 
-- Markdown files inside the profile's `notes:` folder,
+- Markdown files inside the profile's folder,
 - the files of that profile's note entries,
 - images inside those places, read-only.
 
-The file browser can open the profile's `home:`, its `notes:` folder, its folder entries and their folder steps, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file (copies, uploads and restores from the Trash take a free name or refuse), and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
+The file browser can open the Workbench folder, the profile's folder entries and their folder steps, and every drawer's folder, and everything inside them; nothing else. It can't rename, move or trash those folders themselves, it never overwrites a file (copies, uploads and restores from the Trash take a free name or refuse), and it deletes only by moving to the Trash. It won't start `.desktop` files or programs. Previews of media use a random, 10-minute link to one file, because media players can't send the `X-Workbench` header. A report's link covers its own folder, so its styles and scripts load. The report runs in a sandbox without Workbench's origin, so it can't read the app or call the service. These `/raw/` links are the one place the service accepts requests from such a page; the `Host` is still checked.
 
 Paths are checked after resolving symlinks, so `..` or a link can't reach anything else. Background pictures are copied only from the profile's folders, only raster types (no SVG, which can carry scripts), and served only by plain name from the backgrounds folder.
 
@@ -413,14 +444,14 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | --- | --- |
 | `shared/config-schema.ts` | zod schema and types shared by the UI and the service |
 | `server/config-ops.ts` | edits applied to the YAML document |
-| `server/config-store.ts` | loading, validation, atomic writes, watching and undo |
+| `server/config-store.ts` | the error type every service throws |
+| `server/seed.ts` | a fresh Workbench folder: settings and the first profile with one drawer |
 | `server/notes.ts` | which files notes may touch; reading, saving (rev checked), listing, search, images, watching |
 | `server/files.ts`, `server/trash.ts`, `server/paths.ts`, `server/watch.ts` | the file browser's listing, previews and operations; putting things back from the Trash; the folders a profile may reach; folder watching |
 | `server/servers.ts`, `server/procfs.ts` | servers running in projects: listening sockets and their processes from `/proc`, declared servers, health checks, Stop |
 | `server/thumbs.ts`, `server/open-with.ts` | gallery thumbnails (the cache, .blend previews, a Godot project's icon); the program a file opens in |
 | `server/git.ts`, `shared/git.ts` | git per project: status, diffs and hunks, stage, discard with Undo, commit, Draft, branches, stash, fetch, pull, push, conflicts, history, the nav's marks |
-| `server/project-dates.ts` | a project's created and updated dates |
-| `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
+| `server/backgrounds.ts` | background pictures: copies in the Workbench folder, listed, served and deleted by name |
 | `server/chats.ts`, `server/session-hook.mjs`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list, following `/clear`; reading claude's transcripts for History; agent profiles as claude flags |
 | `server/context.ts` | context folders: status, setup, what a chat is told, handoffs and files into the inbox |
 | `server/claude-setup.ts`, `server/mcp-check.ts`, `server/mask.ts` | reading claude's skills, MCP servers, agents, commands, hooks and plugins; checking an MCP server; masking secrets |
@@ -442,4 +473,7 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 9 | Git per project: changes, hunks, commit with Draft, branches, stash, pull and push, conflicts, history (done) |
 | 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
 | after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
+| 11 | The wiki: pages as configuration (done) |
+| 12 | Workspaces: the drawer rail, pinned skills, the chats dock (done) |
+| 13 | One Workbench folder: the setup screen, profiles as subfolders, drawers with their own folders (done) |
 | later | A Tauri window, if wanted |

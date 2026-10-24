@@ -58,6 +58,8 @@ export interface ChatSpec {
   bypass?: boolean
   /** The agent profile's first prompt: sent on a new session, not on a resume. */
   firstPrompt?: string
+  /** The wiki page the chat started from, relative to the wiki (part 12). */
+  page?: string
   /** `args` carry the profile's context folders. */
   context?: boolean
 }
@@ -247,6 +249,7 @@ export class Chats extends EventEmitter {
       messages: 0,
       createdAt: Date.now(),
       context: spec.context ?? false,
+      ...(spec.page ? { page: spec.page } : {}),
     }
     this.#meta.set(id, { args: spec.args, firstPrompt: spec.firstPrompt, dir: spec.cwd, cols: 100, rows: 30 })
     try {
@@ -432,6 +435,7 @@ export class Chats extends EventEmitter {
         bypass: chat.bypass,
         firstPrompt: meta.firstPrompt,
         context: chat.context,
+        page: chat.page,
       })
       if (chat.slot) await this.close(id)
       return next

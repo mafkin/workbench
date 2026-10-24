@@ -1,12 +1,13 @@
-import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, Search, X } from 'lucide-react'
-import { lazy, Suspense, useRef, useState } from 'react'
+import { expandHome, normalizePath, profileFile } from '../../shared/config-schema.ts'
+import { ArrowLeft, CalendarDays, ExternalLink, FileText, Folder, Pencil, X } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import {
   chatName,
   chatProgram,
   allSections,
-  CONTEXT_LABEL,
   drawersOf,
   entryAt,
+  ownDrawerFolder,
   entrySlot,
   folderRoots,
   getItem,
@@ -25,7 +26,7 @@ import {
 } from '../../shared/config-schema.ts'
 import { useChats } from '../lib/chats.ts'
 import { nameOf } from '../lib/files.ts'
-import { findEntry, FILES_KEY, NOTE_KEY, parseKey, resolveEntry, type Selection } from '../lib/nav.ts'
+import { findEntry, FILES_KEY, NOTE_KEY, parseKey, RAIL_LABEL, resolveEntry, type RailTool, type Selection } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
 import { ago, type Recent } from '../lib/recent.ts'
 import { ChatPane } from './ChatPane.tsx'
@@ -33,14 +34,15 @@ import { ContextView } from './ContextView.tsx'
 import { DailyView } from './DailyView.tsx'
 import { agentIcon, EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
-import { NotesFolderHint } from './NotesFolderHint.tsx'
 import { NoteView } from './NoteView.tsx'
-import { ProjectView, type ProjectActions } from './ProjectView.tsx'
+import { ItemView, type ItemActions } from './ItemView.tsx'
 import { SearchView } from './SearchView.tsx'
 import type { ToastInput } from './Toast.tsx'
 
 const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
 const ServersView = lazy(() => import('./ServersView.tsx'))
+const GitView = lazy(() => import('./GitView.tsx'))
+const DrawerDialog = lazy(() => import('./DrawerDialog.tsx').then((m) => ({ default: m.DrawerDialog })))
 
 export interface SearchState {
   open: boolean
@@ -52,7 +54,8 @@ interface Props {
   selected: Selection | null
   search: SearchState
   setSearch: (s: SearchState) => void
-  searchRef: React.RefObject<HTMLInputElement | null>
+  /** The first search hit, which Enter in the nav's search box opens. */
+  firstHit: React.RefObject<string | null>
   canGoBack: boolean
   onBack: () => void
   /** Open a folder in the browser; one that is a folder entry opens as that entry. */
@@ -63,7 +66,7 @@ interface Props {
   activate: (addr: ItemAddr, item: NavItem) => void
   openExternally: (addr: ItemAddr, item: NavItem) => void
   startEditing: () => void
-  actions: ProjectActions
+  actions: ItemActions
   /** Recently opened, newest first, for Home. */
   recent: Recent[]
   openRecent: (r: Recent) => void
@@ -71,136 +74,32 @@ interface Props {
   onServersScan: (scan: ServersScan) => void
   /** The drawer the nav shows. */
   drawer: number
+  /** The rail's Drawer settings: show a drawer by name (renamed), or go home after a delete. */
+  onDrawerShow: (name: string) => void
+  onDrawerDeleted: () => void
 }
 
 const noteName = (path: string) => (path.split('/').pop() ?? path).replace(NOTE_EXT, '')
 
 export function MainPane(props: Props) {
-  const { active, selected, search, setSearch, searchRef, canGoBack, onBack, onHome, activate, startEditing } = props
-  const notes = useNotes()
-  const firstHit = useRef<string | null>(null)
+  const { active, selected, search, setSearch, firstHit, canGoBack, onBack, activate, startEditing } = props
   const profile = active.profile
   const entry = selected?.kind === 'entry' ? selected : null
-  // Where the entry lives: a shared entry's original, in its own drawer.
+  // The heading the entry sits under (a shared entry's original, in its own drawer), for the page's kicker.
   const section = entry && profile ? sectionsOf(profile, entry.origin.drawer ?? 0)[entry.origin.section] : undefined
-  const group = entry && section && entry.origin.group !== undefined ? section.items[entry.origin.group] : undefined
-  const drawers = profile ? drawersOf(profile) : []
-  const drawerName = entry && drawers.length > 1 ? drawers[entry.origin.drawer ?? 0]?.name : undefined
-  const atHome = !selected && !search.open
-  const [stepCrumb, setStepCrumb] = useState<string | null>(null)
 
   return (
     <main className="main">
-      <div className="topbar">
-        {canGoBack && (
-          <button className="icon-btn" onClick={onBack} title="Back (Alt+←)" aria-label="Back">
-            <ArrowLeft size={15} />
-          </button>
-        )}
-        <div className="crumbs">
-          {atHome ? <span className="current">{profile?.name ?? active.id}</span> : <button onClick={onHome}>{profile?.name ?? active.id}</button>}
-          {search.open ? (
-            <>
-              <span className="sep">/</span>
-              <span className="current">Search</span>
-            </>
-          ) : entry ? (
-            <>
-              {drawerName && (
-                <>
-                  <span className="sep">/</span>
-                  <span>{drawerName}</span>
-                </>
-              )}
-              {section && (
-                <>
-                  <span className="sep">/</span>
-                  <span>{section.title}</span>
-                </>
-              )}
-              {group && (
-                <>
-                  <span className="sep">/</span>
-                  <span>{group.label}</span>
-                </>
-              )}
-              <span className="sep">/</span>
-              {entry.item.type === 'folder' && stepCrumb ? (
-                <>
-                  <span>{entry.item.label}</span>
-                  <span className="sep">/</span>
-                  <span className="current">{stepCrumb}</span>
-                </>
-              ) : (
-                <span className="current">{entry.item.label}</span>
-              )}
-            </>
-          ) : selected?.kind === 'chat' ? (
-            <>
-              <span className="sep">/</span>
-              <span>Chats</span>
-            </>
-          ) : selected?.kind === 'setup' ? (
-            <>
-              <span className="sep">/</span>
-              <span className="current">Claude setup</span>
-            </>
-          ) : selected?.kind === 'servers' ? (
-            <>
-              <span className="sep">/</span>
-              <span className="current">Servers</span>
-            </>
-          ) : selected?.kind === 'context' ? (
-            <>
-              <span className="sep">/</span>
-              <span>Context</span>
-              {selected.name !== 'context' && (
-                <>
-                  <span className="sep">/</span>
-                  <span className="current">{CONTEXT_LABEL[selected.name]}</span>
-                </>
-              )}
-            </>
-          ) : selected && selected.kind !== 'entry' ? (
-            <>
-              <span className="sep">/</span>
-              <span>{selected.kind === 'note' ? 'Notes' : 'Files'}</span>
-              <span className="sep">/</span>
-              <span className="current" title={selected.path}>
-                {selected.kind === 'note' ? noteName(selected.path) : nameOf(selected.path)}
-              </span>
-            </>
-          ) : null}
-        </div>
-        <span style={{ flex: 1 }} />
-        <label className="search-box">
-          <Search size={13} />
-          <input
-            ref={searchRef}
-            value={search.query}
-            placeholder="Search notes"
-            aria-label="Search notes"
-            onFocus={() => !search.open && setSearch({ ...search, open: true })}
-            onChange={(e) => setSearch({ open: true, query: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.stopPropagation()
-                setSearch({ ...search, open: false })
-                e.currentTarget.blur()
-              } else if (e.key === 'Enter' && firstHit.current) {
-                notes.open(firstHit.current)
-                e.currentTarget.blur()
-              }
-            }}
-          />
-          {!search.open && <span className="kbd">Ctrl+Shift+F</span>}
-        </label>
-      </div>
+      {canGoBack && (
+        <button className="icon-btn back-float" onClick={onBack} title="Back (Alt+←)" aria-label="Back">
+          <ArrowLeft size={15} />
+        </button>
+      )}
       <div className="content">
         {!profile ? (
           <BrokenProfile active={active} />
         ) : search.open ? (
-          <SearchView query={search.query} onResults={(hits: SearchHit[]) => (firstHit.current = hits[0]?.path ?? null)} />
+          <SearchView query={search.query} onQuery={(query) => setSearch({ open: true, query })} onResults={(hits: SearchHit[]) => (firstHit.current = hits[0]?.path ?? null)} />
         ) : entry ? (
           <EntryView
             key={`${active.id}:${entry.item.label}`}
@@ -208,7 +107,6 @@ export function MainPane(props: Props) {
             item={entry.item}
             kicker={section?.title ?? ''}
             pane={props}
-            onTab={setStepCrumb}
           />
         ) : selected?.kind === 'note' ? (
           <PathNote key={selected.path} path={selected.path} />
@@ -222,10 +120,8 @@ export function MainPane(props: Props) {
           <Suspense fallback={null}>
             <ServersView key={active.id} profileId={active.id} onScan={props.onServersScan} toast={props.toast} />
           </Suspense>
-        ) : selected?.kind === 'setup' ? (
-          <Suspense fallback={null}>
-            <ClaudeSetupView key={active.id} profileId={active.id} profile={profile} rev={active.rev} toast={props.toast} />
-          </Suspense>
+        ) : selected?.kind === 'rail' ? (
+          <RailView key={`${active.id}:${props.drawer}:${selected.tool}`} tool={selected.tool} pane={props} />
         ) : (
           <Home active={active} drawer={props.drawer} activate={activate} recent={props.recent} openRecent={props.openRecent} startEditing={startEditing} />
         )}
@@ -237,7 +133,7 @@ export function MainPane(props: Props) {
 function BrokenProfile({ active }: { active: ProfileState }) {
   return (
     <div className="empty-state">
-      <h2 style={{ color: 'var(--text)' }}>{active.id}.yaml cannot be read</h2>
+      <h2 style={{ color: 'var(--text)' }}>{profileFile(active)} cannot be read</h2>
       <p>
         {active.error?.line ? `Line ${active.error.line}: ` : ''}
         {active.error?.message}
@@ -289,7 +185,6 @@ function Home({
     <div className="page home-page">
       <div className="page-kicker">Profile</div>
       <h1 className="page-title">{profile.name}</h1>
-      {!profile.notes && <NotesFolderHint compact />}
       {dailyAddr && daily && (
         <button className="today-card" onClick={() => activate(dailyAddr, daily)}>
           <CalendarDays size={18} className="icon" />
@@ -302,7 +197,7 @@ function Home({
       <OtherChats profile={profile} />
       <h2 className="section-label">Recent</h2>
       {rows.length === 0 ? (
-        <p className="none">Nothing opened yet. Pick a project on the left.</p>
+        <p className="none">Nothing opened yet. Pick something on the left.</p>
       ) : (
         <ul className="recent-list">
           {rows.map(({ r, icon, label, where }) => (
@@ -397,8 +292,76 @@ function describeRecent(profile: NonNullable<ProfileState['profile']>, r: Recent
   const drawers = drawersOf(profile)
   const heading = group ? `${section?.title} / ${group.label}` : (section?.title ?? '')
   const where = drawers.length > 1 ? `${drawers[addr.drawer ?? 0]?.name} › ${heading}` : heading
-  const step = r.step && stepsOf(profile, item, true).some((s) => s.label === r.step) ? r.step : undefined
+  const step = r.step && stepsOf(profile, item).some((s) => s.label === r.step) ? r.step : undefined
   return { icon: <EntryIcon type={item.type} icon={item.icon} size={15} />, label: step ? `${item.label} › ${step}` : item.label, where }
+}
+
+/** A tool of the right rail, for the drawer the nav shows: its folder's files, its repository, what claude loads there, its settings. */
+function RailView({ tool, pane }: { tool: RailTool; pane: Props }) {
+  const { active, drawer } = pane
+  const profile = active.profile!
+  const d = drawersOf(profile)[drawer]
+  if (!d) return null
+  const folder = d.folder ?? null
+  if (tool === 'files') {
+    if (!folder) return <RailEmpty name={d.name} />
+    return <Browser key={`${active.id}:${folder}`} top={folder} kicker={d.name} heading="Files" pane={pane} />
+  }
+  if (tool === 'git') {
+    if (!folder) return <RailEmpty name={d.name} />
+    return (
+      <div className="page wide">
+        <div className="page-kicker">{d.name}</div>
+        <h1 className="page-title">Git</h1>
+        <Suspense fallback={null}>
+          <GitView key={`${active.id}|${folder}`} profileId={active.id} path={folder} toast={pane.toast} onChanged={pane.actions.gitChanged} />
+        </Suspense>
+      </div>
+    )
+  }
+  if (tool === 'settings') {
+    return (
+      <div className="page">
+        <div className="page-kicker">{d.name}</div>
+        <h1 className="page-title">Drawer settings</h1>
+        <Suspense fallback={null}>
+          <DrawerDialog key={`${active.id}:${drawer}:${active.rev}`} inline profile={profile} profileId={active.id} index={drawer} run={pane.actions.run} onShow={pane.onDrawerShow} onDeleted={pane.onDrawerDeleted} onClose={() => {}} />
+        </Suspense>
+      </div>
+    )
+  }
+  // Skills and MCP: in the drawer's own folder (drawers/<Name>/ in the profile) the views show what claude
+  // loads everywhere and the switches set the drawer's defaults; a folder set on the page (a repository
+  // elsewhere) is a project folder for claude, so the views act in it.
+  const setupFolder = ownDrawerFolder(profile, d) ? undefined : (folder ?? undefined)
+  return (
+    <div className="page wide">
+      <div className="page-kicker">{d.name}</div>
+      <h1 className="page-title">{RAIL_LABEL[tool]}</h1>
+      <Suspense fallback={null}>
+        <ClaudeSetupView
+          key={`${active.id}:${drawer}:${tool}`}
+          profileId={active.id}
+          profile={profile}
+          folder={setupFolder}
+          drawer={drawer}
+          kinds={tool === 'mcp' ? ['mcp'] : ['skills', 'agents', 'commands', 'hooks', 'plugins']}
+          rev={active.rev}
+          toast={pane.toast}
+          pins={tool === 'skills' ? { scope: 'drawer', label: d.name, set: (names) => void pane.actions.run([{ op: 'setSkills', drawer, names }], `Skills pinned on ${d.name} changed`) } : undefined}
+        />
+      </Suspense>
+    </div>
+  )
+}
+
+function RailEmpty({ name }: { name: string }) {
+  return (
+    <div className="empty-state">
+      <h2 style={{ color: 'var(--text)' }}>{name} has no folder yet</h2>
+      <p>Give the drawer a folder in its settings (the sliders on the rail) and its files and repository show here.</p>
+    </div>
+  )
 }
 
 /** A folder opened by path (outside a project's tabs): the file browser at `top`. */
@@ -439,20 +402,29 @@ function PathNote({ path }: { path: string }) {
   )
 }
 
-function EntryView({
-  addr,
-  item,
-  kicker,
-  pane,
-  onTab,
-}: {
-  addr: ItemAddr
-  item: NavItem
-  kicker: string
-  pane: Props
-  onTab: (label: string | null) => void
-}) {
+function EntryView({ addr, item, kicker, pane }: { addr: ItemAddr; item: NavItem; kicker: string; pane: Props }) {
   const { openExternally } = pane
+  if (item.type === 'folder' && !item.page) {
+    // A folder link (no page): the file browser; the wiki's context/ opens the Context view.
+    const profile = pane.active.profile!
+    const want = item.path ? normalizePath(expandHome(item.path, pane.home)) : ''
+    const isContext = want === normalizePath(expandHome(`${profile.root}/context`, pane.home))
+    if (isContext) return <ContextView key={`${pane.active.id}:context`} name="context" profileId={pane.active.id} profile={profile} home={pane.home} openFolder={pane.openFolder} toast={pane.toast} />
+    return (
+      <Browser
+        key={`${pane.active.id}:${item.path}`}
+        top={item.path ?? '~'}
+        kicker={kicker}
+        heading={
+          <>
+            <EntryIcon type="folder" icon={item.icon} size={22} />
+            {item.label}
+          </>
+        }
+        pane={pane}
+      />
+    )
+  }
   if (item.type === 'note') {
     return (
       <NoteView
@@ -485,7 +457,7 @@ function EntryView({
 
   if (item.type === 'folder') {
     return (
-      <ProjectView
+      <ItemView
         key={projectRef(item)}
         addr={addr}
         item={item}
@@ -496,7 +468,6 @@ function EntryView({
         actions={pane.actions}
         openFolder={pane.openFolder}
         toast={pane.toast}
-        onTab={onTab}
       />
     )
   }

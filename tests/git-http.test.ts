@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 let dir: string
 let home: string
@@ -19,8 +20,10 @@ const sh = (cwd: string, ...args: string[]) => {
   return execFileSync('git', args, { cwd, env, encoding: 'utf8' })
 }
 
-const start = (fetchEveryMs = 0) =>
-  buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: fetchEveryMs })
+const start = async (fetchEveryMs = 0) => {
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  return buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: fetchEveryMs })
+}
 
 const status = async () => {
   const res = await server.app.inject({ method: 'GET', url: '/api/git/status?profile=work&path=~/alpha', headers })
@@ -65,7 +68,7 @@ describe('git routes', { timeout: 30_000 }, () => {
     expect((await bad({ action: 'explode', name: 'x' })).statusCode).toBe(400)
     expect((await bad({ action: 'switch', name: 'nope' })).statusCode).toBe(404)
     const missing = await server.app.inject({ method: 'GET', url: '/api/git/status?profile=nobody&path=~/alpha', headers })
-    expect(missing.statusCode).toBeGreaterThanOrEqual(400)
+    expect(missing.statusCode).toBe(404)
     const unknown = await server.app.inject({ method: 'GET', url: `/api/git/status?profile=work&path=${encodeURIComponent(dir)}`, headers })
     expect(unknown.statusCode).toBe(404)
   })
@@ -81,10 +84,11 @@ describe('git routes', { timeout: 30_000 }, () => {
   })
 
   it('fetches the active profile’s repositories in the background, quietly', async () => {
-    server = await start(150)
     fs.writeFileSync(path.join(other, 'f.txt'), 'f2\n')
     sh(other, 'commit', '-qam', 'More')
     sh(other, 'push', '-q')
+    server = await start(300)
+    // Nothing fetched until the timer's first round.
     expect((await status()).lastFetch).toBeNull()
     await expect.poll(async () => (await status()).lastFetch?.error, { timeout: 5000 }).toBeNull()
     expect(sh(alpha, 'branch', '-r', '-v')).toContain('More')

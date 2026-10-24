@@ -10,7 +10,9 @@ import {
   entrySlot,
   findShared,
   expandHome,
+  fillTemplate,
   getItem,
+  isoDate,
   itemKey,
   joinNotes,
   noteFileName,
@@ -19,6 +21,7 @@ import {
   sectionsOf,
   sharedRefs,
   stepsOf,
+  tabSteps,
   themeOf,
   walkItems,
   type AppState,
@@ -40,12 +43,15 @@ import { ContextMenu } from './components/ContextMenu.tsx'
 import { ItemDialog } from './components/ItemDialog.tsx'
 import { MainPane, type SearchState } from './components/MainPane.tsx'
 import { NavPanel } from './components/NavPanel.tsx'
+import { Rail } from './components/Rail.tsx'
+import { SetupScreen } from './components/SetupScreen.tsx'
+import { ChatsDock, type DockContext } from './components/ChatsDock.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
-import type { ProjectActions } from './components/ProjectView.tsx'
+import type { ItemActions } from './components/ItemView.tsx'
 import type { GitMark } from '../shared/git.ts'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
-import { CHAT_TAB, ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
+import { ChatsCtx, showProjectTab, slotStep, type ChatsApi } from './lib/chats.ts'
 import { ContextCtx, type ContextApi } from './lib/context.ts'
 import type { SwitchItem } from './lib/switcher.ts'
 import { followState, onChatsEvent, onContextEvent, type Connection } from './lib/events.ts'
@@ -61,7 +67,10 @@ import {
   listLength,
   NOTE_KEY,
   SERVERS_KEY,
-  SETUP_KEY,
+  RAIL_KEY,
+  RAIL_LABEL,
+  RAIL_TOOLS,
+  type RailTool,
   entryId,
   parseKey,
   resolveEntry,
@@ -111,12 +120,17 @@ export function App() {
   const [selectedIds, setSelectedIds] = useLocal<Record<string, string | undefined>>('selectedId', {})
   const [collapsed, setCollapsed] = useLocal<Record<string, boolean>>('collapsed', {})
   const [navWidth, setNavWidth] = useLocal('navWidth', 280)
+  // The chats dock (part 12): open or a strip, and the chat it shows per profile.
+  const [dock, setDock] = useLocal<{ open: boolean }>('dock', { open: true })
+  const [dockActive, setDockActive] = useLocal<Record<string, string | undefined>>('dockActive', {})
   const [history, setHistory] = useState<(string | undefined)[]>([])
   const [search, setSearch] = useState<SearchState>({ open: false, query: '' })
   const [notesList, setNotesList] = useState<NoteSummary[]>([])
   const [fresh, setFresh] = useState<string | null>(null)
   const [recent, setRecent] = useLocal<Record<string, Recent[]>>('recent', {})
   const searchRef = useRef<HTMLInputElement>(null)
+  // The first hit of the search shown, which Enter in the search box opens.
+  const firstHit = useRef<string | null>(null)
   const toasts = useToasts()
 
   useEffect(() => followState(setState, setConnection), [])
@@ -298,6 +312,16 @@ export function App() {
   )
   const openNote = useCallback((path: string) => openPath('note', path), [openPath])
   const openFolder = useCallback((path: string) => openPath('folder', path), [openPath])
+  /** A context folder: its nav entry when the profile lists one, else its own page. */
+  const openContext = useCallback(
+    (name: ContextFolder) => {
+      const p = activeRef.current?.profile
+      const want = p ? normalizePath(expandHome(`${p.root}/${name}`, homeRef.current)) : null
+      const addr = p && want ? findEntry(p, 'folder', (item) => 'path' in item && !!item.path && normalizePath(expandHome(item.path, homeRef.current)) === want) : null
+      navigate(addr ? itemKey(addr) : CONTEXT_KEY + name)
+    },
+    [navigate],
+  )
 
   const refreshNotes = useCallback(() => {
     const id = activeRef.current?.id
@@ -318,13 +342,26 @@ export function App() {
     notesTimer.current = setTimeout(refreshNotes, 300)
   }, [refreshNotes])
 
+  /** The text of a new page: `templates/page.md` filled in, else a heading. */
+  const newPageText = useCallback(async (id: string, title: string) => {
+    const { text } = await api.noteTemplate(id, 'page').catch(() => ({ text: null }))
+    return text === null ? `# ${title}\n\n` : fillTemplate(text, { date: isoDate(new Date()), title })
+  }, [])
+
+  /** The profile's projects (folder entries, in every drawer), for [[Project/path]] links. */
+  const projects = useMemo(() => {
+    const out: { label: string; path: string }[] = []
+    if (active?.profile) for (const { item } of walkItems(active.profile)) if (item.type === 'folder' && item.path) out.push({ label: item.label, path: item.path })
+    return out
+  }, [active?.profile])
+
   /** Quick-create: the file, then its nav entry, then open it in Edit. Resolves to an error message or null. */
   const createNote = useCallback(
     async (list: ListAddr, title: string, path: string): Promise<string | null> => {
       const a = activeRef.current
       if (!a?.profile) return 'The profile is not loaded'
       try {
-        await api.writeNote(a.id, path, null, `# ${title}\n\n`)
+        await api.writeNote(a.id, path, null, await newPageText(a.id, title))
       } catch (err) {
         if (err instanceof api.ApiError && err.status === 409) return `${path} already exists`
         return err instanceof Error ? err.message : String(err)
@@ -338,41 +375,36 @@ export function App() {
       navigate(itemKey({ ...list, index }))
       return null
     },
-    [run, refreshNotes, navigate],
+    [run, refreshNotes, navigate, newPageText],
+  )
+
+  /** Create the note a [[wiki link]] names (folders allowed) from the page template, and open it. */
+  const createLinkedNote = useCallback(
+    async (name: string) => {
+      const a = activeRef.current
+      const root = a?.profile?.root
+      if (!a || !root) return
+      const parts = name.split('/').map((s) => s.trim()).filter((s) => s && s !== '.' && s !== '..')
+      const file = noteFileName(parts.pop() ?? '')
+      if (!file) return
+      const path = joinNotes(root, [...parts, file].join('/'))
+      try {
+        await api.writeNote(a.id, path, null, await newPageText(a.id, file.replace(/\.md$/, '')))
+        setFresh(path)
+      } catch (err) {
+        // Already there (the list was stale): just open it.
+        if (!(err instanceof api.ApiError && err.status === 409)) return fail(err)
+      }
+      refreshNotes()
+      openNote(path)
+    },
+    [toasts.push, fail, refreshNotes, openNote, newPageText],
   )
 
   /** A [[wiki link]] to a missing note: offer to create it in the notes folder. */
   const missingNote = useCallback(
-    (name: string) => {
-      const create = async () => {
-        const a = activeRef.current
-        const root = a?.profile?.notes
-        if (!a || !root) {
-          toasts.push({ message: 'Set a notes folder for this profile first', kind: 'error' })
-          return
-        }
-        const parts = name.split('/').map((s) => s.trim()).filter((s) => s && s !== '.' && s !== '..')
-        const file = noteFileName(parts.pop() ?? '')
-        if (!file) return
-        const path = joinNotes(root, [...parts, file].join('/'))
-        try {
-          await api.writeNote(a.id, path, null, `# ${file.replace(/\.md$/, '')}\n\n`)
-          setFresh(path)
-        } catch (err) {
-          // Already there (the list was stale): just open it.
-          if (!(err instanceof api.ApiError && err.status === 409)) return fail(err)
-        }
-        refreshNotes()
-        openNote(path)
-      }
-      toasts.push({ message: `No note named "${name}" yet`, action: { label: 'Create', run: () => void create() } })
-    },
-    [toasts.push, fail, refreshNotes, openNote],
-  )
-
-  const setRoot = useCallback(
-    (value: string) => void run([{ op: 'setProfileField', key: 'notes', value }], `Notes folder set to ${value}`),
-    [run],
+    (name: string) => toasts.push({ message: `No note named "${name}" yet`, action: { label: 'Create', run: () => void createLinkedNote(name) } }),
+    [toasts.push, createLinkedNote],
   )
 
   const openExternally = useCallback(
@@ -525,29 +557,34 @@ export function App() {
     setContextStatus(null)
     refreshContext()
     return onContextEvent((e) => (e === 'reconnected' || e.profile === activeRef.current?.id) && refreshContext())
-  }, [active?.id, active?.profile?.notes, refreshContext])
+  }, [active?.id, active?.profile?.root, refreshContext])
 
   /** Put a chat the service just returned into the list, so its tab shows before the next event. */
   const upsertChat = useCallback((chat: Chat) => {
     setChatList((cur) => (cur?.profile === chat.profile ? { ...cur, list: [...cur.list.filter((c) => c.id !== chat.id), chat] } : cur))
   }, [])
 
-  /** Show a chat: its tab in its project, its chat entry, or a page of its own. */
+  /** Show a chat: a step's in its project tab, an entry's on its page, any other in the dock (part 12). */
   const openChat = useCallback(
     (chat: Chat) => {
       const a = activeRef.current
       const p = a?.profile
       if (!a || !p) return
+      if (!chat.slot) {
+        setDockActive((d) => ({ ...d, [a.id]: chat.id }))
+        setDock({ open: true })
+        return
+      }
       const project = findEntry(p, 'folder', (item) => item.type === 'folder' && projectHost(projectRef(item)) === chat.host, drawerRef.current)
       const item = project && getItem(p, project)
       if (project && item?.type === 'folder') {
-        showProjectTab(a.id, projectRef(item), chat.slot ? slotStep(chat.slot) : CHAT_TAB + chat.id)
+        showProjectTab(a.id, projectRef(item), slotStep(chat.slot))
         return navigate(itemKey(project))
       }
       const entry = findEntry(p, 'chat', (it) => it.type === 'chat' && entrySlot(it) === chat.host, drawerRef.current)
       navigate(entry ? itemKey(entry) : CHAT_KEY + chat.id)
     },
-    [navigate],
+    [navigate, setDock, setDockActive],
   )
 
   // Desktop notifications for a chat that needs you while the window is not looked at;
@@ -620,7 +657,7 @@ export function App() {
       history: (path) => api.chatHistory(active.id, path).catch(() => []),
       open: openChat,
       agents: active.profile?.agents ?? {},
-      editAgents: (folder) => setAgentsFor(folder ?? active.profile?.home ?? '~'),
+      editAgents: (folder) => setAgentsFor(folder ?? active.profile?.root ?? '~'),
     }
   }, [active, chatList, fail, upsertChat, openChat, closeChat])
   const chatsRef = useRef(chatsApi)
@@ -630,9 +667,12 @@ export function App() {
   const newChatIn = useCallback(
     async (addr: ItemAddr, agent?: string) => {
       const chat = await chatsRef.current?.start({ at: addr, agent })
-      if (chat) openChat(chat)
+      if (!chat) return
+      // The project shows beside its new chat in the dock.
+      navigate(itemKey(addr))
+      openChat(chat)
     },
-    [openChat],
+    [openChat, navigate],
   )
 
   // Running chats (and any that need you) per project or chat entry, for the nav.
@@ -647,7 +687,7 @@ export function App() {
     return marks
   }, [chatsApi?.list])
 
-  const projectActions = useMemo<ProjectActions>(
+  const projectActions = useMemo<ItemActions>(
     () => ({
       run,
       openDialog: setDialog,
@@ -663,12 +703,9 @@ export function App() {
         const item = activeRef.current?.profile ? getItem(activeRef.current.profile, addr) : undefined
         if (item) remember(itemKey(addr), item.label, label, entryId(item))
       },
-      servers: (path) => serverMarks.get(path),
-      openServers: () => navigate(SERVERS_KEY),
-      git: (path) => gitMarks.get(path),
       gitChanged: () => gitLoad.current(),
     }),
-    [run, fail, toasts.push, remember, serverMarks, gitMarks, navigate],
+    [run, fail, toasts.push, remember],
   )
 
   const itemMenu = useCallback(
@@ -689,7 +726,8 @@ export function App() {
         entries.push({ label: 'Remove from this drawer', icon: <Trash2 size={14} />, danger: true, run: () => void run([{ op: 'deleteItem', at: addr }], `Removed "${item.label}" from this drawer`) })
         return entries
       }
-      if (item.type === 'folder') {
+      // Only a page has a card, tabs and chats; a folder link is just the file browser.
+      if (item.type === 'folder' && item.page) {
         const card = (field: 'pinned' | 'status', value: string | boolean | null, label?: string) =>
           void run([{ op: 'setCard', at: addr, field, value }], label)
         const status = item.status ?? 'active'
@@ -742,8 +780,10 @@ export function App() {
       }
       // Show this entry in the profile's other drawers too.
       const all = p ? drawersOf(p) : []
-      if (p && all.length > 1 && item.type !== 'group') {
-        const shownIn = new Set(sharedRefs(p, addr).map((r) => r.addr.drawer ?? 0))
+      if (p && all.length > 1 && item.type === 'folder' && item.page) {
+        // A page is in a drawer when that drawer's page links it.
+        const pageOf = item.type === 'folder' ? item.page : undefined
+        const shownIn = new Set(all.flatMap((d, i) => (pageOf && d.sections.some((s) => s.items.some((x) => x.type === 'folder' && x.page === pageOf)) ? [i] : [])))
         if (entries.length) entries.push('sep')
         all.forEach((d, i) => {
           if (i === (addr.drawer ?? 0)) return
@@ -815,6 +855,11 @@ export function App() {
         e.preventDefault()
         searchRef.current?.focus()
         searchRef.current?.select()
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+        // Ctrl+J shows or hides the chats dock (in a terminal it is a newline for the program).
+        if ((e.target as HTMLElement | null)?.closest?.('.xterm')) return
+        e.preventDefault()
+        setDock((d) => ({ open: !d.open }))
       } else if (e.altKey && !e.ctrlKey && e.key === 'ArrowLeft') {
         // In text, Alt+← moves the cursor.
         if ((e.target as HTMLElement | null)?.closest?.('input, textarea, .cm-editor')) return
@@ -852,7 +897,10 @@ export function App() {
     if (key?.startsWith(NOTE_KEY)) return { kind: 'note', path: key.slice(NOTE_KEY.length) }
     if (key?.startsWith(FILES_KEY)) return { kind: 'files', path: key.slice(FILES_KEY.length) }
     if (key?.startsWith(CHAT_KEY)) return { kind: 'chat', id: key.slice(CHAT_KEY.length) }
-    if (key === SETUP_KEY) return { kind: 'setup' }
+    if (key?.startsWith(RAIL_KEY)) {
+      const tool = key.slice(RAIL_KEY.length) as RailTool
+      return RAIL_TOOLS.includes(tool) ? { kind: 'rail', tool } : null
+    }
     if (key === SERVERS_KEY) return { kind: 'servers' }
     if (key?.startsWith(CONTEXT_KEY)) {
       const name = key.slice(CONTEXT_KEY.length) as ContextFolder
@@ -866,6 +914,18 @@ export function App() {
     const own = getItem(active.profile, addr)
     return { kind: 'entry', addr, item, origin: found.addr, shared: own?.type === 'shared' ? own : undefined }
   }, [active, selected, selectedIds])
+
+  /** Where the dock's New chat starts: the item shown, else the drawer the nav shows. */
+  const dockContext = useMemo<DockContext>(() => {
+    const p = active?.profile
+    const d = p ? drawersOf(p)[drawer] : undefined
+    const drawerBase = d?.folder ?? p?.root ?? '~'
+    if (p && selection?.kind === 'entry' && selection.item.type === 'folder') {
+      const item = selection.item
+      return { kind: 'item', addr: selection.origin, label: item.label, base: item.path ?? drawerBase, agent: item.agent }
+    }
+    return { kind: 'drawer', drawer, label: d?.name ?? p?.name ?? '', base: drawerBase }
+  }, [active?.profile, selection, drawer])
 
   // An entry of another drawer (Ctrl+K, Back, Recent work) brings its drawer along.
   useEffect(() => {
@@ -911,21 +971,22 @@ export function App() {
 
   const notesApi = useMemo<NotesApi | null>(() => {
     if (!active) return null
-    const home = active.profile?.home
     return {
       profile: active.id,
-      root: active.profile?.notes,
-      suggestedRoot: `${home && home !== '~' ? home.replace(/\/+$/, '') : '~'}/notes`,
-      setRoot,
+      root: active.profile?.root ?? '~',
       list: notesList,
+      projects,
       open: openNote,
+      openFolder,
       missing: missingNote,
+      create: createLinkedNote,
+      search: (query) => setSearch({ open: true, query }),
       changed: notesChanged,
       notify: (message, kind) => toasts.push({ message, kind }),
       fresh,
       clearFresh: () => setFresh(null),
     }
-  }, [active, setRoot, notesList, openNote, missingNote, notesChanged, toasts.push, fresh])
+  }, [active, notesList, projects, openNote, openFolder, missingNote, createLinkedNote, notesChanged, toasts.push, fresh])
 
   const contextApi = useMemo<ContextApi>(
     () => ({
@@ -933,26 +994,25 @@ export function App() {
       setup: async () => {
         const a = activeRef.current
         if (!a?.profile) return
-        // Context lives in the notes folder; a profile without one gets the usual one first.
-        if (!a.profile.notes && notesApi && !(await run([{ op: 'setProfileField', key: 'notes', value: notesApi.suggestedRoot }], `Notes folder set to ${notesApi.suggestedRoot}`))) return
         try {
           setContextStatus(await api.setupContext(a.id))
-          navigate(CONTEXT_KEY + 'context')
+          await refresh()
+          openContext('context')
         } catch (err) {
           fail(err)
         }
       },
-      open: (name) => navigate(CONTEXT_KEY + name),
+      open: openContext,
       sendToInbox: (path) => {
         const a = activeRef.current
         if (!a) return
         api.sendToInbox(a.id, path).then(
-          (r) => toasts.push({ message: `Copied to the inbox as ${nameOf(r.path)}`, action: { label: 'Open inbox', run: () => navigate(CONTEXT_KEY + 'inbox') } }),
+          (r) => toasts.push({ message: `Copied to the inbox as ${nameOf(r.path)}`, action: { label: 'Open inbox', run: () => openContext('inbox') } }),
           fail,
         )
       },
     }),
-    [contextStatus, notesApi, run, navigate, fail, toasts.push],
+    [contextStatus, notesApi, run, navigate, fail, toasts.push, refresh, openContext],
   )
 
   /** Everything Ctrl+K offers, built when it opens. */
@@ -975,16 +1035,9 @@ export function App() {
         const verb = item.type === 'launch' ? 'Start ' : item.type === 'link' ? 'Open ' : ''
         items.push({ id: `entry:${entryId(item)}`, kind: 'entry', label: `${verb}${item.label}`, detail: where(addr), run: () => activate(addr, item) })
         if (item.type !== 'folder') return
-        const mark = item.path ? gitMarks.get(item.path) : undefined
-        for (const [i, step] of stepsOf(p, item, !!mark).entries()) {
+        for (const [i, step] of tabSteps(stepsOf(p, item)).entries()) {
           const outside = step.type === 'launch' || step.type === 'link'
-          const detail = outside
-            ? step.type === 'launch'
-              ? 'Start in the project'
-              : 'Open link'
-            : step.type === 'git' && mark
-              ? [mark.branch ?? 'detached', mark.changed && `${mark.changed} changed`].filter(Boolean).join(' · ')
-              : where(addr)
+          const detail = outside ? (step.type === 'launch' ? 'Start in its folder' : 'Open link') : where(addr)
           items.push({
             id: `step:${entryId(item)}|${step.label}`,
             kind: 'step',
@@ -1004,8 +1057,7 @@ export function App() {
     for (const c of chatsApi?.list ?? []) items.push({ id: `chat:${c.id}`, kind: 'chat', label: chatName(c), detail: `${c.cwd} · ${c.state}`, run: () => chatsApi?.open(c) })
     items.push(
       { id: 'page:home', kind: 'page', label: 'Home', detail: 'Recent work and today', run: goHome },
-      { id: 'page:setup', kind: 'page', label: 'Claude setup', detail: 'Skills, MCP servers, agents, hooks, plugins', run: () => navigate(SETUP_KEY) },
-      { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your projects', run: () => navigate(SERVERS_KEY) },
+      { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your folders', run: () => navigate(SERVERS_KEY) },
     )
     // New note goes under the shown drawer's heading with the notes (the daily entry's), else its last one.
     const here = sectionsOf(p, drawer)
@@ -1022,12 +1074,17 @@ export function App() {
     if (!active.error) {
       items.push(
         { id: 'action:new-drawer', kind: 'action', label: 'New drawer…', detail: p.name, run: () => setDrawerDialog({ index: null }) },
-        { id: 'action:drawer-settings', kind: 'action', label: 'Drawer settings…', detail: all[drawer]?.name ?? '', run: () => setDrawerDialog({ index: drawer }) },
       )
+    }
+    // The rail's tools for the shown drawer.
+    for (const tool of RAIL_TOOLS) {
+      const d = all[drawer]
+      if (!d || ((tool === 'files' || tool === 'git') && !d.folder)) continue
+      items.push({ id: `rail:${tool}`, kind: 'page', label: all.length > 1 ? `${d.name} › ${RAIL_LABEL[tool]}` : RAIL_LABEL[tool], detail: tool === 'settings' ? 'Name, logo, folder, uses' : (d.folder ?? 'everywhere'), run: () => navigate(RAIL_KEY + tool) })
     }
     items.push(
       { id: 'action:look', kind: 'action', label: 'Theme and background…', detail: p.name, run: () => setLookOpen(true) },
-      { id: 'action:agents', kind: 'action', label: 'Agent profiles…', detail: p.name, run: () => setAgentsFor(p.home ?? '~') },
+      { id: 'action:agents', kind: 'action', label: 'Agent profiles…', detail: p.name, run: () => setAgentsFor(p.root) },
       { id: 'action:profile', kind: 'action', label: 'Profile settings…', detail: p.name, run: () => setProfileOpen(true) },
       { id: 'action:edit', kind: 'action', label: 'Edit navigation', detail: 'Drag, add, rename, delete', run: () => setEditing(true) },
     )
@@ -1036,6 +1093,9 @@ export function App() {
     }
     return items
   }
+
+  // No Workbench folder yet (part 13): the setup screen, until the service has one.
+  if (state?.setup) return <SetupScreen suggested={state.setup.suggested} onDone={setState} />
 
   if (!state || !active || !notesApi || !chatsApi) {
     return (
@@ -1070,15 +1130,17 @@ export function App() {
                 onSwitch={switchProfile}
                 onResizeStart={onResizeStart}
                 onHome={goHome}
+                search={search}
+                setSearch={setSearch}
+                searchRef={searchRef}
+                firstHit={firstHit}
                 onLook={() => setLookOpen(true)}
-                onSetup={() => navigate(SETUP_KEY)}
               onServers={() => navigate(SERVERS_KEY)}
               serversActive={selection?.kind === 'servers'}
               serverMarks={serverMarks}
               gitMarks={gitMarks}
               onProfileSettings={() => setProfileOpen(true)}
               onAddProfile={() => setProfileOpen('add')}
-                setupActive={selection?.kind === 'setup'}
                 contextSelected={selection?.kind === 'context' ? selection.name : null}
                 drawer={drawer}
                 onDrawer={pickDrawer}
@@ -1092,7 +1154,7 @@ export function App() {
                 selected={selection}
                 search={search}
                 setSearch={setSearch}
-                searchRef={searchRef}
+                firstHit={firstHit}
                 canGoBack={search.open || history.length > 0}
                 onBack={back}
                 openFolder={openFolder}
@@ -1102,12 +1164,25 @@ export function App() {
                 recent={recent[active.id] ?? []}
                 drawer={drawer}
                 openRecent={openRecent}
-              onServersScan={(scan) => active && setServerScan({ profile: active.id, scan })}
+                onServersScan={(scan) => active && setServerScan({ profile: active.id, scan })}
+                onDrawerShow={(name) => setDrawerPick((s) => ({ ...s, [active.id]: name }))}
+                onDrawerDeleted={() => navigate(undefined)}
                 onHome={goHome}
                 activate={activate}
                 openExternally={openExternally}
                 startEditing={() => setEditing(true)}
               />
+              {profile && chatsApi && (
+                <ChatsDock
+                  profile={profile}
+                  context={dockContext}
+                  open={dock.open}
+                  setOpen={(open) => setDock({ open })}
+                  active={chatsApi.list.find((c) => c.id === dockActive[active.id] && !c.slot) ?? null}
+                  select={(chat) => openChat(chat)}
+                />
+              )}
+              <Rail drawer={profile ? (drawersOf(profile)[drawer] ?? null) : null} active={selection?.kind === 'rail' ? selection.tool : null} onPick={(tool) => navigate(RAIL_KEY + tool)} />
               {dialog?.mode === 'note' ? (
                 <NewNoteDialog context={dialog.context} onClose={() => setDialog(null)} onCreate={(title, path) => createNote(dialog.list, title, path)} />
               ) : (

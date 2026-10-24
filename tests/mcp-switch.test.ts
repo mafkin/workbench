@@ -2,11 +2,8 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseDocument } from 'yaml'
 import { projectKey } from '../server/claude-setup.ts'
-import { applyOps } from '../server/config-ops.ts'
 import { McpDefaults, setFoldersOff } from '../server/mcp-switch.ts'
-import { Profile, type Op } from '../shared/config-schema.ts'
 
 let dir: string
 let file: string
@@ -25,13 +22,14 @@ const readJson = async () => JSON.parse(await fsp.readFile(file, 'utf8'))
 describe('switching MCP servers per folder', () => {
   it('adds and removes names in the folder’s disabledMcpServers, leaving the rest of the file as it was', async () => {
     const before = { numStartups: 3, oauthAccount: { accessToken: 'keep' }, projects: { '/a': { history: [1], disabledMcpServers: ['x'] }, '/b': {} } }
-    await fsp.writeFile(file, JSON.stringify(before, null, 2), { mode: 0o600 })
+    // Not 0600, which a new file gets: the file's own mode stays.
+    await fsp.writeFile(file, JSON.stringify(before, null, 2), { mode: 0o640 })
     await setFoldersOff(file, ['/a'], ['plugin:p:slack', 'x'], true)
     expect((await readJson()).projects['/a'].disabledMcpServers).toEqual(['x', 'plugin:p:slack'])
     await setFoldersOff(file, ['/a'], ['x'], false)
     const after = await readJson()
     expect(after).toEqual({ ...before, projects: { '/a': { history: [1], disabledMcpServers: ['plugin:p:slack'] }, '/b': {} } })
-    expect((await fsp.stat(file)).mode & 0o777).toBe(0o600)
+    expect((await fsp.stat(file)).mode & 0o777).toBe(0o640)
     expect(await fsp.readFile(file, 'utf8')).toBe(JSON.stringify(after, null, 2))
   })
 
@@ -55,7 +53,7 @@ describe('switching MCP servers per folder', () => {
   })
 })
 
-describe('profile defaults', () => {
+describe('the defaults (a drawer’s mcpOff:)', () => {
   it('turns the defaults off once per folder, so one switched back on stays on', async () => {
     const defaults = new McpDefaults({ stateDir: path.join(dir, 'state'), claudeJson: file })
     expect(await defaults.apply(['slack', 'gmail'], '/game')).toEqual(['slack', 'gmail'])
@@ -76,32 +74,5 @@ describe('profile defaults', () => {
     await setFoldersOff(file, ['/game'], ['slack'], false)
     await defaults.forget(['slack'])
     expect(await defaults.apply(['slack'], '/game')).toEqual(['slack'])
-  })
-})
-
-describe('mcpOff in the profile', () => {
-  const SOURCE = `name: Work
-# Servers chats don't need
-mcpOff: [plugin:data:hex]
-sections: []
-`
-  const run = (ops: Op[], source = SOURCE) => {
-    const doc = parseDocument(source)
-    applyOps(doc, ops, source)
-    return { text: doc.toString(), profile: Profile.parse(doc.toJS()) }
-  }
-
-  it('adds names once and keeps comments', () => {
-    const { text, profile } = run([{ op: 'setMcpOff', names: ['plugin:p:slack', 'plugin:data:hex'], off: true }])
-    expect(profile.mcpOff).toEqual(['plugin:data:hex', 'plugin:p:slack'])
-    expect(text).toContain("# Servers chats don't need")
-  })
-
-  it('removes names; the last one removes the key', () => {
-    expect(run([{ op: 'setMcpOff', names: ['plugin:data:hex'], off: false }]).text).not.toContain('mcpOff')
-  })
-
-  it('makes the list when there is none', () => {
-    expect(run([{ op: 'setMcpOff', names: ['slack'], off: true }], 'name: Work\nsections: []\n').profile.mcpOff).toEqual(['slack'])
   })
 })

@@ -7,10 +7,11 @@ import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { CONTEXT_FOLDERS, drawerIndex, drawersOf, expandHome, type ContextFolder, type ContextStatus, type Profile } from '../shared/config-schema.ts'
+import { CONTEXT_FOLDERS, CONTEXT_LABEL, drawerIndex, drawersOf, expandHome, walkItems, type ContextFolder, type ContextStatus, type Op, type Profile } from '../shared/config-schema.ts'
 import type { ChatContext } from './agents.ts'
 import { frontmatter } from './claude-setup.ts'
-import { StoreError, type ConfigStore } from './config-store.ts'
+import { StoreError } from './config-store.ts'
+import type { Wiki } from './wiki.ts'
 import { browseRoots, realish, within } from './paths.ts'
 import { FolderWatcher } from './watch.ts'
 
@@ -87,14 +88,14 @@ async function writeFree(dir: string, name: string, write: (file: string) => Pro
 }
 
 export class Context extends EventEmitter {
-  #store: ConfigStore
+  #store: Wiki
   #home: string
   /** Watched folder → the profiles it belongs to. */
   #watched = new Map<string, Set<string>>()
   #timers = new Map<string, NodeJS.Timeout>()
   #watcher: FolderWatcher
 
-  constructor(store: ConfigStore, home: string) {
+  constructor(store: Wiki, home: string) {
     super()
     this.#store = store
     this.#home = home
@@ -115,9 +116,9 @@ export class Context extends EventEmitter {
     return p.profile
   }
 
-  /** The notes folder, absolute; null without one. */
-  #root(profile: Profile): string | null {
-    return profile.notes ? path.resolve(expandHome(profile.notes, this.#home)) : null
+  /** The profile's folder, absolute (part 13: a profile always has one; tests parsing a bare profile get home). */
+  #root(profile: Profile): string {
+    return path.resolve(expandHome(profile.root, this.#home))
   }
 
   #tilde(p: string) {
@@ -158,18 +159,31 @@ export class Context extends EventEmitter {
     const inboxDir = path.join(root, 'inbox')
     if (folders[3].exists) this.#watch(id, inboxDir)
     const inbox = folders[3].exists ? (await fsp.readdir(inboxDir).catch(() => [])).filter((n) => !n.startsWith('.')).length : 0
-    return { notes: this.#profile(id).notes ?? null, ready: folders[0].exists, folders, inbox }
+    return { notes: this.#tilde(root), ready: folders[0].exists, folders, inbox }
   }
 
-  /** Make the folders and starter notes that are missing; nothing is overwritten. */
+  /**
+   * Make the folders and starter notes that are missing (nothing is
+   * overwritten), and list the folders in the nav: a Context heading at the top
+   * of the first drawer's page, unless an entry already opens context/.
+   */
   async setup(id: string): Promise<ContextStatus> {
-    const root = this.#root(this.#profile(id))
-    if (!root) throw new StoreError('Set a notes folder first (notes: in the profile)', 409)
+    const profile = this.#profile(id)
+    const root = this.#root(profile)
     for (const name of CONTEXT_FOLDERS) await fsp.mkdir(path.join(root, name), { recursive: true })
     for (const [rel, text] of Object.entries(STARTER)) {
       await fsp.writeFile(path.join(root, rel), text, { flag: 'wx' }).catch((err) => {
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
       })
+    }
+    const linked = walkItems(profile).some((e) => e.item.type === 'folder' && !!e.item.path && path.resolve(expandHome(e.item.path, this.#home)) === path.join(root, 'context'))
+    if (!linked) {
+      const notes = this.#tilde(root)
+      const ops: Op[] = [
+        { op: 'addSection', drawer: 0, title: 'Context', index: 0 },
+        ...CONTEXT_FOLDERS.map((name, i): Op => ({ op: 'addItem', to: { drawer: 0, section: 0 }, index: i, item: { type: 'folder', label: CONTEXT_LABEL[name], path: `${notes.replace(/\/+$/, '')}/${name}` } })),
+      ]
+      await this.#store.apply(id, this.#store.profile(id).rev, ops)
     }
     this.#emit(id)
     return this.status(id)
@@ -229,7 +243,7 @@ export class Context extends EventEmitter {
     const value = raw.trim()
     if (!/^(~|\/)/.test(value)) throw new StoreError('Path must start with ~ or /', 400)
     const real = await realish(path.resolve(expandHome(value, this.#home)))
-    if (!(await browseRoots(profile, this.#home)).some((r) => within(real, r.real))) throw new StoreError("Not allowed: outside this profile's folders", 403)
+    if (!(await browseRoots(profile, this.#home, this.#store.dir)).some((r) => within(real, r.real))) throw new StoreError("Not allowed: outside this profile's folders", 403)
     const stat = await fsp.stat(real).catch(() => null)
     if (!stat) throw new StoreError('No such file', 404)
     if (!stat.isFile()) throw new StoreError('Only files can be sent to the inbox', 422)
@@ -253,15 +267,49 @@ export async function drawerContext(profile: Profile, drawer: number, home: stri
     if (other && other !== own) named.push({ name: other.name, folder: other.folder, mine: false })
   }
   const found: { line: string; dir: string }[] = []
+  // A drawer's own folder inside the profile (drawers/<Name>/, part 13) is already covered by the wiki's --add-dir.
+  const root = profile.root === '~' ? null : path.resolve(expandHome(profile.root, home))
   for (const d of named) {
     if (!d.folder) continue
     const dir = path.resolve(expandHome(d.folder, home))
+    if (root && (dir === root || dir.startsWith(`${root}${path.sep}`))) continue
     if (!(await fsp.stat(dir).catch(() => null))?.isDirectory() || found.some((f) => f.dir === dir)) continue
     found.push({ dir, line: `- ${dir}: ${d.mine ? `the ${d.name} drawer's own shared folder` : `shared by the ${d.name} drawer`}` })
   }
   if (!found.length) return null
   const prompt = [`# Shared folders (Workbench, drawer ${own.name})`, ['Material shared between drawers. Read it when relevant:', ...found.map((f) => f.line)].join('\n')].join('\n\n')
   return { prompt, dirs: found.map((f) => f.dir) }
+}
+
+/**
+ * The wiki a claude chat gets (part 11): the profile's notes folder, where the
+ * pages that configure Workbench live too, and the project's own page when the
+ * chat belongs to one. Null when the folder does not exist yet.
+ */
+/** How much of a page's text a chat gets in its instructions. */
+const PAGE_CAP = 16 * 1024
+
+export async function wikiContext(profile: Profile, home: string, page?: string): Promise<ChatContext | null> {
+  if (profile.root === '~') return null
+  const root = path.resolve(expandHome(profile.root, home))
+  if (!(await fsp.stat(root).catch(() => null))?.isDirectory()) return null
+  const parts = [
+    `# My wiki (Workbench, profile ${profile.name})`,
+    [
+      `${root} holds my notes and the pages that configure Workbench: index.md (the nav), pages/*.md and drawers/*/*.md (one per item: its frontmatter is the card, its ## Workflow the tabs), Workflow.md and agents/*.md.`,
+      'Markdown there is mine; [[Name]] links name pages. Read them when relevant.',
+    ].join(' '),
+  ]
+  if (page) {
+    parts.push(
+      `This project's page is ${path.join(root, page)}: its frontmatter is the card and its ## Workflow the tabs. When you finish something worth remembering, add a line under a ## Log heading there (make the heading if it is missing); leave the frontmatter and ## Workflow to me unless I ask.`,
+    )
+    // The page's own text, so the chat starts with what it says (the frontmatter is the card, not prose).
+    const text = await fsp.readFile(path.join(root, page), 'utf8').catch(() => '')
+    const body = frontmatter(text).body.trim()
+    if (body) parts.push(`## The page I am looking at\n\n${body.length > PAGE_CAP ? `${body.slice(0, PAGE_CAP)}\n\n[cut here: the page is longer; read the file for the rest]` : body}`)
+  }
+  return { prompt: parts.join('\n\n'), dirs: [root] }
 }
 
 /** Two contexts as one: claude takes one --append-system-prompt and one --add-dir. */

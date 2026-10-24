@@ -6,7 +6,8 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { StoreError, type ConfigStore } from './config-store.ts'
+import { StoreError } from './config-store.ts'
+import type { Wiki } from './wiki.ts'
 import { absPath, browseRoots, realish, within } from './paths.ts'
 
 export const PICTURE_TYPES: Record<string, string> = {
@@ -30,14 +31,17 @@ async function hashOf(file: string): Promise<string> {
 }
 
 export class Backgrounds {
-  readonly dir: string
-  #store: ConfigStore
+  #store: Wiki
   #home: string
 
-  constructor(dir: string, store: ConfigStore, home: string) {
-    this.dir = dir
+  constructor(store: Wiki, home: string) {
     this.#store = store
     this.#home = home
+  }
+
+  /** `<Workbench>/backgrounds` (part 13). */
+  get dir(): string {
+    return path.join(this.#store.need(), 'backgrounds')
   }
 
   async list(): Promise<string[]> {
@@ -70,7 +74,7 @@ export class Backgrounds {
     const p = this.#store.profile(profileId)
     if (!p.profile) throw new StoreError(`${profileId}.yaml has an error; fix it first`, 423)
     const real = await realish(absPath(raw, this.#home))
-    if (!(await browseRoots(p.profile, this.#home)).some((r) => within(real, r.real))) {
+    if (!(await browseRoots(p.profile, this.#home, this.#store.dir)).some((r) => within(real, r.real))) {
       throw new StoreError("Outside this profile's folders", 403)
     }
     const stat = await fsp.stat(real).catch(() => null)

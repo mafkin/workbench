@@ -187,7 +187,7 @@ function AgentForm({
         <label className="field">
           <span>Name</span>
           <input {...field('name')} autoFocus={!name} placeholder="Reviewer" />
-          {error ? <span className="err">{error}</span> : <span className="hint">Chat steps, chat entries and projects use it by this name.</span>}
+          {error ? <span className="err">{error}</span> : <span className="hint">Chat steps, chat entries and items use it by this name.</span>}
         </label>
         <label className="field">
           <span>Claude agent (optional)</span>
@@ -197,7 +197,7 @@ function AgentForm({
               <option key={s} value={s} />
             ))}
           </datalist>
-          <span className="hint">One of your Claude Code agents (~/.claude/agents or the project's .claude/agents), e.g. an orchestrator.</span>
+          <span className="hint">One of your Claude Code agents (~/.claude/agents or the folder's .claude/agents), e.g. an orchestrator.</span>
         </label>
         <div className="field-row">
           <label className="field">

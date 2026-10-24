@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { isoDate } from '../shared/config-schema.ts'
-import { HOME, NOTES, PERSONAL_FILE, pickProfile, resetFixture, WORK_FILE } from './fixture.ts'
+import { HOME, NOTES, pickProfile, resetFixture, WORK_FILE } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -35,6 +35,8 @@ test('a note entry opens formatted', async ({ page }) => {
   await expect(md.locator('a.wikilink', { hasText: 'Deploy plan' })).not.toHaveClass(/missing/)
   await expect(md.locator('a.wikilink', { hasText: 'Missing page' })).toHaveClass(/missing/)
   await expect(md.locator('img')).toHaveAttribute('src', /^blob:/)
+  // An image's title is its caption.
+  await expect(md.locator('.img-caption')).toHaveText('The parts, roughly')
   await expect(md.locator('a', { hasText: 'link' })).toHaveAttribute('target', '_blank')
   await page.screenshot({ path: 'test-results/notes-view.png' })
 })
@@ -91,15 +93,13 @@ test('New note under a heading creates the file and its entry', async ({ page })
   await page.getByRole('menuitem', { name: 'New note…' }).click()
   const dialog = page.getByRole('form', { name: 'New note' })
   await dialog.locator('input[name=title]').fill('Deploy checklist')
-  await expect(dialog).toContainText('~/notes/Deploy checklist.md')
+  await expect(dialog).toContainText('~/workbench/work/Deploy checklist.md')
   await dialog.getByRole('button', { name: 'Create' }).click()
   await expect(dialog).toHaveCount(0)
   await expect(entry(page, 'Deploy checklist')).toHaveClass(/selected/)
   await expect(page.locator('.cm-content')).toBeFocused()
   expect(await read(path.join(NOTES, 'Deploy checklist.md'))).toBe('# Deploy checklist\n\n')
-  const yaml = await read(WORK_FILE)
-  expect(yaml).toContain('path: ~/notes/Deploy checklist.md')
-  expect(yaml).toContain('# first entry comment')
+  expect(await read(WORK_FILE)).toContain('- [Deploy checklist](Deploy%20checklist.md)\n')
 
   // The same title again would overwrite: refused.
   await nav(page).locator('.section-head', { hasText: 'Notes' }).click({ button: 'right' })
@@ -139,8 +139,9 @@ test('search finds notes by their text', async ({ page }) => {
   await page.keyboard.press('Control+Shift+F')
   await expect(page.getByLabel('Search notes')).toBeFocused()
   await expect(title(page)).toHaveText('Recent notes')
-  // Ideas, Deploy plan, the daily template, the Runbook entry, and Alpha's README (a note step).
-  await expect(page.locator('.search-results li')).toHaveCount(5)
+  // Ideas, Deploy plan, the daily template, the Runbook entry, Alpha's README (a note step), and the wiki's own
+  // pages: index.md, Workflow.md, pages/Alpha.md and pages/Beta.md.
+  await expect(page.locator('.search-results li')).toHaveCount(9)
   await page.keyboard.type('rollback')
   const hits = page.locator('.search-results li')
   await expect(hits).toHaveCount(1)
@@ -165,12 +166,74 @@ test('Today creates the daily note from the template', async ({ page }) => {
   await expect(markdown(page).locator('h1')).toHaveText(today)
 })
 
-test('a profile without a notes folder offers one', async ({ page }) => {
+test('every profile’s notes live in its wiki; Personal has its own', async ({ page }) => {
   await pickProfile(page, 'Personal')
-  const hint = page.locator('.notes-hint')
-  await expect(hint).toContainText('personal.yaml')
-  await hint.getByRole('button', { name: 'Use ~/notes' }).click()
-  await expect(hint).toHaveCount(0)
-  const yaml = await read(PERSONAL_FILE)
-  expect(yaml).toMatch(/accent: "#8fa58a"\nnotes: ~\/notes\nsections:/)
+  await nav(page).locator('.section-head', { hasText: 'Games' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'New note…' }).click()
+  const dialog = page.getByRole('form', { name: 'New note' })
+  await dialog.locator('input[name=title]').fill('Loot tables')
+  await expect(dialog).toContainText('~/workbench/personal/Loot tables.md')
+  await page.keyboard.press('Escape')
+})
+
+test('properties show from frontmatter, Mentions list the notes linking here, and Rename rewrites their links', async ({ page }) => {
+  await fsp.writeFile(path.join(NOTES, 'Tuohi.md'), '---\nstatus: paused\ntags: [game, art]\n---\n# Tuohi\n\nSee [[Deploy plan]].\n')
+  await page.reload()
+  await entry(page, 'Ideas').click()
+  await markdown(page).locator('a.wikilink', { hasText: 'Deploy plan' }).click()
+  await expect(title(page)).toHaveText('Deploy plan')
+  const mentions = page.getByRole('region', { name: 'Mentions' })
+  await expect(mentions).toContainText('Ideas')
+  await expect(mentions).toContainText('Tuohi')
+
+  await page.getByRole('button', { name: 'Rename' }).click()
+  await page.getByLabel('Note name').fill('Release plan')
+  await page.keyboard.press('Enter')
+  await expect(title(page)).toHaveText('Release plan')
+  await expect(page.locator('.toast')).toContainText('Renamed')
+  expect(await read(IDEAS_FILE)).toContain('[[Release plan]]')
+  expect(await read(path.join(NOTES, 'Tuohi.md'))).toContain('[[Release plan]]')
+  expect(await read(path.join(NOTES, 'work/Release plan.md'))).toContain('# Deploy plan')
+
+  await mentions.getByRole('button', { name: /Tuohi/ }).click()
+  await expect(title(page)).toHaveText('Tuohi')
+  const props = page.getByLabel('Properties')
+  await expect(props).toContainText('status')
+  await expect(props).toContainText('paused')
+  await expect(props.getByRole('button', { name: '#game' })).toBeVisible()
+  await expect(props).toContainText('#art')
+  await expect(markdown(page)).not.toContainText('status: paused')
+  await expect(markdown(page)).toContainText('See')
+})
+
+test('before a query the search shows the tags and the pages to write; a tag chip searches, a missing page is created', async ({ page }) => {
+  await fsp.writeFile(path.join(NOTES, 'Tuohi.md'), '---\ntags: [game]\n---\n# Tuohi\n\nA #game about birch bark; see [[Art direction]].\n')
+  await page.reload()
+  await expect(entry(page, 'Alpha')).toBeVisible()
+  await page.keyboard.press('Control+Shift+F')
+  await expect(title(page)).toHaveText('Recent notes')
+  const tags = page.getByRole('region', { name: 'Tags' })
+  await expect(tags.getByRole('button', { name: /game/ })).toContainText('1')
+  const missing = page.getByRole('region', { name: 'Pages to write' })
+  // Ideas links [[Missing page]]; Tuohi links [[Art direction]].
+  await expect(missing).toContainText('Missing page')
+  await expect(missing).toContainText('Art direction')
+  await page.screenshot({ path: 'test-results/notes-overview.png' })
+
+  await tags.getByRole('button', { name: /game/ }).click()
+  await expect(page.getByLabel('Search notes')).toHaveValue('#game')
+  await expect(title(page)).toHaveText('“#game”')
+  await expect(page.locator('.search-results li')).toHaveCount(1)
+  await expect(page.locator('.search-results li')).toContainText('Tuohi')
+
+  await page.getByLabel('Search notes').fill('')
+  await missing.getByRole('button', { name: /Art direction/ }).click()
+  await expect(title(page)).toHaveText('Art direction')
+  expect(await read(path.join(NOTES, 'Art direction.md'))).toContain('# Art direction')
+  // Written now, so it is no longer a page to write.
+  await entry(page, 'Ideas').click()
+  await page.keyboard.press('Control+Shift+F')
+  // The overview is fetched anew: wait for it before saying what it lacks.
+  await expect(missing).toContainText('Missing page')
+  await expect(missing).not.toContainText('Art direction')
 })

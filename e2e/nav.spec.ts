@@ -1,11 +1,14 @@
 import fsp from 'node:fs/promises'
+import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { pickProfile, profileButton, resetFixture, SPAWN_LOG, WORK, WORK_FILE } from './fixture.ts'
+import { page as wikiPage, pickProfile, profileButton, resetFixture, SPAWN_LOG, WB, WORK, WORK_FILE, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const accent = (page: Page) => page.evaluate(() => document.documentElement.style.getPropertyValue('--accent'))
-const workYaml = () => fsp.readFile(WORK_FILE, 'utf8')
+const indexMd = () => fsp.readFile(WORK_FILE, 'utf8')
+/** The active profile as the service saved it. */
+const active = async () => /^activeProfile: (\S+)$/m.exec(await fsp.readFile(path.join(WB, 'settings.yaml'), 'utf8'))?.[1]
 
 test.beforeEach(async ({ page }) => {
   await resetFixture()
@@ -25,11 +28,12 @@ test('profile switch swaps nav, accent and title', async ({ page }) => {
   await expect(entry(page, 'Alpha')).toHaveCount(0)
   expect(await accent(page)).toBe('#8fa58a')
   await expect(page).toHaveTitle('Personal · Workbench')
+  await expect.poll(active).toBe('personal')
   await page.screenshot({ path: 'test-results/personal.png' })
 
   await page.keyboard.press('Control+1')
   await expect(entry(page, 'Alpha')).toBeVisible()
-  await expect.poll(async () => (await fsp.readFile(WORK_FILE.replace('profiles/work.yaml', 'settings.yaml'), 'utf8'))).toContain('activeProfile: work')
+  await expect.poll(active).toBe('work')
 })
 
 test('selecting a folder shows its view', async ({ page }) => {
@@ -49,16 +53,20 @@ test('a launcher starts from its button; its name is just text', async ({ page }
   expect(await fsp.readFile(SPAWN_LOG, 'utf8')).toBe('echo hello\n')
 })
 
-test('adding a heading in the UI writes the YAML and keeps comments', async ({ page }) => {
+test('adding a heading in the UI writes index.md and keeps its prose', async ({ page }) => {
+  // A line of prose above the lists, as a wiki page may have.
+  await fsp.writeFile(WORK_FILE, (await indexMd()).replace('## Projects', 'Words about work.\n\n## Projects'))
+  await page.reload()
+  await expect(entry(page, 'Alpha')).toBeVisible()
   await page.getByRole('button', { name: 'Edit navigation' }).click()
   await page.getByRole('button', { name: 'Add heading' }).click()
   await page.getByPlaceholder('Heading title').fill('Docs')
   await page.keyboard.press('Enter')
   await expect(nav(page).locator('.section-head', { hasText: 'Docs' })).toBeVisible()
-  const text = await workYaml()
-  expect(text).toContain('title: Docs')
-  expect(text).toContain('# fixture: work profile')
-  expect(text).toContain('# first entry comment')
+  const text = await indexMd()
+  expect(text).toContain('\n## Docs\n')
+  expect(text).toContain('Words about work.\n\n## Projects')
+  expect(text).toContain('- [[Alpha]]')
   await page.screenshot({ path: 'test-results/editing.png' })
 })
 
@@ -72,32 +80,34 @@ test('adding an entry through the dialog', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Add' }).click()
   await expect(dialog).toHaveCount(0)
   await expect(entry(page, 'Docs site')).toBeVisible()
-  expect(await workYaml()).toMatch(/- label: Docs site\n\s+type: item\n/)
+  expect(await indexMd()).toContain('- [[Docs site]]\n')
+  expect(await fsp.readFile(wikiPage('pages/Docs site.md'), 'utf8')).toBe('# Docs site\n')
 })
 
-test('a hand edit to the YAML shows up live', async ({ page }) => {
-  await fsp.writeFile(WORK_FILE, WORK.replace('label: Beta', 'label: Beta (edited by hand)'))
+test('a hand edit to index.md shows up live', async ({ page }) => {
+  await fsp.writeFile(WORK_FILE, (await indexMd()).replace('[[Beta]]', '[[Beta|Beta (edited by hand)]]'))
   await expect(entry(page, 'Beta (edited by hand)')).toBeVisible()
 })
 
-test('a broken file shows the banner, keeps the nav and recovers', async ({ page }) => {
-  await fsp.writeFile(WORK_FILE, WORK.replace('name: Work', 'name: [Work'))
+test('a broken page shows the banner, keeps the nav and recovers', async ({ page }) => {
+  await fsp.writeFile(WORK_FILE, '---\nname: [Work\n---\n## Nothing\n')
   const banner = page.getByRole('alert')
-  await expect(banner).toContainText('work.yaml has an error')
-  await expect(banner).toContainText('line')
+  await expect(banner).toContainText('has an error')
+  await expect(banner).toContainText('index.md')
   await expect(entry(page, 'Alpha')).toBeVisible()
   await page.screenshot({ path: 'test-results/broken.png' })
-  await fsp.writeFile(WORK_FILE, WORK)
+  await writeWork(WORK)
   await expect(banner).toHaveCount(0)
 })
 
 test('delete and undo', async ({ page }) => {
+  const before = await indexMd()
   await entry(page, 'Beta').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Delete' }).click()
   await expect(entry(page, 'Beta')).toHaveCount(0)
   await page.locator('.toast').getByRole('button', { name: 'Undo' }).click()
   await expect(entry(page, 'Beta')).toBeVisible()
-  expect(await workYaml()).toBe(WORK)
+  expect(await indexMd()).toBe(before)
 })
 
 test('drag an entry to reorder it', async ({ page }) => {
@@ -113,14 +123,11 @@ test('drag an entry to reorder it', async ({ page }) => {
   await page.mouse.up()
   await expect
     .poll(async () => {
-      const t = await workYaml()
-      return ['Alpha', 'Beta', 'Gamma'].sort((a, b) => t.indexOf(`label: ${a}`) - t.indexOf(`label: ${b}`))
+      const t = await indexMd()
+      const at = (name: string) => t.indexOf(name === 'Gamma' ? '[Gamma](' : `[[${name}]]`)
+      return ['Alpha', 'Beta', 'Gamma'].sort((a, b) => at(a) - at(b))
     })
     .toEqual(['Beta', 'Gamma', 'Alpha'])
-  // The comment travels with its entry.
-  const t = await workYaml()
-  expect(t.indexOf('# first entry comment')).toBeGreaterThan(t.indexOf('label: Gamma'))
-  expect(t.indexOf('# first entry comment')).toBeLessThan(t.indexOf('label: Alpha'))
 })
 
 test('drag an entry to another heading', async ({ page }) => {
@@ -135,7 +142,7 @@ test('drag an entry to another heading', async ({ page }) => {
   await page.mouse.move(to.x + 40, to.y + 6, { steps: 12 })
   await page.mouse.up()
   await expect.poll(async () => {
-    const t = await workYaml()
-    return t.indexOf('label: Beta') > t.indexOf('title: Tools')
+    const t = await indexMd()
+    return t.indexOf('[[Beta]]') > t.indexOf('## Tools')
   }).toBe(true)
 })

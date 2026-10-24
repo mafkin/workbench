@@ -5,7 +5,7 @@
 // masked here; the raw MCP configs stay in the service, for checks.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { parse as parseYaml } from 'yaml'
+import { frontmatter } from './frontmatter.ts'
 import type { ClaudeSetup, DocKind, HookEntry, McpEntry, McpState, McpTransport, PluginEntry, SetupDoc, SetupProblem, SetupScope } from '../shared/claude-setup.ts'
 import { claudeDir as defaultClaudeDir } from './claude-sessions.ts'
 import { maskArgs, maskHeader, maskText, maskUrl, maskValue } from './mask.ts'
@@ -22,6 +22,8 @@ export interface SetupOptions {
   managedDir?: string
   /** The folder whose project and local items count; none for everywhere. */
   folder?: string | null
+  /** The profile's wiki: its `skills/` folder lists as scope `wiki` (loaded only in chats that pin them). */
+  wiki?: string | null
 }
 
 export interface RawServer {
@@ -49,19 +51,7 @@ const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code
 
 export const claudeJson = (home: string) => (process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(home, '.claude.json'))
 
-/** The YAML between `---` lines at the top, and the rest. */
-export function frontmatter(text: string): { data: Json; body: string; error?: string } {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text)
-  if (!m) return { data: {}, body: text }
-  const body = text.slice(m[0].length)
-  try {
-    const data = parseYaml(m[1])
-    return { data: isObj(data) ? data : {}, body }
-  } catch (err) {
-    // The message's first line only: the rest quotes the file.
-    return { data: {}, body, error: maskText(String((err as Error).message).split('\n')[0]) }
-  }
-}
+export { frontmatter }
 
 /** A JSON parse error without the text it quotes, which may hold a secret. */
 function jsonError(err: unknown): string {
@@ -512,8 +502,10 @@ export async function readSetup(opts: SetupOptions): Promise<SetupRead> {
       else first.set(d.name, d)
     }
   }
-  const scopeWord: Record<SetupScope, string> = { managed: 'the managed', user: 'your', project: 'the project', local: 'the local', plugin: 'the plugin' }
+  const scopeWord: Record<SetupScope, string> = { managed: 'the managed', user: 'your', project: 'the project', local: 'the local', plugin: 'the plugin', wiki: 'the wiki' }
   shadow(skills, (w) => `${scopeWord[w.scope]} skill ${w.name}`)
+  // The wiki's skills load only in chats that pin them (as /wiki:<name>), so they override nothing.
+  if (opts.wiki) skills.push(...(await r.skills(path.join(opts.wiki, 'skills'), 'wiki')))
   shadow(agents, (w) => `${scopeWord[w.scope]} agent ${w.name}`)
   shadow(commands, (w) => `${scopeWord[w.scope]} command ${w.name}`)
   const skillNames = new Set(skills.filter((s) => !s.overriddenBy).map((s) => s.name))

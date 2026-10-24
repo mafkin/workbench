@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, closeChats, resetFixture, WORK, WORK_FILE } from './fixture.ts'
+import { ALPHA, closeChats, resetFixture, WORK, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -30,16 +29,16 @@ test.afterEach(() => {
   child = null
 })
 
-test('servers: a project’s running server shows in the nav, the card and the page; Stop asks first', async ({ page }) => {
-  fs.writeFileSync(WORK_FILE, WORK.replace('        path: ~/beta\n', '        path: ~/beta\n        servers:\n          - { name: api, url: "http://127.0.0.1:1/health" }\n'))
+test('servers: an item’s running server shows in the nav and on the Servers page; Stop asks first', async ({ page }) => {
+  await writeWork(WORK.replace('        path: ~/beta\n', '        path: ~/beta\n        servers:\n          - { name: api, url: "http://127.0.0.1:1/health" }\n'))
   const port = await startServer()
   await page.goto('/')
   await expect(entry(page, 'Alpha').locator('.server-mark')).toHaveAttribute('aria-label', '1 server running')
   await expect(entry(page, 'Beta').locator('.server-mark.down')).toHaveAttribute('aria-label', '1 down')
 
-  await entry(page, 'Alpha').click()
-  await page.getByRole('button', { name: '1 server running' }).click()
-  await expect(page.locator('.crumbs')).toContainText('Servers')
+  // The Servers page opens from the nav header.
+  await page.getByRole('button', { name: 'Servers', exact: true }).click()
+  await expect(page.locator('.page-title')).toHaveText('Servers')
   const alpha = page.getByRole('region', { name: 'Alpha' })
   await expect(alpha.locator('.server-row')).toContainText(`:${port}`)
   await expect(alpha.locator('.server-row')).toContainText('node')

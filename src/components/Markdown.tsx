@@ -5,7 +5,7 @@ import { NOTE_EXT } from '../../shared/config-schema.ts'
 import { noteImage } from '../lib/api.ts'
 import { cx } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
-import { parseWiki, remarkWikiLinks, resolveHref, resolveWiki, slug, WIKI_HREF } from '../lib/wikilinks.ts'
+import { blankFrontmatter, parseWiki, remarkWikiLinks, resolveHref, resolveProject, resolveWiki, slug, WIKI_HREF } from '../lib/wikilinks.ts'
 
 const plugins = [remarkGfm, remarkWikiLinks]
 
@@ -70,6 +70,17 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   return <code className={`language-${lang}`}>{runs ? runs.map((r, i) => (r.cls ? <span key={i} className={r.cls}>{r.text}</span> : r.text)) : code}</code>
 }
 
+/** An image's title (`![alt](x.png "A caption")`) shows under it, as a caption; inline elements, since the image sits in a paragraph. */
+function captioned(img: React.ReactNode, title?: string): React.ReactNode {
+  if (!title) return img
+  return (
+    <span className="img-figure">
+      {img}
+      <span className="img-caption">{title}</span>
+    </span>
+  )
+}
+
 function NoteImage({ src: raw, alt, title }: { src?: string | Blob; alt?: string; title?: string }) {
   const { profile } = useNotes()
   const notePath = useContext(NotePath)
@@ -96,9 +107,9 @@ function NoteImage({ src: raw, alt, title }: { src?: string | Blob; alt?: string
     }
   }, [profile, target?.path])
 
-  if (!target) return <img src={src} alt={alt} title={title} />
+  if (!target) return captioned(<img src={src} alt={alt} title={title} />, title)
   if (failed) return <span className="img-missing" title={target.path}>{alt || 'Image'}: not found or not allowed</span>
-  return url ? <img src={url} alt={alt} title={title} /> : <span className="img-loading" />
+  return url ? captioned(<img src={url} alt={alt} title={title} />, title) : <span className="img-loading" />
 }
 
 /** A note rendered: GitHub-flavoured Markdown plus [[wiki links]]. Raw HTML is not rendered. */
@@ -111,6 +122,9 @@ export function Markdown({ text, notePath, onToggleTask }: { text: string; noteP
     const heading = takeAnchor()
     if (heading && root.current) requestAnimationFrame(() => root.current && scrollToHeading(root.current, heading))
   }, [notePath])
+
+  // Frontmatter is shown as properties above the note, not as text; blank lines keep task lines numbered.
+  const shown = useMemo(() => blankFrontmatter(text), [text])
 
   const components = useMemo<Components>(() => {
     const heading =
@@ -127,16 +141,20 @@ export function Markdown({ text, notePath, onToggleTask }: { text: string; noteP
         if (href.startsWith(WIKI_HREF)) {
           const link = parseWiki(decodeURIComponent(href.slice(WIKI_HREF.length)))
           const found = resolveWiki(link.target, notes.list, notePath)
+          // [[Project/path]]: a file in a project's folder.
+          const inProject = found ? null : resolveProject(link.target, notes.projects)
           return (
             <a
               href="#"
-              className={cx('wikilink', !found && 'missing')}
-              title={found ? found.path : `No note named "${link.target}" yet`}
+              className={cx('wikilink', !found && !inProject && 'missing')}
+              title={found ? found.path : (inProject?.path ?? `No note named "${link.target}" yet`)}
               onClick={(e) => {
                 e.preventDefault()
                 // [[#heading]] is a heading in this note.
                 if (!link.target && link.heading) scrollToHeading(e.currentTarget, link.heading)
                 else if (found) openAt(() => notes.open(found.path), e.currentTarget, found.path === notePath, link.heading)
+                else if (inProject?.note) openAt(() => notes.open(inProject.path), e.currentTarget, inProject.path === notePath, link.heading)
+                else if (inProject) notes.openFolder(/\/$|\/[^/.]+$/.test(link.target) ? inProject.path : inProject.path.slice(0, inProject.path.lastIndexOf('/')))
                 else notes.missing(link.target)
               }}
             >
@@ -203,7 +221,7 @@ export function Markdown({ text, notePath, onToggleTask }: { text: string; noteP
       <NotePath.Provider value={notePath}>
         <ToggleTask.Provider value={onToggleTask ?? null}>
           <ReactMarkdown remarkPlugins={plugins} components={components}>
-            {text}
+            {shown}
           </ReactMarkdown>
         </ToggleTask.Provider>
       </NotePath.Provider>

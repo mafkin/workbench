@@ -3,8 +3,7 @@
 // in the profile's YAML with Undo; deleting asks first.
 import { ImagePlus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { drawersOf, drawerSlug, hasDrawers, type Op, type Profile } from '../../shared/config-schema.ts'
-import * as api from '../lib/api.ts'
+import { drawersOf, hasDrawers, ownDrawerFolder, type Op, type Profile } from '../../shared/config-schema.ts'
 import { makeLogo, putLogo } from '../lib/logos.ts'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { DrawerLogo } from './DrawerLogo.tsx'
@@ -19,29 +18,34 @@ interface Props {
   onShow: (name: string) => void
   onDeleted: () => void
   onClose: () => void
+  /** In the rail's Settings view: no scrim, no Cancel, Escape does nothing. */
+  inline?: boolean
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted, onClose }: Props) {
+export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted, onClose, inline }: Props) {
   const drawers = drawersOf(profile)
   const current = index === null ? undefined : drawers[index]
   const [name, setName] = useState(current?.name ?? '')
   const [logo, setLogo] = useState(current?.logo ?? '')
-  const [folder, setFolder] = useState(current?.folder ?? '')
+  // The page's own `folder:`; empty means the drawer's own folder, drawers/<Name>/ in the profile (part 13).
+  const own = current ? ownDrawerFolder(profile, current) : true
+  const [folder, setFolder] = useState(current && !own ? (current.folder ?? '') : '')
   const [uses, setUses] = useState<string[]>(current?.uses ?? [])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const others = drawers.filter((_, i) => i !== index)
-  const suggested = `${(profile.notes ?? profile.home ?? '~').replace(/\/+$/, '')}/drawers/${drawerSlug(name.trim() || 'drawer')}`
+  const ownFolder = `drawers/${name.trim() || current?.name || 'Name'}`
 
   useEffect(() => {
+    if (inline) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !confirming && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, confirming])
+  }, [onClose, confirming, inline])
 
   async function choose(file: File | undefined) {
     if (!file) return
@@ -56,16 +60,6 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
     }
   }
 
-  async function useSuggested() {
-    if (!name.trim()) return setError('Name the drawer first')
-    try {
-      setFolder((await api.drawerFolder(profileId, name.trim())).folder)
-      setError(null)
-    } catch (err) {
-      setError(message(err))
-    }
-  }
-
   async function save(e: React.FormEvent) {
     e.preventDefault()
     const n = name.trim()
@@ -77,7 +71,7 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
     const ops: Op[] = index === null ? [{ op: 'addDrawer', name: n }] : []
     if (index !== null && n !== current?.name) ops.push({ op: 'setDrawer', drawer: at, field: 'name', value: n })
     if (logo !== (current?.logo ?? '')) ops.push({ op: 'setDrawer', drawer: at, field: 'logo', value: logo })
-    if (folder.trim() !== (current?.folder ?? '')) ops.push({ op: 'setDrawer', drawer: at, field: 'folder', value: folder.trim() })
+    if (folder.trim() !== (current && !own ? (current.folder ?? '') : '')) ops.push({ op: 'setDrawer', drawer: at, field: 'folder', value: folder.trim() })
     const keep = uses.filter((u) => others.some((d) => d.name === u))
     if (keep.join('\n') !== (current?.uses ?? []).join('\n')) ops.push({ op: 'setDrawer', drawer: at, field: 'uses', value: keep })
     if (!ops.length) return onClose()
@@ -98,13 +92,16 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
 
   const entries = current?.sections.reduce((n, s) => n + s.items.length, 0) ?? 0
 
+  const Wrap = 'div'
   return (
-    <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="dialog drawer-dialog" role="dialog" aria-label={index === null ? 'New drawer' : 'Drawer settings'} onSubmit={save}>
-        <header>
-          {index === null ? 'New drawer' : 'Drawer settings'}
-          <small>{profileId}.yaml · saved in the file, comments kept</small>
-        </header>
+    <Wrap className={inline ? 'drawer-inline' : 'scrim'} onPointerDown={inline ? undefined : (e) => e.target === e.currentTarget && onClose()}>
+      <form className={inline ? 'dialog drawer-dialog inline' : 'dialog drawer-dialog'} role={inline ? 'form' : 'dialog'} aria-label={index === null ? 'New drawer' : 'Drawer settings'} onSubmit={save}>
+        {!inline && (
+          <header>
+            {index === null ? 'New drawer' : 'Drawer settings'}
+            <small>{profileId}.yaml · saved in the file, comments kept</small>
+          </header>
+        )}
         <div className="body">
           {index === null && !hasDrawers(profile) && (
             <p className="hint">Your current headings become the first drawer, {profile.name}. You can rename it.</p>
@@ -134,16 +131,13 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
             </div>
           </div>
           <label className="field">
-            <span>Shared folder</span>
-            <input className="mono" name="drawerFolder" value={folder} placeholder="None" onChange={(e) => setFolder(e.target.value)} />
+            <span>Folder</span>
+            <input className="mono" name="drawerFolder" value={folder} placeholder={`${ownFolder} (its own)`} onChange={(e) => setFolder(e.target.value)} />
             {folder.trim() ? (
-              <span className="hint">Other drawers can use it; it shows under Shared, and claude chats here can read it.</span>
+              <span className="hint">The rail's Files and Git, new pages and claude chats work in this folder instead of the drawer's own one; other drawers can use it too.</span>
             ) : (
               <span className="hint">
-                No folder yet.{' '}
-                <button type="button" className="link-btn" onClick={() => void useSuggested()}>
-                  Use {suggested}
-                </button>
+                The drawer works in <span className="mono">{ownFolder}</span> inside the profile: its pages, references and assets go there. Enter a path (~/… or /…) to work in a folder elsewhere, such as a repository.
               </span>
             )}
           </label>
@@ -172,9 +166,11 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
             </button>
           )}
           <span style={{ flex: 1 }} />
-          <button type="button" className="btn ghost" onClick={onClose}>
-            Cancel
-          </button>
+          {!inline && (
+            <button type="button" className="btn ghost" onClick={onClose}>
+              Cancel
+            </button>
+          )}
           <button type="submit" className="btn primary" disabled={busy}>
             {index === null ? 'Add drawer' : 'Save'}
           </button>
@@ -182,9 +178,9 @@ export function DrawerDialog({ profile, profileId, index, run, onShow, onDeleted
       </form>
       {confirming && current && (
         <ConfirmDialog title={`Delete ${current.name}?`} action="Delete" onCancel={() => setConfirming(false)} onConfirm={() => void remove()}>
-          Its {current.sections.length} {current.sections.length === 1 ? 'heading' : 'headings'} and {entries} {entries === 1 ? 'entry' : 'entries'} go from the file, and so does what other drawers show from it. Folders on disk stay. Undo brings it all back.
+          Its {current.sections.length} {current.sections.length === 1 ? 'heading' : 'headings'} and {entries} {entries === 1 ? 'entry' : 'entries'} leave the switcher; the drawer’s page and the folders on disk stay. Undo brings it back.
         </ConfirmDialog>
       )}
-    </div>
+    </Wrap>
   )
 }

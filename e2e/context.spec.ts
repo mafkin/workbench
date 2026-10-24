@@ -1,12 +1,13 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { closeChats, NOTES, PERSONAL_FILE, pickProfile, PORT, resetFixture } from './fixture.ts'
+import { closeChats, NOTES, pickProfile, PNOTES, PORT, resetFixture } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
+// Before setup, the fixed block with its button; after it, the Context heading written into index.md.
 const context = (page: Page) => nav(page).getByRole('group', { name: 'Context' })
-const row = (page: Page, name: string) => context(page).getByRole('link', { name: new RegExp(`^${name}`) })
+const row = (page: Page, name: string) => context(page).locator('.item', { hasText: name })
 const screen = (page: Page) => page.locator('.chat-terminal .xterm-rows')
 const fileRow = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
 
@@ -24,7 +25,8 @@ async function setUp(page: Page) {
 async function newChat(page: Page) {
   await entry(page, 'Alpha').click()
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
-  await expect(screen(page)).toContainText('FAKE CLAUDE')
+  // The prompt is long enough to scroll the first line away; the args line ends the start.
+  await expect(screen(page)).toContainText('"--settings"')
 }
 
 test.beforeEach(async ({ page }) => {
@@ -39,9 +41,10 @@ test.afterAll(closeChats)
 
 test('Set up context from the nav; its notes open in tabs', async ({ page }) => {
   await page.screenshot({ path: 'test-results/context-setup-row.png' })
-  await context(page).getByRole('button', { name: 'Set up context in ~/notes' }).click()
+  await context(page).getByRole('button', { name: 'Set up context in ~/workbench/work' }).click()
   await expect(page.locator('.page-title')).toHaveText('Context')
-  await expect(row(page, 'Context')).toHaveAttribute('aria-current', 'page')
+  await expect(row(page, 'Context')).toHaveClass(/selected/)
+  expect(await fsp.readFile(path.join(NOTES, 'index.md'), 'utf8')).toContain('## Context\n\n- [Context](context/)\n- [Knowledge](knowledge/)\n- [Processes](processes/)\n- [Inbox](inbox/)\n')
   for (const name of ['Knowledge', 'Processes', 'Inbox']) await expect(row(page, name)).toBeVisible()
   expect(await fsp.readFile(path.join(NOTES, 'context/README.md'), 'utf8')).toContain('context/preferences.md')
 
@@ -52,22 +55,22 @@ test('Set up context from the nav; its notes open in tabs', async ({ page }) => 
   await page.screenshot({ path: 'test-results/context-notes.png' })
 
   await row(page, 'Knowledge').click()
-  await expect(page.locator('.crumbs')).toContainText('Context/Knowledge')
+  await expect(page.locator('.page-title')).toHaveText('Knowledge')
   await expect(page.getByRole('tree', { name: 'Files' })).toBeVisible()
 })
 
-test('a profile without a notes folder gets one when context is set up', async ({ page }) => {
+test('each profile’s context lives in its own wiki', async ({ page }) => {
   await pickProfile(page, 'Personal')
-  await context(page).getByRole('button', { name: 'Set up context in ~/notes' }).click()
+  await context(page).getByRole('button', { name: 'Set up context in ~/workbench/personal' }).click()
   await expect(row(page, 'Inbox')).toBeVisible()
-  expect(await fsp.readFile(PERSONAL_FILE, 'utf8')).toContain('notes: ~/notes')
+  expect(await fsp.readFile(path.join(PNOTES, 'context/README.md'), 'utf8')).toContain('context/preferences.md')
 })
 
 test('a new claude chat starts with the context folders and says so', async ({ page }) => {
   await setUp(page)
   await newChat(page)
   await expect(screen(page)).toContainText(`"--add-dir","${NOTES}/context"`)
-  await expect(page.locator('.chat-bar .chat-context')).toHaveText('context')
+  await expect(page.locator('.chat-bar .chat-context')).toHaveText('context · wiki')
 })
 
 test('Send to inbox copies a file; the badge counts it and the inbox lists it', async ({ page }) => {
@@ -79,7 +82,7 @@ test('Send to inbox copies a file; the badge counts it and the inbox lists it', 
   await expect(row(page, 'Inbox').locator('.inbox-count')).toHaveText('1')
   await page.screenshot({ path: 'test-results/context-inbox-badge.png' })
   await page.locator('.toast').getByRole('button', { name: 'Open inbox' }).click()
-  await expect(page.locator('.crumbs')).toContainText('Context/Inbox')
+  await expect(page.locator('.page-title')).toHaveText('Inbox')
   await expect(fileRow(page, 'README.md')).toBeVisible()
 })
 

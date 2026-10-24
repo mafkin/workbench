@@ -101,7 +101,10 @@ export default function ChatTerminal({ id }: { id: string }) {
           term.reset()
           term.write(frame.slice(1))
           unregister()
-          unregister = registerTerminal(id, (text) => term.paste(text))
+          unregister = registerTerminal(id, (text) => {
+            term.paste(text)
+            term.focus()
+          })
         } else if (frame[0] === 'o') {
           term.write(frame.slice(1))
         }

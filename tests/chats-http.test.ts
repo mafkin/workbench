@@ -6,6 +6,7 @@ import WebSocket from 'ws'
 import type { Chat } from '../shared/config-schema.ts'
 import { makeGuard } from '../server/guard.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
 const FAKE_SHELL = path.resolve('tests/fixtures/fake-shell.mjs')
@@ -54,8 +55,9 @@ beforeEach(async () => {
   await fsp.mkdir(path.join(home, 'elsewhere'), { recursive: true })
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
+  await migrateFixture(path.join(dir, 'cfg'), home)
   server = await buildServer({
-    configDir: path.join(dir, 'cfg'),
+    dir: path.join(home, 'wb'),
     port: 7420,
     distDir: null,
     home,
@@ -75,15 +77,15 @@ describe('chat routes', { timeout: 15_000 }, () => {
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
     expect(adhoc.status).toBe(200)
     expect(adhoc.body).toMatchObject({ host: 'project:~/alpha', slot: null, agent: 'claude', cwd: '~/alpha', state: 'running' })
-    // Alpha has no steps: of its own: All files and Claude setup come before the workflow.
+    // Alpha was written without steps of its own: its page has All files, then the profile's workflow.
 
-    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     expect(step.body).toMatchObject({ host: 'project:~/alpha', slot: 'step:~/alpha|agent', cwd: '~/alpha' })
-    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     expect(again.body.id).toBe(step.body.id)
     await until(() => server.chats.text(step.body.id).includes('args=["--model","opus"'), 'the step args')
 
-    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 3 })
+    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
     expect(shell.body).toMatchObject({ agent: 'shell', cwd: '~/alpha/src', session: null })
 
     const entry = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 1 } })
@@ -93,14 +95,80 @@ describe('chat routes', { timeout: 15_000 }, () => {
     expect(list.body.map((c) => c.id)).toEqual([adhoc.body.id, step.body.id, shell.body.id, entry.body.id])
   })
 
-  test('an item without a folder: its chats run in home, keyed by its id; marks and servers skip it', async () => {
+  test('a chat gets the pinned skills: named in the prompt, the wiki’s own through --plugin-dir; a shell gets none', async () => {
+    const wiki = path.join(home, 'wb/work')
+    await fsp.mkdir(path.join(wiki, 'skills/concept-art'), { recursive: true })
+    await fsp.writeFile(path.join(wiki, 'skills/concept-art/SKILL.md'), '---\ndescription: Prompts for concept art\n---\n# Concept art\n')
+    await fsp.mkdir(path.join(home, '.claude/skills/deploy'), { recursive: true })
+    await fsp.writeFile(path.join(home, '.claude/skills/deploy/SKILL.md'), '---\nname: deploy\ndescription: Ships it\n---\n')
+    await server.store.apply('work', rev(), [
+      { op: 'setSkills', names: ['deploy', 'nope'] },
+      { op: 'setSkills', at: { section: 0, index: 0 }, names: ['concept-art'] },
+    ])
+    const setup = await call('GET', '/api/claude/setup?profile=work&path=~/alpha')
+    expect(setup.body.pinned).toEqual({ profile: ['deploy', 'nope'], drawer: ['deploy', 'nope'], page: ['concept-art'], missing: ['nope'] })
+    expect(setup.body.skills.find((s: { scope: string; name: string }) => s.scope === 'wiki' && s.name === 'concept-art')).toBeTruthy()
+
+    const chat = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
+    expect(chat.status, JSON.stringify(chat.body)).toBe(200)
+    const saved = await until(async () => {
+      const list = JSON.parse(await fsp.readFile(path.join(dir, 'state/chats.json'), 'utf8').catch(() => '{}')).chats ?? []
+      return list.find((c: { id: string }) => c.id === chat.body.id)
+    }, 'the saved chat')
+    const args: string[] = saved.args
+    const prompt = args[args.indexOf('--append-system-prompt') + 1]
+    expect(prompt).toContain('# Pinned skills (Workbench)')
+    expect(prompt).toContain('- /deploy: Ships it')
+    expect(prompt).toContain('- /wiki:concept-art: Prompts for concept art')
+    expect(prompt).not.toContain('nope')
+    const plugin = args[args.indexOf('--plugin-dir') + 1]
+    expect(plugin).toMatch(new RegExp(`^${path.join(dir, 'state/skills')}/[0-9a-f]{16}/wiki$`))
+    expect(await fsp.readlink(path.join(plugin, 'skills/concept-art'))).toBe(path.join(wiki, 'skills/concept-art'))
+    // The plugin flag comes before the list flags, which the session id ends.
+    expect(args.indexOf('--plugin-dir')).toBeLessThan(args.indexOf('--add-dir'))
+
+    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, agent: 'shell' })
+    const shellSaved = await until(async () => {
+      const list = JSON.parse(await fsp.readFile(path.join(dir, 'state/chats.json'), 'utf8').catch(() => '{}')).chats ?? []
+      return list.find((c: { id: string }) => c.id === shell.body.id)
+    }, 'the saved shell')
+    expect(shellSaved.args).not.toContain('--plugin-dir')
+  })
+
+  test('a chat from a page remembers it and gets its text; a drawer’s own chat runs in its folder', async () => {
+    const wiki = path.join(home, 'wb/work')
+    await fsp.writeFile(path.join(wiki, 'pages/Alpha.md'), '---\nfolder: ~/alpha\n---\n# Alpha\n\nA small pig. A very big sky.\n\n## Workflow\n\n- [All files](files:)\n')
+    // No watcher in tests: the store notices the hand edit on the next apply (which it refuses, as stale).
+    await server.store.apply('work', rev(), []).catch(() => {})
+    await server.store.apply('work', rev(), [{ op: 'setDrawer', drawer: 0, field: 'folder', value: '~/scratch' }])
+    const chat = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
+    expect(chat.body.page).toBe('pages/Alpha.md')
+    const saved = await until(async () => {
+      const list = JSON.parse(await fsp.readFile(path.join(dir, 'state/chats.json'), 'utf8').catch(() => '{}')).chats ?? []
+      return list.find((c: { id: string }) => c.id === chat.body.id)
+    }, 'the saved chat')
+    const prompt: string = saved.args[saved.args.indexOf('--append-system-prompt') + 1]
+    expect(prompt).toContain('## The page I am looking at\n\n# Alpha\n\nA small pig. A very big sky.')
+    expect(prompt).not.toContain('folder: ~/alpha')
+    expect(saved.page).toBe('pages/Alpha.md')
+    // A page without a folder starts in its drawer's folder; the drawer's own chat too.
+    const loose = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 3 } })
+    expect(loose.body).toMatchObject({ cwd: '~/scratch', page: 'pages/Loose.md' })
+    const own = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), drawer: 0 })
+    expect(own.body).toMatchObject({ host: 'drawer:Work', slot: null, cwd: '~/scratch', agent: 'claude' })
+    expect(own.body.page).toBeUndefined()
+    expect((await call('POST', '/api/chats', { profile: 'work', rev: rev(), drawer: 4 })).status).toBe(404)
+  })
+
+  test('an item without a folder: its chats run in its drawer’s folder, keyed by its id; marks and servers leave it out', async () => {
     const loose = { section: 0, index: 3 }
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose })
-    expect(adhoc.body).toMatchObject({ host: 'project:id:abc12345', slot: null, cwd: '~' })
+    expect(adhoc.body).toMatchObject({ host: 'project:id:abc12345', slot: null, cwd: '~/wb/work/drawers/Work' })
     const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: loose, step: 0 })
-    expect(step.body).toMatchObject({ host: 'project:id:abc12345', slot: 'step:id:abc12345|talk', cwd: '~' })
-    expect((await call('GET', '/api/git/marks?profile=work')).status).toBe(200)
-    expect((await call('GET', '/api/servers?profile=work')).status).toBe(200)
+    expect(step.body).toMatchObject({ host: 'project:id:abc12345', slot: 'step:id:abc12345|talk', cwd: '~/wb/work/drawers/Work' })
+    expect(await call('GET', '/api/git/marks?profile=work')).toEqual({ status: 200, body: [] })
+    const servers = await call<{ projects: { label: string }[] }>('GET', '/api/servers?profile=work')
+    expect(servers.body.projects.map((p) => p.label)).toEqual(['Alpha'])
   })
 
   test('requests name entries, never commands; paths stay in the profile folders; resume takes only a session id', async () => {
@@ -128,14 +196,14 @@ describe('chat routes', { timeout: 15_000 }, () => {
   })
 
   test('renaming a chat step in the app keeps its chat', async () => {
-    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     const renamed = await call('POST', '/api/profiles/work/ops', {
       rev: rev(),
-      ops: [{ op: 'updateStep', at: { section: 0, index: 0 }, index: 2, step: { label: 'claude', type: 'chat', args: ['--model', 'opus'] } }],
+      ops: [{ op: 'updateStep', at: { section: 0, index: 0 }, index: 1, step: { label: 'claude', type: 'chat', args: ['--model', 'opus'] } }],
     })
     expect(renamed.status).toBe(200)
     expect(server.chats.get(step.body.id)?.slot).toBe('step:~/alpha|claude')
-    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     expect(again.body.id).toBe(step.body.id)
   })
 
@@ -192,8 +260,12 @@ describe('chat terminal socket', { timeout: 15_000 }, () => {
     expect(frames[0].startsWith('r')).toBe(true)
     ws.send('ihello socket\r')
     await until(() => frames.some((f) => f.startsWith('o') && f.includes('you said: hello socket')), 'the echo')
-    // The args line (with the session hook's --settings) is longer than any width.
-    await until(() => server.chats.text(chat.id).split('\n').every((l) => l.length <= 90 || l.startsWith('args=')), 'the size')
+    // The program's terminal takes the view's size: first from the socket's address, then from a resize.
+    ws.send('isize\r')
+    await until(() => server.chats.text(chat.id).includes('size=90x20'), 'the size from the address')
+    ws.send('s70,24')
+    ws.send('isize\r')
+    await until(() => server.chats.text(chat.id).includes('size=70x24'), 'the size after a resize')
     ws.close()
   })
 

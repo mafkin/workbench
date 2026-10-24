@@ -36,6 +36,9 @@ export function useChats(): ChatsApi {
   return c
 }
 
+/** Names for CHAT_COLORS (the category palette), in the colour menus. */
+export const COLOR_NAMES = ['Slate', 'Sage', 'Sand', 'Heather', 'Teal', 'Clay', 'Grey']
+
 /** A project's open tab: '' for All files, a step label, or `chat:<id>`. */
 export const CHAT_TAB = 'chat:'
 const TAB_EVENT = 'workbench:project-tab'

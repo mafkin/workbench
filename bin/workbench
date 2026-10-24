@@ -7,6 +7,8 @@
 #   bin/workbench --uninstall    remove those units again
 #   bin/workbench --print-units  show the units --install would write, changing nothing
 #   bin/workbench --update       what the update unit runs after a pull
+#   bin/workbench --dir PATH     set the Workbench folder without the setup screen (the service
+#                                reads it at its next start; the folder is made with a first profile)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -71,6 +73,15 @@ EOF
 }
 
 case "${1:-}" in
+  --dir)
+    [ -n "${2:-}" ] || { echo "usage: bin/workbench --dir PATH" >&2; exit 2; }
+    POINTER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/workbench"
+    mkdir -p "$POINTER_DIR"
+    printf '%s\n' "$2" >"$POINTER_DIR/dir"
+    echo "Workbench folder: $2 (takes effect when the service starts next)"
+    if installed; then systemctl --user restart workbench.service && echo "Service restarted."; fi
+    exit 0
+    ;;
   --print-units)
     for u in "${UNITS[@]}"; do
       echo "# ==> $UNIT_DIR/$u"

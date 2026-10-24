@@ -1,12 +1,11 @@
-import { FileText, Search } from 'lucide-react'
+import { FilePlus, FileText, Hash, Search } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import type { SearchHit } from '../../shared/config-schema.ts'
+import type { NotesOverview, SearchHit } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
-import { NotesFolderHint } from './NotesFolderHint.tsx'
 
 /** Text with the given [start, end) ranges wrapped in <mark>. */
-function marked(text: string, ranges: [number, number][]): ReactNode[] {
+export function marked(text: string, ranges: [number, number][]): ReactNode[] {
   const out: ReactNode[] = []
   let at = 0
   for (const [s, e] of ranges) {
@@ -31,12 +30,26 @@ function nameRanges(name: string, query: string): [number, number][] {
 
 const when = (mtime: number) => new Date(mtime).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 
-/** Search results for the top-bar box; an empty query lists notes, newest first. */
-export function SearchView({ query, onResults }: { query: string; onResults: (hits: SearchHit[]) => void }) {
+/**
+ * Search results for the top-bar box. An empty query lists notes, newest
+ * first, under the wiki's tags and the pages its links name but nobody wrote.
+ */
+export function SearchView({ query, onQuery, onResults }: { query: string; onQuery?: (query: string) => void; onResults: (hits: SearchHit[]) => void }) {
   const notes = useNotes()
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [overview, setOverview] = useState<NotesOverview | null>(null)
   const q = query.trim()
+
+  // Tags and pages to write, before a query; refreshed when the notes change.
+  useEffect(() => {
+    if (q) return
+    let live = true
+    api.notesOverview(notes.profile).then((o) => live && setOverview(o), () => live && setOverview(null))
+    return () => {
+      live = false
+    }
+  }, [q, notes.profile, notes.list])
 
   useEffect(() => {
     let live = true
@@ -66,16 +79,42 @@ export function SearchView({ query, onResults }: { query: string; onResults: (hi
       </h1>
       <p className="page-sub">
         {error ?? (hits ? `${hits.length} ${hits.length === 1 ? 'note' : 'notes'}` : 'Searching…')}
-        {notes.root ? (
-          <>
-            {' in '}
-            <span className="mono">{notes.root}</span> and note entries
-          </>
-        ) : (
-          ' among note entries'
-        )}
+        {' in '}
+        <span className="mono">{notes.root}</span> and note entries
       </p>
-      {!notes.root && <NotesFolderHint compact />}
+      {!q && overview && overview.tags.length > 0 && (
+        <section className="search-overview" aria-label="Tags">
+          <div className="section-label">Tags</div>
+          <div className="tag-list">
+            {overview.tags.map((t) => (
+              <button key={t.tag} className="chip tag" onClick={() => onQuery?.(`#${t.tag}`)} title={`Notes tagged #${t.tag}`}>
+                <Hash size={11} />
+                {t.tag}
+                <span className="count">{t.count}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {!q && overview && overview.missing.length > 0 && (
+        <section className="search-overview" aria-label="Pages to write">
+          <div className="section-label">Pages to write</div>
+          <ul className="missing-pages">
+            {overview.missing.map((m) => (
+              <li key={m.name.toLowerCase()}>
+                <button onClick={() => void notes.create(m.name)} title={`Create ${m.name} from the page template`}>
+                  <FilePlus size={14} className="icon" />
+                  <span className="hit-name">{m.name}</span>
+                  <span className="hit-path">
+                    linked from {m.count === 1 ? m.from : `${m.count} notes`}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {!q && overview && (overview.tags.length > 0 || overview.missing.length > 0) && <div className="section-label">Recent notes</div>}
       {hits && hits.length === 0 && q && <div className="placeholder">No note contains every word of “{q}”.</div>}
       <ul className="search-results">
         {hits?.map((h) => (

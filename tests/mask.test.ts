@@ -36,6 +36,7 @@ describe('masking secrets', () => {
   })
 
   it('scrubs known values out of logs', () => {
-    expect(scrub('connecting with abcd1234 to db', ['abcd1234', 'ab'])).toBe(`connecting with ${MASK} to db`)
+    // Longest first, so a value inside another goes too; values under 4 characters stay (they would eat ordinary words).
+    expect(scrub('connecting with abcd1234 to db as cd12', ['db', 'cd12', 'abcd1234'])).toBe(`connecting with ${MASK} to db as ${MASK}`)
   })
 })

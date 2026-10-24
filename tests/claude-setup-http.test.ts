@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ClaudeSetup, McpCheck } from '../shared/claude-setup.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 const FAKE_MCP = path.resolve('tests/fixtures/fake-mcp.mjs')
 const FAKE_CLAUDE = path.resolve('tests/fixtures/fake-claude.mjs')
@@ -43,9 +44,10 @@ beforeEach(async () => {
   await write(path.join(alpha, '.mcp.json'), { mcpServers: { local: { command: process.execPath, args: [FAKE_MCP] } } })
   await write(path.join(home, 'elsewhere/.mcp.json'), { mcpServers: {} })
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
-  // Home is outside the profile's folders here: only Alpha may be read.
-  await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), `${WORK}home: ~/alpha\n`)
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), managedDir: path.join(dir, 'managed'), mcpTimeoutMs: 5000, chatCommands: { claude: FAKE_CLAUDE, shell: FAKE_SHELL } })
+  // ~/elsewhere is outside the profile's folders (the Workbench folder, its drawers' and Alpha).
+  await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), WORK)
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), managedDir: path.join(dir, 'managed'), mcpTimeoutMs: 5000, chatCommands: { claude: FAKE_CLAUDE, shell: FAKE_SHELL } })
 })
 
 afterEach(async () => {
@@ -122,7 +124,7 @@ describe('switching MCP servers', () => {
     expect(json.mcpServers.tools.env.FAKE_MCP_TOKEN).toBe('tok-SECRET-1')
     const on = await call<{ setup: ClaudeSetup }>('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: true })
     expect(states(on.body.setup)).toMatchObject({ tools: 'on' })
-    // Not in the profile's defaults: the YAML is untouched.
+    // A folder's switch is not a default: index.md is untouched.
     expect(server.store.profile('work').profile!.mcpOff).toBeUndefined()
   })
 
@@ -139,20 +141,23 @@ describe('switching MCP servers', () => {
     expect(res.body.error).toMatch(/usable/)
   })
 
-  it('everywhere: the profile’s default, written to the YAML and to every project now', async () => {
-    expect((await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false })).status).toBe(422)
-    const off = await call<{ setup: ClaudeSetup; rev: string }>('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, rev: rev() })
+  it('a drawer’s default: written to its page and to every project of the drawer now', async () => {
+    // The rev and the drawer are both needed without a path.
+    expect((await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, drawer: 0 })).status).toBe(422)
+    expect((await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, rev: rev() })).status).toBe(422)
+    const off = await call<{ setup: ClaudeSetup; rev: string }>('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: false, rev: rev(), drawer: 0 })
     expect(off.status).toBe(200)
     expect(off.body.rev).toBe(rev())
+    // A profile without drawers is one drawer: the key is index.md's.
     expect(server.store.profile('work').profile!.mcpOff).toEqual(['tools'])
     expect(states(off.body.setup)).toMatchObject({ tools: 'off' })
     expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual(['tools'])
     // Switched back on in Alpha: on there, with a note.
     const alpha = await call<{ setup: ClaudeSetup }>('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: true })
     expect(alpha.body.setup.mcp.find((m) => m.key === 'tools')).toMatchObject({ state: 'on', note: expect.stringMatching(/off by default/) })
-    // On everywhere: out of the YAML and on in every project.
+    // On everywhere: out of the drawer's mcpOff: and on in every item's folder.
     await call('POST', '/api/claude/mcp', { ...alphaQ, keys: ['tools'], on: false })
-    await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: true, rev: rev() })
+    await call('POST', '/api/claude/mcp', { profile: 'work', keys: ['tools'], on: true, rev: rev(), drawer: 0 })
     expect(server.store.profile('work').profile!.mcpOff).toBeUndefined()
     expect((await claudeJsonOf()).projects[path.join(home, 'alpha')].disabledMcpServers).toEqual([])
   })

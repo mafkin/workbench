@@ -2,28 +2,24 @@
 // Listens on loopback only; see guard.ts for who may call it.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
-import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
 import websocket from '@fastify/websocket'
 import Fastify from 'fastify'
-import { Document, parseDocument } from 'yaml'
 import { z } from 'zod'
 import {
-  ACCENTS,
   AgentProfile,
   CHAT_COLORS,
   chatName,
   chatProgram,
   displayPath,
+  NOTE_EXT,
   entrySlot,
   expandHome,
   FileOp,
   findAgent,
-  Drawer,
-  drawerSlug,
   entryAt,
   getItem,
   walkItems,
@@ -37,9 +33,10 @@ import {
   stepsOf,
   itemBase,
   projectRef,
+  type AppState,
   type NavItem,
   type Profile,
-  type StepItem,
+  drawersOf,
 } from '../shared/config-schema.ts'
 
 /** Ops that change an item's steps: the first one on an older project seeds its steps. */
@@ -51,19 +48,20 @@ import { Chats, type ChatCommands, type ChatSpec } from './chats.ts'
 import { claudeJson, frontmatter, projectKey, readSetup } from './claude-setup.ts'
 import type { ClaudeSetup, McpEntry } from '../shared/claude-setup.ts'
 import { sessionsIn } from './claude-sessions.ts'
-import { applyOps, describeIssue } from './config-ops.ts'
-import { ConfigStore, StoreError } from './config-store.ts'
-import { Context, drawerContext, mergeContext } from './context.ts'
+import { describeIssue, StoreError } from './config-store.ts'
+import { Wiki } from './wiki.ts'
+import { Context, drawerContext, mergeContext, wikiContext } from './context.ts'
+import type { ChatContext } from './agents.ts'
 import { Files, type FilesEvent } from './files.ts'
 import { Git, type Repo } from './git.ts'
 import { openProgram } from './open-with.ts'
 import { Thumbs } from './thumbs.ts'
 import { makeGuard } from './guard.ts'
-import { LaunchError, openItem, runDetached, runToExit } from './launch.ts'
+import { LaunchError, openItem, runDetached } from './launch.ts'
 import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
 import { McpDefaults, setFoldersOff } from './mcp-switch.ts'
-import { projectDates } from './project-dates.ts'
+import { pinnedSkills, pluginDirsIn, resolveSkills, SkillBundles, skillsPrompt } from './skills.ts'
 import { Servers } from './servers.ts'
 import { Notes, type NoteEvent } from './notes.ts'
 import { absPath, browseRoots, realish, within } from './paths.ts'
@@ -73,14 +71,17 @@ const DEV_UI_PORT = 7421
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 export interface ServerOptions {
-  configDir: string
+  /** The Workbench folder (part 13); null until the setup screen names one. */
+  dir: string | null
+  /** Where setup writes the chosen folder (`<XDG config>/workbench/dir`); null writes nothing (tests). */
+  pointerFile?: string | null
   port: number
   dev?: boolean
   distDir?: string | null
   home?: string
   spawn?: Parameters<typeof openItem>[2]
   watch?: boolean
-  /** Where the chat list is kept; defaults to `state/` in the config folder (tests). */
+  /** Where the chat list is kept; defaults to ~/.local/state/workbench. */
   stateDir?: string
   /** Programs for chats; tests pass stand-ins. */
   chatCommands?: Partial<ChatCommands>
@@ -96,25 +97,31 @@ export interface ServerOptions {
   thumbsDir?: string
 }
 
+/** What answers before setup names the Workbench folder. */
+const SETUP_ROUTES = new Set(['/api/state', '/api/health', '/api/events', '/api/setup'])
 const OpsBody = z.object({ rev: z.string(), ops: z.array(Op).min(1) })
 const RevBody = z.object({ rev: z.string() })
 const ActiveBody = z.object({ profile: z.string() })
 const NewProfile = z.object({ id: z.string(), name: z.string().trim().min(1, 'A name is required').max(40), copyFrom: z.string().optional() })
+const SetupBody = z.object({ dir: z.string().trim().min(1, 'A folder is required'), name: z.string().trim().min(1, 'A name is required').max(40).default('Main') })
 const OpenBody = z.object({ profile: z.string(), rev: z.string(), at: ItemAddr, step: z.int().nonnegative().optional() })
 const PathQuery = z.object({ profile: z.string(), path: z.string() })
 const NoteSave = z.object({ profile: z.string(), path: z.string(), rev: z.string().nullable(), text: z.string() })
+const NoteRename = z.object({ profile: z.string(), path: z.string(), name: z.string() })
+const TemplateQuery = z.object({ profile: z.string(), name: z.string() })
 const ProfileQuery = z.object({ profile: z.string() })
 const SearchQuery = z.object({ profile: z.string(), q: z.string().default('') })
 const FileOpBody = z.object({ profile: z.string(), op: FileOp })
 const StopServer = z.object({ profile: z.string(), pid: z.int().positive(), port: z.int().min(1).max(65535) })
 const FindQuery = z.object({ profile: z.string(), path: z.string(), q: z.string().default(''), hidden: z.string().optional() })
 const UploadQuery = z.object({ profile: z.string(), dir: z.string(), name: z.string() })
-const DrawerFolder = z.object({ profile: z.string(), name: Drawer.shape.name })
 const TicketBody = z.object({ profile: z.string(), path: z.string(), folder: z.boolean().optional() })
 const ChatStart = z.object({
   profile: z.string(),
   rev: z.string(),
-  at: ItemAddr,
+  /** The entry the chat belongs to, or (part 12) a drawer, for a chat in its folder with no page. */
+  at: ItemAddr.optional(),
+  drawer: z.int().nonnegative().optional(),
   step: z.int().nonnegative().optional(),
   /** claude, shell or an agent profile's name (the New chat menu); else the step's, entry's or project's. */
   agent: z.string().trim().min(1).max(64).optional(),
@@ -131,7 +138,8 @@ const ChatPatch = z.object({
   pinned: z.boolean().optional(),
 })
 const ChatRestart = z.object({ fresh: z.boolean().default(false) })
-const SetupQuery = z.object({ profile: z.string(), path: z.string().optional() })
+// Claude setup: a folder's, or (no path) a drawer's defaults.
+const SetupQuery = z.object({ profile: z.string(), path: z.string().optional(), drawer: z.coerce.number().int().nonnegative().optional() })
 // Git: every request names a project (its path as written in the config).
 const GitQuery = z.object({ profile: z.string(), path: z.string() })
 const GitHunk = z.object({ file: z.string().min(1), id: z.string().regex(/^[0-9a-f]{16}$/, 'Not a hunk') })
@@ -168,10 +176,21 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   return result.data
 }
 
-export function defaultConfigDir(): string {
-  if (process.env.WORKBENCH_CONFIG_DIR) return process.env.WORKBENCH_CONFIG_DIR
+/** Where the chosen Workbench folder is remembered between starts: one line in `<XDG config>/workbench/dir`. */
+export function pointerFile(): string {
   const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config')
-  return path.join(base, 'workbench')
+  return path.join(base, 'workbench', 'dir')
+}
+
+/** The Workbench folder: `WORKBENCH_DIR`, else the pointer file's line, else none (the setup screen asks). */
+export function defaultWorkbenchDir(): string | null {
+  if (process.env.WORKBENCH_DIR) return path.resolve(expandHome(process.env.WORKBENCH_DIR, os.homedir()))
+  try {
+    const line = fs.readFileSync(pointerFile(), 'utf8').trim()
+    return line ? path.resolve(expandHome(line, os.homedir())) : null
+  } catch {
+    return null
+  }
 }
 
 export function defaultCacheDir(): string {
@@ -189,19 +208,28 @@ const sameSecret = (a: string, b: string) => a.length === b.length && timingSafe
 
 export async function buildServer(opts: ServerOptions) {
   const home = opts.home ?? os.homedir()
-  const store = new ConfigStore(opts.configDir)
+  const store = new Wiki(opts.dir, home)
   await store.init({ watch: opts.watch ?? true })
   store.on('error', (err) => console.error('[config]', err))
   const notes = new Notes(store, home)
   const files = new Files(store, home, { spawn: opts.spawn })
   const thumbs = new Thumbs(opts.thumbsDir ?? path.join(defaultCacheDir(), 'thumbs'))
-  const backgrounds = new Backgrounds(path.join(opts.configDir, 'backgrounds'), store, home)
-  const logos = new Logos(path.join(opts.configDir, 'logos'))
+  const backgrounds = new Backgrounds(store, home)
+  const logos = new Logos(() => path.join(store.need(), 'logos'))
   const context = new Context(store, home)
   const servers = new Servers(store, home)
-  const stateDir = opts.stateDir ?? path.join(opts.configDir, 'state')
+  const stateDir = opts.stateDir ?? defaultStateDir()
   const chats = new Chats({ stateDir, home, commands: opts.chatCommands, ...opts.chatTiming })
   const mcpDefaults = new McpDefaults({ stateDir, claudeJson: claudeJson(home) })
+  // The pinned wiki skills reach claude as per-session plugins; bundles no saved chat names are dropped.
+  const bundles = new SkillBundles(path.join(stateDir, 'skills'))
+  await fs.promises
+    .readFile(path.join(stateDir, 'chats.json'), 'utf8')
+    .then((t) => (JSON.parse(t).chats ?? []) as { args?: string[] }[], () => [])
+    .then((saved) => bundles.prune(saved.flatMap((c) => pluginDirsIn(c.args ?? []))))
+    .catch((err) => console.error('[skills]', err))
+  /** The profile's folder (absolute), where its skills/ folder lives; null for a profile without one (tests). */
+  const wikiRootOf = (profile: Profile) => (profile.root === '~' ? null : absPath(profile.root, home))
   await chats.init()
   const git = new Git(store, home, {
     spawn: opts.spawn,
@@ -212,7 +240,7 @@ export async function buildServer(opts: ServerOptions) {
   // A chat's terminal is shell access. Besides the guard, its socket needs this
   // token, new on every start, which only the app can read (through the API).
   const ptyToken = randomBytes(32).toString('hex')
-  const state = () => ({ ...store.state(), home })
+  const state = (): AppState => ({ ...store.state(), home, ...(store.dir ? {} : { setup: { suggested: '~/Workbench' } }) })
 
   const app = Fastify({ logger: false })
   const guard = makeGuard(opts.dev ? [opts.port, DEV_UI_PORT] : [opts.port])
@@ -223,6 +251,27 @@ export async function buildServer(opts: ServerOptions) {
     if (req.headers.upgrade && req.url.startsWith('/pty/')) return
     const reason = guard(req.headers, req.url)
     if (reason) return reply.code(403).send({ error: reason })
+    // Until setup names the Workbench folder, only the state, the events and setup itself answer.
+    const route = req.url.split('?')[0]
+    if (!store.dir && route.startsWith('/api/') && !SETUP_ROUTES.has(route)) return reply.code(409).send({ error: 'Workbench has no folder yet; set one up first' })
+  })
+
+  // Setup (part 13): the folder Workbench works in, made with its first profile; remembered in the pointer file.
+  app.post('/api/setup', async (req) => {
+    const b = parse(SetupBody, req.body)
+    const dir = absPath(b.dir, home)
+    const id = b.name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32)
+    await store.setDir(dir, { id: id || 'main', name: b.name })
+    if (opts.pointerFile) {
+      await fs.promises.mkdir(path.dirname(opts.pointerFile), { recursive: true })
+      await fs.promises.writeFile(opts.pointerFile, `${dir}\n`)
+    }
+    return state()
   })
   app.addHook('onClose', async () => {
     store.close()
@@ -262,9 +311,9 @@ export async function buildServer(opts: ServerOptions) {
     // An older project without `steps:` gets the tabs it showed as its own on its first step change.
     if (before) {
       for (const op of ops) {
-        if (!('at' in op) || !STEP_OPS.has(op.op) || 'seed' in op) continue
+        if (!('at' in op) || !op.at || !STEP_OPS.has(op.op) || 'seed' in op) continue
         const item = getItem(before, op.at)
-        if (item?.type === 'folder' && !item.steps) Object.assign(op, { seed: await stepsFor(req.params.id, before, item) })
+        if (item?.type === 'folder' && !item.steps) Object.assign(op, { seed: stepsOf(before, item) })
       }
     }
     // A chat step's chat is found by its label: a rename moves the chat with it.
@@ -274,7 +323,7 @@ export async function buildServer(opts: ServerOptions) {
             if (op.op !== 'updateStep') return null
             const project = getItem(before, op.at)
             if (project?.type !== 'folder') return null
-            const old = (await stepsFor(req.params.id, before, project))[op.index]
+            const old = stepsOf(before, project)[op.index]
             const ref = projectRef(project)
             return old?.type === 'chat' && old.label !== op.step.label ? { from: stepSlot(ref, old.label), to: stepSlot(ref, String(op.step.label)) } : null
           }),
@@ -290,28 +339,16 @@ export async function buildServer(opts: ServerOptions) {
     return store.undo(req.params.id, rev)
   })
 
-  // Profiles: a new file (blank, or a copy of another with a new name), or one moved to the Trash.
+  // Profiles: a new folder in the Workbench (blank with one drawer, or a copy of another's pages), or one forgotten.
   app.post('/api/profiles', async (req) => {
     const b = parse(NewProfile, req.body)
-    let text: string
-    if (b.copyFrom) {
-      const src = store.profile(b.copyFrom)
-      if (!src.profile) throw new StoreError('That profile file is broken', 423)
-      const source = store.text(b.copyFrom)
-      const doc = parseDocument(source)
-      applyOps(doc, [{ op: 'setProfileField', key: 'name', value: b.name }], source)
-      text = doc.toString()
-    } else {
-      const used = store.state().profiles.map((p) => p.profile?.accent)
-      const accent = ACCENTS.find((a) => !used.includes(a)) ?? ACCENTS[0]
-      text = new Document({ name: b.name, accent, sections: [] }).toString()
-    }
-    await store.createProfile(b.id, text)
+    await store.createProfile(b.id, { name: b.name, copyFrom: b.copyFrom })
     return { id: b.id }
   })
 
+  // The profile leaves the switcher; its wiki folder stays.
   app.delete<{ Params: { id: string } }>('/api/profiles/:id', async (req) => {
-    await store.removeProfile(req.params.id, (file) => runToExit({ command: 'gio', args: ['trash', '--', file] }, opts.spawn))
+    await store.removeProfile(req.params.id)
     return { ok: true }
   })
 
@@ -333,9 +370,9 @@ export async function buildServer(opts: ServerOptions) {
       await openItem(item, home, opts.spawn)
       return { ok: true }
     }
-    const s = item.type === 'folder' ? (await stepsFor(id, p.profile, item))[step] : undefined
+    const s = item.type === 'folder' ? stepsOf(p.profile, item)[step] : undefined
     if (!s || item.type !== 'folder') throw new StoreError('No such step', 404)
-    const entry = stepEntry(itemBase(p.profile, item), s)
+    const entry = stepEntry(itemBase(p.profile, item, at.drawer), s)
     if (entry.type !== 'launch' && entry.type !== 'link') throw new StoreError('This step opens in its tab', 422)
     await openItem(entry, home, opts.spawn)
     return { ok: true }
@@ -365,6 +402,22 @@ export async function buildServer(opts: ServerOptions) {
   app.get('/api/notes/search', async (req) => {
     const { profile, q } = parse(SearchQuery, req.query)
     return notes.search(profile, q)
+  })
+
+  app.get('/api/notes/overview', async (req) => notes.overview(parse(ProfileQuery, req.query).profile))
+  app.get('/api/notes/backlinks', async (req) => {
+    const { profile, path: p } = parse(PathQuery, req.query)
+    return notes.backlinks(profile, p)
+  })
+
+  app.post('/api/notes/rename', async (req) => {
+    const { profile, path: p, name } = parse(NoteRename, req.body)
+    return notes.rename(profile, p, name)
+  })
+
+  app.get('/api/notes/template', async (req) => {
+    const { profile, name } = parse(TemplateQuery, req.query)
+    return notes.template(profile, name)
   })
 
   app.get('/api/notes/asset', async (req, reply) => {
@@ -397,6 +450,8 @@ export async function buildServer(opts: ServerOptions) {
 
   app.post('/api/files/op', async (req) => {
     const { profile, op } = parse(FileOpBody, req.body)
+    // Renaming a page of the wiki keeps the links to it working.
+    if (op.op === 'rename' && NOTE_EXT.test(op.name) && (await notes.inWiki(profile, op.path))) return { path: (await notes.rename(profile, op.path, op.name)).path }
     return files.op(profile, op)
   })
 
@@ -516,20 +571,11 @@ export async function buildServer(opts: ServerOptions) {
 
   // A drawer's shared folder in one click: <notes or home>/drawers/<name>, made
   // here; the UI then sets `folder:` (with Undo). Only the name comes from the request.
-  app.post('/api/drawers/folder', async (req) => {
-    const b = parse(DrawerFolder, req.body)
-    const profile = store.profile(b.profile).profile
-    if (!profile) throw new StoreError('The profile is not loaded', 404)
-    const folder = `${(profile.notes ?? profile.home ?? '~').replace(/\/+$/, '')}/drawers/${drawerSlug(b.name)}`
-    await fsp.mkdir(absPath(folder, home), { recursive: true })
-    return { folder }
-  })
-
   // Chats: started from an entry or step in the config, by address; a request
   // never carries a command or arguments.
   async function chatFolder(profile: Profile, raw: string, confine: boolean): Promise<string> {
     const real = await realish(absPath(raw, home))
-    if (confine && !(await browseRoots(profile, home)).some((r) => within(real, r.real))) {
+    if (confine && !(await browseRoots(profile, home, store.dir)).some((r) => within(real, r.real))) {
       throw new StoreError("Not allowed: outside this profile's folders", 403)
     }
     return real
@@ -541,55 +587,75 @@ export async function buildServer(opts: ServerOptions) {
 
   /** What a chat's `agent:` starts: the shell, plain claude, or claude with an agent profile's flags. */
   /** Every claude chat (not the shell) also gets the profile's context folders, once they are set up, and its drawer's shared folders. */
-  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[]) {
+  async function agentFor(id: string, profile: Profile, drawer: number, name: string | undefined, cwd: string, args: string[], item?: NavItem) {
     const program = name && isReservedAgent(name) ? chatProgram(name) : 'claude'
     const found = name && !isReservedAgent(name) ? findAgent(profile, name) : null
     if (name && !isReservedAgent(name) && !found) throw new StoreError(`No agent profile named ${name}`, 422)
     if (program === 'shell') return { agent: program, args, agentProfile: null, bypass: false, context: false }
-    // The profile's MCP defaults, the first time a chat starts in this folder.
-    await mcpDefaults.apply(profile.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
+    // The drawer's MCP defaults, the first time a chat starts in this folder.
+    await mcpDefaults.apply(drawersOf(profile)[drawer]?.mcpOff, await projectKey(cwd)).catch((err) => console.error('[mcp defaults]', err))
     const ctx = await context.chatContext(id)
-    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, mergeContext(ctx, await drawerContext(profile, drawer, home)))
-    return { agent: 'claude' as const, args: [...args, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
+    const page = item?.type === 'folder' ? item.page : undefined
+    // The skills pinned by the profile, the drawer and the page: named in the prompt; the wiki's own loaded as a plugin.
+    const pinned = pinnedSkills(profile, drawer, item)
+    let skillsCtx: ChatContext | null = null
+    const extra: string[] = []
+    if (pinned.all.length) {
+      const wiki = wikiRootOf(profile)
+      const read = await readSetup({ home, managedDir: opts.managedDir, folder: cwd, wiki })
+      const r = await resolveSkills(pinned.all, read.setup.skills, wiki)
+      const prompt = skillsPrompt(r.found)
+      if (prompt) skillsCtx = { prompt, dirs: [] }
+      const plugin = await bundles.bundle(r.found)
+      if (plugin) extra.push('--plugin-dir', plugin)
+    }
+    // The context folders, then the wiki (and the project's page), the pinned skills, then the drawer's shared folders: one --add-dir, one --append-system-prompt.
+    const merged = mergeContext(mergeContext(mergeContext(ctx, await wikiContext(profile, home, page)), skillsCtx), await drawerContext(profile, drawer, home))
+    const start = agentArgs(found ? found[1] : AgentProfile.parse({}), home, cwd, merged)
+    return { agent: 'claude' as const, args: [...args, ...extra, ...start.args], agentProfile: found?.[0] ?? null, bypass: start.bypass, firstPrompt: start.prompt, context: !!ctx }
   }
 
   /** The drawer holding a project (its folder entry), for its chats' shared folders. */
   const projectDrawer = (profile: Profile, projectPath: string) =>
     walkItems(profile).find((e) => e.item.type === 'folder' && e.item.path === projectPath)?.addr.drawer ?? 0
 
-  /** An item's steps; an older project's include Git only when its folder is in a repository, as its page shows them. */
-  async function stepsFor(profileId: string, profile: Profile, item: NavItem): Promise<StepItem[]> {
-    if (item.type !== 'folder' || item.steps) return stepsOf(profile, item)
-    const repo = item.path ? !!(await git.repo(profileId, item.path).catch(() => null)) : false
-    return stepsOf(profile, item, repo)
-  }
-
   app.post('/api/chats', async (req) => {
     const body = parse(ChatStart, req.body)
     const p = store.profile(body.profile)
     if (p.rev !== body.rev || !p.profile) throw new StoreError('The profile changed since it was loaded; reloaded', 409)
+    let spec: ChatSpec
+    if (!body.at) {
+      // A chat of the drawer's own (the dock's New chat with no page shown): in the drawer's folder.
+      const d = body.drawer ?? 0
+      const own = drawersOf(p.profile)[d]
+      if (!own) throw new StoreError('No such drawer', 404)
+      const cwd = body.path === undefined ? await chatFolder(p.profile, own.folder ?? p.profile.root, false) : await chatFolder(p.profile, body.path, true)
+      spec = { profile: body.profile, host: `drawer:${own.name}`, slot: null, cwd, ...(await agentFor(body.profile, p.profile, d, body.agent, cwd, [])) }
+      return chats.start({ ...spec, resume: body.resume })
+    }
     // A shared entry starts its original's chat; the chat gets the shared folders of the drawer holding the original.
     const found = entryAt(p.profile, body.at)
     if (!found) throw new StoreError('No such entry', 404)
     const { item } = found
     const drawer = found.addr.drawer ?? 0
-    let spec: ChatSpec
     if (item.type === 'chat') {
       const slot = entrySlot(item)
       const cwd = await chatFolder(p.profile, item.path ?? '~', false)
       spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, drawer, item.agent, cwd, item.args)) }
     } else if (item.type === 'folder' && body.step !== undefined) {
-      const step = (await stepsFor(body.profile, p.profile, item))[body.step]
+      const step = stepsOf(p.profile, item)[body.step]
       if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
-      const base = itemBase(p.profile, item)
+      const base = itemBase(p.profile, item, drawer)
       const entry = stepEntry(base, step) as typeof step
       const cwd = await chatFolder(p.profile, entry.path ?? base, false)
       const ref = projectRef(item)
-      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args)) }
+      spec = { profile: body.profile, host: projectHost(ref), slot: stepSlot(ref, step.label), cwd, ...(await agentFor(body.profile, p.profile, drawer, step.agent, cwd, step.args, item)) }
     } else if (item.type === 'folder') {
-      const cwd = body.path === undefined ? await chatFolder(p.profile, itemBase(p.profile, item), false) : await chatFolder(p.profile, body.path, true)
+      // A page without a folder of its own starts in its drawer's folder (part 12), else home.
+      const base = itemBase(p.profile, item, drawer)
+      const cwd = body.path === undefined ? await chatFolder(p.profile, base, false) : await chatFolder(p.profile, body.path, true)
       // The New chat menu's pick, else the project's default.
-      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [])) }
+      spec = { profile: body.profile, host: projectHost(projectRef(item)), slot: null, cwd, page: item.page, ...(await agentFor(body.profile, p.profile, drawer, body.agent ?? item.agent, cwd, [], item)) }
     } else {
       throw new StoreError('Only projects and chat entries have chats', 422)
     }
@@ -765,16 +831,8 @@ export async function buildServer(opts: ServerOptions) {
       `This repository has merge conflicts from ${what}. Resolve the conflicts in ${files.join(', ')}` +
       ` (paths from the repository's top folder${s.sub ? `; this chat runs in ${s.sub}` : ''}): keep what both sides meant,` +
       ` remove the conflict markers, and say what you chose. Don't stage, commit or abort; I'll mark the files resolved myself.`
-    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [])) }
+    const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [], r.project)) }
     return chats.start({ ...spec, prompt, label: 'Conflicts' })
-  })
-
-  // A project card's dates: when its folder was made and last worked on.
-  app.get('/api/projects/dates', async (req) => {
-    const { profile: id, path: raw } = parse(PathQuery, req.query)
-    const p = store.profile(id)
-    if (!p.profile) throw new StoreError('The profile file is broken', 423)
-    return projectDates(await chatFolder(p.profile, raw, true))
   })
 
   // Claude setup: what claude loads, for everywhere or for a folder of the
@@ -784,25 +842,43 @@ export async function buildServer(opts: ServerOptions) {
     const p = store.profile(id)
     if (!p.profile) throw new StoreError('The profile file is broken', 423)
     const folder = raw ? await chatFolder(p.profile, raw, true) : null
-    return { folder, profile: p.profile, read: await readSetup({ home, managedDir: opts.managedDir, folder }) }
+    return { folder, profile: p.profile, read: await readSetup({ home, managedDir: opts.managedDir, folder, wiki: wikiRootOf(p.profile) }) }
   }
 
-  /** The setup as the page shows it: everywhere, the profile's defaults are what the switches show. */
-  function withDefaults(setup: ClaudeSetup, profile: Profile, folder: string | null): ClaudeSetup {
-    const off = new Set(profile.mcpOff ?? [])
+  /** The setup as the views show it: the drawer's defaults on the switches, and the skills pinned here. */
+  async function setupView(id: string, raw: string | undefined, drawer: number | undefined): Promise<ClaudeSetup> {
+    const { folder, read, profile } = await setupFor(id, raw)
+    const d = drawerFor(profile, raw, drawer)
+    const item = raw ? walkItems(profile).find((e) => e.item.type === 'folder' && e.item.path === raw)?.item : undefined
+    const pinned = pinnedSkills(profile, d, item)
+    const { missing } = await resolveSkills(pinned.all, read.setup.skills, wikiRootOf(profile))
+    return { ...withDefaults(read.setup, profile, folder, d), pinned: { profile: pinned.profile, drawer: pinned.drawer, page: pinned.page, missing } }
+  }
+
+  /** The setup as the rail shows it: without a folder, the drawer's defaults are what the switches show. */
+  function withDefaults(setup: ClaudeSetup, profile: Profile, folder: string | null, drawer: number): ClaudeSetup {
+    const off = new Set(drawersOf(profile)[drawer]?.mcpOff ?? [])
     if (!off.size) return setup
     const mcp = setup.mcp.map((m): McpEntry => {
       if (m.state !== 'on' || !off.has(m.key)) return m
-      if (folder) return { ...m, note: 'On here, though off by default in this profile' }
-      return { ...m, state: 'off', note: 'Off by default: turned off in each project before its first chat' }
+      if (folder) return { ...m, note: 'On here, though off by default in this drawer' }
+      return { ...m, state: 'off', note: 'Off by default: turned off in each project of the drawer before its first chat' }
     })
     return { ...setup, mcp }
   }
 
+  /** The drawer a setup request is about: the one holding the folder (a project's, or a drawer's own), else the one named. */
+  const drawerFor = (profile: Profile, raw: string | undefined, drawer: number | undefined): number => {
+    if (raw) {
+      const own = drawersOf(profile).findIndex((d) => d.folder === raw)
+      return own >= 0 ? own : projectDrawer(profile, raw)
+    }
+    return drawer ?? 0
+  }
+
   app.get('/api/claude/setup', async (req) => {
     const q = parse(SetupQuery, req.query)
-    const { folder, read, profile } = await setupFor(q.profile, q.path)
-    return withDefaults(read.setup, profile, folder)
+    return setupView(q.profile, q.path, q.drawer)
   })
 
   // Switch MCP servers off or on the way /mcp does, in one folder; or, with no
@@ -821,19 +897,23 @@ export async function buildServer(opts: ServerOptions) {
       await setFoldersOff(claudeJson(home), [await projectKey(folder)], b.keys, !b.on)
     } else {
       if (!b.rev) throw new StoreError('The profile’s rev is needed to change its defaults', 422)
-      rev = (await store.apply(b.profile, b.rev, [{ op: 'setMcpOff', names: b.keys, off: !b.on }])).rev
+      if (b.drawer === undefined) throw new StoreError('Say which drawer the defaults are for', 422)
+      const own = drawersOf(profile)[b.drawer]
+      if (!own) throw new StoreError(`Drawer ${b.drawer} does not exist`, 404)
+      rev = (await store.apply(b.profile, b.rev, [{ op: 'setMcpOff', drawer: b.drawer, names: b.keys, off: !b.on }])).rev
+      // Every project of the drawer, and the drawer's own folder.
+      const folders = walkItems(profile).flatMap(({ addr, item }) => ((addr.drawer ?? 0) === b.drawer && item.type === 'folder' && item.path ? [item.path] : []))
+      if (own.folder) folders.push(own.folder)
       const keys = new Set<string>()
-      for (const { item } of walkItems(profile)) {
-        if (item.type !== 'folder' || !item.path) continue
-        const dir = await chatFolder(profile, item.path, false)
+      for (const p of folders) {
+        const dir = await chatFolder(profile, p, false)
         if (await fs.promises.stat(dir).then((st) => st.isDirectory(), () => false)) keys.add(await projectKey(dir))
       }
       await setFoldersOff(claudeJson(home), [...keys], b.keys, !b.on)
       if (b.on) await mcpDefaults.forget(b.keys)
       else await mcpDefaults.noteApplied([...keys], b.keys)
     }
-    const fresh = await setupFor(b.profile, b.path)
-    return { setup: withDefaults(fresh.read.setup, fresh.profile, fresh.folder), ...(rev ? { rev } : {}) }
+    return { setup: await setupView(b.profile, b.path, b.drawer), ...(rev ? { rev } : {}) }
   })
 
   app.get('/api/claude/doc', async (req) => {
@@ -945,10 +1025,10 @@ if (import.meta.main) {
   const portArg = args.indexOf('--port')
   const port = portArg >= 0 ? Number(args[portArg + 1]) : Number(process.env.WORKBENCH_PORT || DEFAULT_PORT)
   const dev = args.includes('--dev')
-  const configDir = defaultConfigDir()
-  const { app } = await buildServer({ configDir, port, dev, distDir: dev ? null : undefined, stateDir: defaultStateDir() })
+  const dir = defaultWorkbenchDir()
+  const { app } = await buildServer({ dir, pointerFile: pointerFile(), port, dev, distDir: dev ? null : undefined, stateDir: defaultStateDir() })
   await app.listen({ host: '127.0.0.1', port })
-  console.log(`Workbench service on http://127.0.0.1:${port}/ (config: ${configDir})`)
+  console.log(`Workbench service on http://127.0.0.1:${port}/ (${dir ? `folder: ${dir}` : 'no folder yet: open the app to set one up'})`)
   const stop = () => app.close().then(() => process.exit(0))
   process.on('SIGINT', stop)
   process.on('SIGTERM', stop)

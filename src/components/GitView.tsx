@@ -562,7 +562,7 @@ export default function GitView({ profileId, path, toast, onChanged }: Props) {
           </div>
           <div className="git-sub">
             <span className="mono">{s.repo}</span>
-            {s.sub && <span> · this project is {s.sub}</span>}
+            {s.sub && <span> · this folder is {s.sub}</span>}
             {s.lastFetch && (
               <span className={cx(s.lastFetch.error && 'err')} title={s.lastFetch.error ?? undefined}>
                 {' '}

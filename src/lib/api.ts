@@ -12,6 +12,7 @@ import type {
   ItemAddr,
   NoteFile,
   NoteSummary,
+  NotesOverview,
   Op,
   SearchHit,
   ServersScan,
@@ -59,6 +60,9 @@ export const undo = (profile: string, rev: string) =>
 export const setActive = (profile: string) => api('/api/active', { body: { profile } })
 /** A new profile: blank, or a copy of another (its headings and workflow) under a new name. */
 export const createProfile = (id: string, name: string, copyFrom?: string) => api<{ id: string }>('/api/profiles', { body: { id, name, copyFrom } })
+/** Setup (part 13): the folder Workbench works in, with its first profile's name. */
+export const setup = (dir: string, name: string) => api<AppState>('/api/setup', { body: { dir, name } })
+/** Profiles still in YAML become wikis. */
 /** The profile's file goes to the Trash. */
 export const removeProfile = (id: string) => api(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' })
 /** Open an entry, or with `step`, start a project's launcher step. */
@@ -72,11 +76,19 @@ export const readNote = (profile: string, path: string) => api<NoteFile>(`/api/n
  * page closes; browsers cap such a request at 64 KB, so a larger note is sent as a normal request.
  */
 export const writeNote = (profile: string, path: string, rev: string | null, text: string, keepalive = false) =>
-  api<{ path: string; rev: string; mtime: number }>('/api/notes/file', {
+  api<Omit<NoteFile, 'text'>>('/api/notes/file', {
     body: { profile, path, rev, text },
     keepalive: keepalive && text.length < 60_000,
   })
 export const listNotes = (profile: string) => api<NoteSummary[]>(`/api/notes/list?${query({ profile })}`)
+/** Notes linking to this one, with the lines that do. */
+export const notesOverview = (profile: string) => api<NotesOverview>(`/api/notes/overview?${query({ profile })}`)
+export const backlinks = (profile: string, path: string) => api<SearchHit[]>(`/api/notes/backlinks?${query({ profile, path })}`)
+/** Rename a note in the notes folder; links to it are rewritten. */
+export const renameNote = (profile: string, path: string, name: string) =>
+  api<{ path: string; files: number; links: number }>('/api/notes/rename', { body: { profile, path, name } })
+/** `<notes>/templates/<name>.md`, or null. */
+export const noteTemplate = (profile: string, name: string) => api<{ text: string | null }>(`/api/notes/template?${query({ profile, name })}`)
 export const searchNotes = (profile: string, q: string) => api<SearchHit[]>(`/api/notes/search?${query({ profile, q })}`)
 
 export const listFiles = (profile: string, path: string) => api<FileListing>(`/api/files/list?${query({ profile, path })}`)
@@ -91,9 +103,6 @@ export const openFile = (profile: string, path: string) => api('/api/files/open'
 /** The program a file opens in (the profile's openWith:, or Blender and Godot when installed); null for the default app. */
 export const openWithLabel = (profile: string, path: string) => api<{ label: string | null }>(`/api/files/open-with?${query({ profile, path })}`)
 export const openWith = (profile: string, path: string) => api<{ label: string }>('/api/files/open-with', { body: { profile, path } })
-/** When a project's folder was made and last worked on (git, else its files). */
-export const projectDates = (profile: string, path: string) =>
-  api<{ created: number | null; updated: number | null; source: 'git' | 'files' }>(`/api/projects/dates?${query({ profile, path })}`)
 /** A folder's size, added up on request. */
 export const folderSize = (profile: string, path: string) => api<FolderSize>(`/api/files/size?${query({ profile, path })}`)
 /** Names containing `q` below a folder, closed folders included. */
@@ -113,7 +122,9 @@ export async function uploadFile(profile: string, dir: string, file: File): Prom
 
 // Chats: started from an entry or step by address; the service picks the program.
 export interface ChatStart {
-  at: ItemAddr
+  /** The entry the chat belongs to; or (part 12) none and a `drawer`, for a chat in the drawer's folder. */
+  at?: ItemAddr
+  drawer?: number
   /** A chat step of the project at `at`. */
   step?: number
   /** New chat in a project: claude, shell or an agent profile (default the project's), in `path` (default the project folder). */
@@ -148,18 +159,19 @@ export const sendToInbox = (profile: string, path: string) => api<{ path: string
 
 // Claude setup, masked. `folder` adds that folder's project and local items.
 const inFolder = (folder: string | null): Record<string, string> => (folder ? { path: folder } : {})
-export const claudeSetup = (profile: string, folder: string | null) => api<ClaudeSetup>(`/api/claude/setup?${query({ profile, ...inFolder(folder) })}`)
+export const claudeSetup = (profile: string, folder: string | null, drawer?: number) =>
+  api<ClaudeSetup>(`/api/claude/setup?${query({ profile, ...inFolder(folder), ...(drawer !== undefined ? { drawer: String(drawer) } : {}) })}`)
 export const claudeDoc = (profile: string, folder: string | null, id: string) =>
   api<{ body: string }>(`/api/claude/doc?${query({ profile, id, ...inFolder(folder) })}`)
 /** Start a server (or connect), list its tools and stop it. `confirm` for a project server claude has not approved. */
 export const checkMcp = (profile: string, folder: string | null, id: string, confirm = false) =>
   api<McpCheck>('/api/claude/check', { body: { profile, id, confirm, ...inFolder(folder) } })
 /** MCP servers (by their /mcp names) on or off in a folder, like /mcp; without a folder, the profile's defaults (needs its rev). */
-export const switchMcp = (profile: string, folder: string | null, keys: string[], on: boolean, rev?: string) =>
-  api<{ setup: ClaudeSetup; rev?: string }>('/api/claude/mcp', { body: { profile, keys, on, ...(folder ? { path: folder } : { rev }) } })
+/** In a folder, or (no folder) as the drawer's defaults, which need the profile's rev. */
+export const switchMcp = (profile: string, folder: string | null, keys: string[], on: boolean, rev?: string, drawer?: number) =>
+  api<{ setup: ClaudeSetup; rev?: string }>('/api/claude/mcp', { body: { profile, keys, on, drawer, ...(folder ? { path: folder } : { rev }) } })
 
 /** Make <notes or home>/drawers/<name> for a drawer; returns it for `folder:`. */
-export const drawerFolder = (profile: string, name: string) => api<{ folder: string }>('/api/drawers/folder', { body: { profile, name } })
 
 // Background pictures: copies in the config folder, chosen per profile.
 export const listBackgrounds = () => api<string[]>('/api/backgrounds')

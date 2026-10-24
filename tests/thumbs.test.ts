@@ -6,6 +6,7 @@ import zlib from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildServer } from '../server/main.ts'
 import { Thumbs } from '../server/thumbs.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 let dir: string
 let home: string
@@ -47,7 +48,8 @@ beforeEach(async () => {
   await fsp.writeFile(path.join(home, 'outside/secret.png'), 'no')
   await fsp.mkdir(path.join(dir, 'cfg/profiles'), { recursive: true })
   await fsp.writeFile(path.join(dir, 'cfg/profiles/work.yaml'), 'name: Work\nsections:\n  - title: Projects\n    items:\n      - { label: Art, type: folder, path: ~/art }\n')
-  server = await buildServer({ configDir: path.join(dir, 'cfg'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, thumbsDir })
+  await migrateFixture(path.join(dir, 'cfg'), home)
+  server = await buildServer({ dir: path.join(home, 'wb'), port: 7420, distDir: null, home, watch: false, stateDir: path.join(dir, 'state'), gitFetchEveryMs: 0, thumbsDir })
 })
 
 afterEach(async () => {
@@ -94,14 +96,19 @@ describe('gallery thumbnails', () => {
 
   it('prune the least recently used past the cap', async () => {
     const t = new Thumbs(path.join(dir, 'small'), { maxBytes: 1000 })
-    for (const name of ['a', 'b', 'c', 'd']) {
+    const thumb: Record<string, string> = {}
+    // a is made first and d last, a minute apart; then a is looked at again.
+    for (const [i, name] of ['a', 'b', 'c', 'd'].entries()) {
       const file = path.join(home, 'art', `${name}.png`)
       await fsp.writeFile(file, name)
       await t.put(file, Buffer.concat([WEBP, Buffer.alloc(300)]))
-      const old = new Date(Date.now() - (10 - name.charCodeAt(0)) * 60_000)
-      for (const f of fs.readdirSync(t.dir)) if (fs.statSync(path.join(t.dir, f)).mtimeMs > old.getTime()) await fsp.utimes(path.join(t.dir, f), old, old)
+      thumb[name] = `${t.key(file, fs.statSync(file))}.webp`
+      const made = new Date(Date.now() - (4 - i) * 60_000)
+      await fsp.utimes(path.join(t.dir, thumb[name]), made, made)
     }
+    expect(await t.get(path.join(home, 'art/a.png'), (p) => p)).toMatchObject({ type: 'image/webp' })
+    // Four of about 340 bytes is past 1000; the two least recently used go, down to 80%.
     expect(await t.prune()).toBe(2)
-    expect(fs.readdirSync(t.dir)).toHaveLength(2)
+    expect(fs.readdirSync(t.dir).sort()).toEqual([thumb.a, thumb.d].sort())
   })
 })

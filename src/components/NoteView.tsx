@@ -4,12 +4,13 @@
 // banner offers to reload or to keep this version.
 import { Eye, FilePlus, Pencil } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { NoteFile } from '../../shared/config-schema.ts'
+import type { NoteFile, SearchHit } from '../../shared/config-schema.ts'
 import * as api from '../lib/api.ts'
 import { toggleTaskLine } from '../lib/tasks.ts'
 import { onNoteEvent, type NoteEvent } from '../lib/events.ts'
 import { cx } from '../lib/nav.ts'
 import { useNotes } from '../lib/notes-ctx.ts'
+import { marked } from './SearchView.tsx'
 
 // react-markdown and remark are a large chunk; they load with the first note shown.
 const Markdown = lazy(() => import('./Markdown.tsx').then((m) => ({ default: m.Markdown })))
@@ -45,6 +46,49 @@ interface Props {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
+type Meta = Pick<NoteFile, 'meta' | 'metaError'>
+
+/** A frontmatter value as a short text. */
+/** `tags:` as a list of plain names: a list, or one string split on commas and spaces. */
+function tagList(v: unknown): string[] {
+  const raw = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(/[\s,]+/) : []
+  return [...new Set(raw.map((t) => t.replace(/^#+/, '').trim().toLowerCase()).filter(Boolean))]
+}
+
+function showValue(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v) && v.every((x) => typeof x !== 'object')) return v.join(', ')
+  return typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)
+}
+
+/** The title as a field: Enter or leaving it renames, Esc cancels. */
+function RenameField({ name, onDone, onCancel }: { name: string; onDone: (name: string) => void; onCancel: () => void }) {
+  const [value, setValue] = useState(name)
+  const done = useRef(false)
+  const finish = (v: string | null) => {
+    if (done.current) return
+    done.current = true
+    if (v === null) onCancel()
+    else onDone(v)
+  }
+  return (
+    <input
+      className="inline-input rename note-rename"
+      aria-label="Note name"
+      autoFocus
+      value={value}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => finish(value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') finish(value)
+        else if (e.key === 'Escape') finish(null)
+        e.stopPropagation()
+      }}
+    />
+  )
+}
+
 export function NoteView({ path, kicker, heading, compact, below, initialText, title, autoCreate, missingText }: Props) {
   const notes = useNotes()
   const ctx = useRef(notes)
@@ -57,6 +101,9 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
   const [atEnd, setAtEnd] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [meta, setMeta] = useState<Meta>({ meta: {} })
+  const [mentions, setMentions] = useState<SearchHit[]>([])
+  const [renaming, setRenaming] = useState(false)
 
   // Async code reads these, so it always sees the latest values.
   const r = useRef({
@@ -84,6 +131,7 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
   function apply(file: NoteFile) {
     setBase({ path: file.path, text: file.text, rev: file.rev })
     setDraft(file.text)
+    setMeta({ meta: file.meta, metaError: file.metaError })
     setConflict(null)
     setPhase({ kind: 'ready' })
   }
@@ -108,7 +156,7 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
     try {
       const text = initialText ? await initialText() : `# ${title}\n\n`
       const saved = await api.writeNote(ctx.current.profile, path, null, text)
-      apply({ path: saved.path, text, rev: saved.rev, mtime: saved.mtime })
+      apply({ path: saved.path, text, rev: saved.rev, mtime: saved.mtime, meta: saved.meta, metaError: saved.metaError })
       setAtEnd(true)
       setEditing(true)
       ctx.current.changed()
@@ -132,6 +180,7 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
     try {
       const saved = await api.writeNote(ctx.current.profile, s.base.path, s.base.rev, text, keepalive)
       setBase({ path: saved.path, text, rev: saved.rev })
+      setMeta({ meta: saved.meta, metaError: saved.metaError })
       setSaveError(null)
       ctx.current.changed()
     } catch (err) {
@@ -189,6 +238,7 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
     try {
       const saved = await api.writeNote(ctx.current.profile, s.base.path, s.conflict.rev, text)
       setBase({ path: saved.path, text, rev: saved.rev })
+      setMeta({ meta: saved.meta, metaError: saved.metaError })
       setConflict(null)
       ctx.current.changed()
     } catch (err) {
@@ -210,6 +260,39 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
     else setAtEnd(false)
     setEditing(!editing)
   }
+
+  const currentPath = base?.path ?? path
+  // Only notes in the notes folder can be renamed here: notes elsewhere are named by the config.
+  const summary = notes.list.find((n) => n.path === currentPath)
+  const canRename = !!summary && summary.rel !== null
+
+  /** Rename the file; links to it are rewritten by the service, and the new name opens. */
+  async function rename(name: string) {
+    setRenaming(false)
+    if (!summary || !name.trim() || name.trim() === summary.name) return
+    await save()
+    try {
+      const res = await api.renameNote(ctx.current.profile, summary.path, name)
+      ctx.current.changed()
+      ctx.current.notify(res.files ? `Renamed; ${res.links} ${res.links === 1 ? 'link' : 'links'} in ${res.files} ${res.files === 1 ? 'note' : 'notes'} updated` : 'Renamed')
+      ctx.current.open(res.path)
+    } catch (err) {
+      ctx.current.notify(`Could not rename: ${message(err)}`, 'error')
+    }
+  }
+
+  // Notes linking here, refreshed when the list of notes changes (a save, a new note).
+  useEffect(() => {
+    if (phase.kind !== 'ready') return
+    let live = true
+    api.backlinks(ctx.current.profile, currentPath).then(
+      (h) => live && setMentions(h),
+      () => live && setMentions([]),
+    )
+    return () => {
+      live = false
+    }
+  }, [phase.kind, currentPath, notes.list])
 
   // Open: load it, and go straight to Edit for a note that was just created.
   useEffect(() => {
@@ -241,6 +324,12 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F2' && !e.ctrlKey && !e.altKey && phase.kind === 'ready' && canRename && !editing) {
+        if ((e.target as HTMLElement | null)?.closest?.('input, textarea, .scrim')) return
+        e.preventDefault()
+        setRenaming(true)
+        return
+      }
       if (!e.ctrlKey || e.altKey || e.shiftKey) return
       const key = e.key.toLowerCase()
       if (key === 's') {
@@ -254,7 +343,7 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editing, phase.kind])
+  }, [editing, phase.kind, canRename])
 
   const dirty = !!base && draft !== base.text
   const status = conflict ? 'Conflict' : saving ? 'Saving…' : saveError ? 'Not saved' : dirty ? 'Unsaved' : 'Saved'
@@ -264,13 +353,18 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
     <div className={cx('page note-page', compact && 'compact')}>
       {kicker && <div className="page-kicker">{kicker}</div>}
       <div className="note-head">
-        <h1 className="page-title">{heading}</h1>
+        {renaming && summary ? <RenameField name={summary.name} onDone={(v) => void rename(v)} onCancel={() => setRenaming(false)} /> : <h1 className="page-title">{heading}</h1>}
         {phase.kind === 'ready' && (
           <div className="note-actions">
             {(editing || tone !== 'ok') && (
               <span className={cx('save-status', tone)} title={saveError ?? undefined} aria-live="polite">
                 {status}
               </span>
+            )}
+            {canRename && !editing && !renaming && (
+              <button className="btn ghost" onClick={() => setRenaming(true)} title="Rename this note; links to it follow (F2)">
+                Rename
+              </button>
             )}
             <button className={cx('btn', editing && 'primary')} onClick={toggle} title={editing ? 'View (Ctrl+E)' : 'Edit (Ctrl+E)'} aria-pressed={editing}>
               {editing ? <Eye size={14} /> : <Pencil size={14} />}
@@ -280,6 +374,31 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
         )}
       </div>
       {below}
+
+      {phase.kind === 'ready' && !editing && (meta.metaError || Object.keys(meta.meta).length > 0) && (
+        <div className={cx('note-props', meta.metaError && 'bad')} aria-label="Properties">
+          {meta.metaError ? (
+            <span>Frontmatter: {meta.metaError}</span>
+          ) : (
+            Object.entries(meta.meta).map(([k, v]) => (
+              <span className="prop" key={k}>
+                <span className="k">{k}</span>
+                {k === 'tags' ? (
+                  <span className="v tags">
+                    {tagList(v).map((t) => (
+                      <button key={t} className="tag-link" onClick={() => ctx.current.search(`#${t}`)} title={`Notes tagged #${t}`}>
+                        #{t}
+                      </button>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="v">{showValue(v)}</span>
+                )}
+              </span>
+            ))
+          )}
+        </div>
+      )}
 
       {conflict && (
         <div className="note-conflict" role="alert">
@@ -332,6 +451,25 @@ export function NoteView({ path, kicker, heading, compact, below, initialText, t
             )}
           </div>
         ))}
+      {phase.kind === 'ready' && !editing && mentions.length > 0 && (
+        <section className="note-mentions" aria-label="Mentions">
+          <div className="section-label">Mentions</div>
+          <ul>
+            {mentions.map((m) => (
+              <li key={m.path}>
+                <button className="mention" onClick={() => notes.open(m.path)} title={m.path}>
+                  <span className="mention-name">{m.name}</span>
+                  {m.lines.map((l) => (
+                    <span className="hit-line" key={l.line}>
+                      <span>{marked(l.text, l.ranges)}</span>
+                    </span>
+                  ))}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }

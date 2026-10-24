@@ -7,6 +7,7 @@ import { expandHome } from '../shared/config-schema.ts'
 import { makeGuard } from '../server/guard.ts'
 import { launchFor, openItem, runDetached } from '../server/launch.ts'
 import { buildServer } from '../server/main.ts'
+import { migrateFixture } from './fixtures/wiki.ts'
 
 interface Call {
   command: string
@@ -127,14 +128,17 @@ sections:
       - { label: Today, type: daily }
 `,
     )
+    await migrateFixture(path.join(dir, 'cfg'), path.join(dir, 'home'))
     spawn = fakeSpawn()
     server = await buildServer({
-      configDir: path.join(dir, 'cfg'),
+      dir: path.join(dir, 'home/wb'),
       port: 7420,
       distDir: null,
       home: path.join(dir, 'home'),
       spawn: spawn.spawn,
       watch: false,
+      stateDir: path.join(dir, 'state'),
+      gitFetchEveryMs: 0,
     })
   })
 

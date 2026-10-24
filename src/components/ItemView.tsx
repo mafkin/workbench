@@ -1,100 +1,61 @@
-// An item: its card (category, status, pin, description) and its steps as tabs.
-// A new item is blank; you add what it needs. A files step is the item's folder
-// in the browser, a git step its repository's changes, branches and history, a
-// setup step what claude loads there; a folder step shows another folder, a note
+// An item: its card (pin, description, the agent and skills for its chats) and
+// its steps as tabs. A new item is blank; you add what it needs. A files step is
+// the item's folder in the browser; a folder step shows another folder, a note
 // step its note in place, a report its HTML page, a file step one file large,
 // and launcher and link steps open outside. A chat step is claude (or the shell)
-// in its tab, and chats started with New chat are tabs after the steps. An older
-// project without `steps:` shows All files, Git (in a repository), Claude setup
-// and the profile's workflow; its first change writes them as its own. With a
-// single tab there is no tab row: the step fills the page.
+// in its tab; chats started with New chat live in the dock. Git and Claude setup
+// are the drawer's tools on the rail (part 12): `git:` and `setup:` lines in a
+// page get no tab. An older project without `steps:` shows All files and the
+// profile's workflow; its first change writes them as its own. With a single
+// tab there is no tab row: the step fills the page.
+import { ExternalLink, FileText, FolderOpen, Pencil, Pin, Plus, RefreshCw, RotateCcw, Share2, ShieldAlert, Sparkles, SquareTerminal, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  Blocks,
-  ChevronDown,
-  ExternalLink,
-  FastForward,
-  FileText,
-  FolderOpen,
-  GitBranch,
-  History,
-  MessageSquarePlus,
-  Palette,
-  Pencil,
-  Pin,
-  PinOff,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Share2,
-  ShieldAlert,
-  Sparkles,
-  SquareTerminal,
-  Tag,
-  Trash2,
-  X,
-} from 'lucide-react'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import {
-  CATEGORY_PALETTE,
-  categoriesOf,
-  categoryColor,
-  CHAT_COLORS,
-  chatName,
   chatProgram,
   expandHome,
   FOLDER_STEPS,
   folderRoots,
   itemBase,
+  joinNotes,
   normalizePath,
-  projectHost,
   projectRef,
-  STATUSES,
   STEP_LABEL,
   stepPath,
   stepSlot,
   stepsOf,
+  tabSteps,
   type CARD_FIELDS,
-  type Chat,
   type ItemAddr,
   type NavItem,
   type Op,
   type Profile,
-  type Status,
   type StepItem,
 } from '../../shared/config-schema.ts'
-import type { GitMark } from '../../shared/git.ts'
 import * as api from '../lib/api.ts'
-import { byPin, carriesPaths, CHAT_TAB, droppedPaths, onProjectTab, pasteInto, PATHS_TYPE, quotePaths, useChats } from '../lib/chats.ts'
+import { onProjectTab, PATHS_TYPE, useChats } from '../lib/chats.ts'
 import { nameOf, parentOf, previewKind } from '../lib/files.ts'
+import { useNotes } from '../lib/notes-ctx.ts'
 import { useLocal } from '../lib/local.ts'
 import { cx, type DialogState, type MenuEntry, type MenuState } from '../lib/nav.ts'
-import { ago } from '../lib/recent.ts'
 import { agentEntries } from './AgentMenu.tsx'
 import { ChatPane } from './ChatPane.tsx'
 import { ContextMenu } from './ContextMenu.tsx'
-import { agentIcon, EntryIcon } from './EntryIcon.tsx'
+import { EntryIcon } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
 import { MediaPreview, TextPreview } from './FilePreview.tsx'
 import { NoteView } from './NoteView.tsx'
 import type { ToastInput } from './Toast.tsx'
 
 /** What a project page needs from the app. */
-export interface ProjectActions {
+export interface ItemActions {
   run: (ops: Op[], undoLabel?: string) => Promise<boolean>
   openDialog: (d: DialogState) => void
   /** Start a launcher step, or open a link step in the browser. */
   launchStep: (addr: ItemAddr, index: number, label: string, kind: 'launch' | 'link') => void
   rememberStep: (addr: ItemAddr, label: string) => void
-  /** Servers running (or declared and down) in a project folder, from the last check. */
-  servers: (path: string) => { up: number; down: number } | undefined
-  openServers: () => void
-  /** The project's repository: branch and counts from the last check; undefined when it isn't in one. */
-  git: (path: string) => GitMark | undefined
-  /** Check the repositories again (after a change in the Git tab). */
+  /** Check the repositories again (after a change in the rail's Git view). */
   gitChanged: () => void
 }
-
-export const STATUS_LABEL: Record<Status, string> = { active: 'Active', paused: 'Paused', done: 'Done', archived: 'Archived' }
 
 type CardField = (typeof CARD_FIELDS)[number]
 
@@ -108,11 +69,9 @@ interface Props {
   profile: Profile
   profileId: string
   home: string
-  actions: ProjectActions
+  actions: ItemActions
   openFolder: (path: string) => void
   toast: (t: ToastInput) => void
-  /** The open step's label, for the crumbs; null for All files. */
-  onTab: (label: string | null) => void
 }
 
 const describe = (s: StepItem) =>
@@ -121,7 +80,7 @@ const describe = (s: StepItem) =>
     : s.type === 'link'
       ? s.url
       : s.type === 'chat'
-        ? `${s.agent === 'shell' ? 'Shell' : 'Claude'} in ${s.path ?? 'the project folder'}`
+        ? `${s.agent === 'shell' ? 'Shell' : 'Claude'} in ${s.path ?? 'the item’s folder'}`
         : s.type === 'files'
           ? 'The item’s folder'
           : s.type === 'git'
@@ -130,61 +89,60 @@ const describe = (s: StepItem) =>
               ? 'What claude loads in this folder: skills, MCP servers, agents, commands, hooks and plugins'
               : s.path
 
-const ClaudeSetupView = lazy(() => import('./ClaudeSetupView.tsx'))
-const GitView = lazy(() => import('./GitView.tsx'))
-// Saved tabs from before the built-in tabs were steps: its Claude setup and its Git tab.
-const SETUP_TAB = 'setup:'
-const GIT_TAB = 'git:'
+/** The item's own page, as a tab beside its steps. */
+const PAGE_TAB = 'page:'
 
-/** Names for the chat colours, in the order of CHAT_COLORS. */
-const COLOR_NAMES = ['Slate', 'Sage', 'Sand', 'Heather', 'Teal', 'Clay', 'Grey']
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-export function ProjectView({ addr, item, kicker, profile, profileId, home, actions, openFolder, toast, onTab }: Props) {
-  const gitMark = item.path ? actions.git(item.path) : undefined
-  const steps = stepsOf(profile, item, !!gitMark)
+export function ItemView({ addr, item, kicker, profile, profileId, home, actions, openFolder, toast }: Props) {
+  const notes = useNotes()
+  // Every step by its index in the page (ops address them so); the tabs leave out Git and Claude setup.
+  const steps = stepsOf(profile, item)
+  const shown = tabSteps(steps)
   const own = item.steps !== undefined
   // Relative step paths, launchers and chats start in the item's folder, else in home.
-  const base = itemBase(profile, item)
+  const base = itemBase(profile, item, addr.drawer)
   const ref = projectRef(item)
   const [tabs, setTabs] = useLocal<Record<string, string>>('projectTab', {})
   const tabKey = `${profileId}|${ref}`
   const chats = useChats()
-  const host = projectHost(ref)
-  const adhoc = chats.list.filter((c) => c.host === host && !c.slot).sort(byPin)
   const slotChat = (s: StepItem) => chats.list.find((c) => c.slot === stepSlot(ref, s.label)) ?? null
   const saved = tabs[tabKey] ?? ''
-  const activeChat = saved.startsWith(CHAT_TAB) ? (adhoc.find((c) => CHAT_TAB + c.id === saved) ?? null) : null
-  // Until the list arrives, a chat tab cannot be told from a closed one.
-  const waitingForChats = saved.startsWith(CHAT_TAB) && !chats.loaded
-  const inTab = steps.filter((s) => !opensOutside(s))
-  const ofKind = (type: StepItem['type']) => inTab.find((s) => s.type === type)
-  // The saved step by its label (or a saved Git or Claude setup tab from before), else the first.
-  const active = activeChat
-    ? null
-    : (inTab.find((s) => s.label === saved) ?? (saved === GIT_TAB ? ofKind('git') : saved === SETUP_TAB ? ofKind('setup') : undefined) ?? inTab[0] ?? null)
-  const tabId = activeChat ? saved : (active?.label ?? '')
+  const inTab = shown.filter((s) => !opensOutside(s))
   // One tab fills the page: the tab row shows from two on (or for a lone launcher or link, which needs its button).
-  const showRow = steps.length + adhoc.length >= 2 || steps.some(opensOutside)
-  const blank = steps.length === 0 && adhoc.length === 0
+  // Chats started with New chat live in the dock (part 12), not in this row.
+  const showRow = shown.length >= 2 || shown.some(opensOutside)
+  const blank = shown.length === 0
+  // With a row of tabs, the item's own page is one of them.
+  const pageTab = !!item.page && showRow
+  const onPage = pageTab && saved === PAGE_TAB
+  // The saved step by its label, else the first.
+  const active = onPage ? null : (inTab.find((s) => s.label === saved) ?? inTab[0] ?? null)
+  const tabId = onPage ? PAGE_TAB : (active?.label ?? '')
   /** An older project's first step change writes the tabs it showed as its own. */
   const seeded = <T extends Op>(op: T): T => (own ? op : { ...op, seed: steps })
+  const quickAddButtons = () => (
+    <>
+      <button className="btn" onClick={() => void quickAdd('files')}>
+        <FolderOpen size={14} /> File browser
+      </button>
+      <button className="btn" onClick={() => void quickAdd('note')}>
+        <FileText size={14} /> Note
+      </button>
+      <button className="btn ghost" onClick={addStep}>
+        <Plus size={14} /> More…
+      </button>
+    </>
+  )
   const [browse, setBrowse] = useState<{ tab: string; top: string } | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
-  const [editing, setEditing] = useState<'description' | 'category' | null>(null)
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [dropChat, setDropChat] = useState<string | null>(null)
+  const [editing, setEditing] = useState<'description' | null>(null)
   const dragging = useRef<number | null>(null)
-  // The browser's colour picker, for "Other colour…" on a category.
-  const colourInput = useRef<HTMLInputElement>(null)
   // Where the last right-click on this page was, for follow-up menus (Chat here as…).
   const lastPoint = useRef({ x: 0, y: 0 })
   const hasAgents = Object.keys(profile.agents ?? {}).length > 0
-  const status = item.status ?? 'active'
-  const crumb = activeChat ? chatName(activeChat) : (active?.label ?? null)
 
-  useEffect(() => onTab(crumb), [crumb])
   // A chat opened from elsewhere (the nav menu, a notification) picks its tab here.
   useEffect(() => onProjectTab((key, tab) => key === tabKey && setTabs((t) => ({ ...t, [key]: tab }))), [tabKey])
 
@@ -200,28 +158,15 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     actions.rememberStep(addr, step.label)
   }
 
-  const selectGit = () => {
-    const git = ofKind('git')
-    if (git) select(git)
-  }
-
-  const selectChat = (chat: Chat) => {
-    setTabs((t) => ({ ...t, [tabKey]: CHAT_TAB + chat.id }))
-    setBrowse(null)
-  }
-
   /**
    * New chat in the project, or with `path` in a folder inside it (Chat here).
-   * `agent` comes from a menu; without one the project's default starts.
+   * `agent` comes from a menu; without one the project's default starts. The
+   * chat shows in the dock (part 12).
    */
   const newChat = async (agent?: string, path?: string) => {
     const chat = await chats.start({ at: addr, agent, path })
-    if (chat) selectChat(chat)
+    if (chat) chats.open(chat)
   }
-
-  /** The agent menu for New chat ▾: Claude, the agent profiles (the default marked), Shell. */
-  const startMenu = (e: React.MouseEvent) =>
-    menuBelow(e, agentEntries(profile.agents, { current: item.agent, shell: true, run: (a) => void newChat(a), edit: () => chats.editAgents(base) }))
 
   /** The agent New chat starts in this project; Claude is the default and written by leaving the field out. */
   const defaultAgentMenu = (e: React.MouseEvent) =>
@@ -229,7 +174,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       e,
       agentEntries(profile.agents, {
         current: item.agent,
-        mark: 'this project',
+        mark: 'this item',
         run: (a) => setCard('agent', a === 'claude' ? null : a, `New chat in ${item.label} starts ${a === 'claude' ? 'Claude' : a}`),
         edit: () => chats.editAgents(base),
       }),
@@ -249,74 +194,6 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       : []),
     { label: 'Shell here', icon: <SquareTerminal size={14} />, run: () => void newChat('shell', dir) },
   ]
-
-  const handoff = async (chat: Chat) => {
-    const next = await chats.handoff(chat)
-    if (next) selectChat(next)
-  }
-
-  // Earlier Claude sessions in the project folder and below; one already open is shown, not started twice.
-  const historyMenu = async (e: React.MouseEvent) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    const sessions = await chats.history(base)
-    const open = new Map(chats.list.filter((c) => c.session).map((c) => [c.session, c]))
-    const entries: MenuEntry[] = sessions.slice(0, 15).map((s) => ({
-      label: s.title,
-      detail: `${normalizePath(s.cwd) === normalizePath(base) ? '' : `${s.cwd} · `}${open.has(s.id) ? 'open' : ago(s.mtime)}`,
-      icon: <Sparkles size={14} />,
-      run: () => {
-        const chat = open.get(s.id)
-        if (chat) return chats.open(chat)
-        void chats.start({ at: addr, resume: s.id, path: s.cwd }).then((c) => c && selectChat(c))
-      },
-    }))
-    setMenu({ x: r.left, y: r.bottom + 4, entries: entries.length ? entries : [{ label: 'No Claude sessions in this folder yet', disabled: true, run() {} }] })
-  }
-
-  function chatMenu(e: React.MouseEvent, chat: Chat) {
-    e.preventDefault()
-    e.stopPropagation()
-    const at = { x: e.clientX, y: e.clientY }
-    const colours: (MenuEntry | 'sep')[] = [
-      ...CHAT_COLORS.map((c, i) => ({
-        label: COLOR_NAMES[i] ?? c,
-        icon: <span className="category-dot" style={{ background: c }} />,
-        run: () => void chats.update(chat, { color: c }),
-      })),
-      ...(chat.color ? (['sep', { label: 'No colour', icon: <X size={14} />, run: () => void chats.update(chat, { color: null }) }] as const) : []),
-    ]
-    setMenu({
-      ...at,
-      entries: [
-        { label: 'Rename…', icon: <Pencil size={14} />, run: () => setRenaming(chat.id) },
-        { label: 'Colour…', icon: <Palette size={14} />, run: () => setMenu({ ...at, entries: colours }) },
-        chat.pinned
-          ? { label: 'Unpin', icon: <PinOff size={14} />, run: () => void chats.update(chat, { pinned: false }) }
-          : { label: 'Pin', icon: <Pin size={14} />, run: () => void chats.update(chat, { pinned: true }) },
-        ...(chat.agent === 'claude' && chat.session ? [{ label: 'Summarize and continue', icon: <FastForward size={14} />, run: () => void handoff(chat) }] : []),
-        'sep',
-        { label: 'Close', icon: <X size={14} />, danger: true, run: () => chats.close(chat) },
-      ],
-    })
-  }
-
-  /** Paths dropped on a chat's tab are typed into its prompt. */
-  const chatDrop = (chat: Chat) => ({
-    onDragOver: (e: React.DragEvent) => {
-      if (!carriesPaths(e)) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'copy'
-      setDropChat(chat.id)
-    },
-    onDragLeave: () => setDropChat((d) => (d === chat.id ? null : d)),
-    onDrop: (e: React.DragEvent) => {
-      setDropChat(null)
-      if (!carriesPaths(e)) return
-      e.preventDefault()
-      pasteInto(chat.id, quotePaths(droppedPaths(e)))
-      selectChat(chat)
-    },
-  })
 
   const folderTop = active?.type === 'folder' ? stepPath(base, active.path) : base
   const top = browse?.tab === tabId ? browse.top : folderTop
@@ -345,6 +222,27 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
 
   const setCard = (field: CardField, value: string | boolean | null, undoLabel?: string) =>
     void actions.run([{ op: 'setCard', at: addr, field, value }], undoLabel)
+  const setSkills = (names: string[]) => void actions.run([{ op: 'setSkills', at: addr, names }], `Skills pinned on ${item.label} changed`)
+
+  /** The card's skills chip: every skill claude loads here and the wiki's, ticked when pinned on this page. */
+  async function skillsMenu(e: React.MouseEvent) {
+    const pinned = item.skills ?? []
+    const r = e.currentTarget.getBoundingClientRect()
+    const at = { x: r.left, y: r.bottom + 4 }
+    try {
+      const setup = await api.claudeSetup(profileId, item.path ?? null, addr.drawer)
+      const has = (n: string) => pinned.some((p) => p.toLowerCase() === n.toLowerCase())
+      const toggle = (n: string) => setSkills(has(n) ? pinned.filter((p) => p.toLowerCase() !== n.toLowerCase()) : [...pinned, n])
+      const docs = setup.skills.filter((s) => !s.overriddenBy)
+      const entries: (MenuEntry | 'sep')[] = docs.map((s) => ({ label: `/${s.name}`, detail: s.scope === 'wiki' ? 'wiki' : s.plugin ?? s.scope, kind: 'checkbox', checked: has(s.name), run: () => toggle(s.name) }))
+      const unknown = pinned.filter((p) => !docs.some((s) => s.name.toLowerCase() === p.toLowerCase()))
+      for (const n of unknown) entries.push({ label: `/${n}`, detail: 'not found', kind: 'checkbox', checked: true, run: () => toggle(n) })
+      if (!entries.length) entries.push({ label: 'No skills to pin: add one in ~/.claude/skills or <wiki>/skills', disabled: true, run: () => {} })
+      setMenu({ ...at, entries })
+    } catch (err) {
+      toast({ message: err instanceof Error ? err.message : String(err), kind: 'error' })
+    }
+  }
 
   const openDefault = (path: string) =>
     api.openFile(profileId, path).then(
@@ -358,63 +256,13 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     setMenu({ x: r.left, y: r.bottom + 4, entries })
   }
 
-  const statusMenu = (e: React.MouseEvent) =>
-    menuBelow(
-      e,
-      STATUSES.map((s) => ({
-        label: STATUS_LABEL[s],
-        icon: <span className={cx('status-dot', s)} />,
-        // Active is the default, so it is written by leaving the field out.
-        run: () => setCard('status', s === 'active' ? null : s, `${item.label}: ${STATUS_LABEL[s].toLowerCase()}`),
-      })),
-    )
-
-  const categoryMenu = (e: React.MouseEvent) => {
-    const known = categoriesOf(profile)
-    const at = e.currentTarget.getBoundingClientRect()
-    menuBelow(e, [
-      ...known.map((c) => ({
-        label: c,
-        icon: <span className="category-dot" style={{ background: categoryColor(profile, c) }} />,
-        run: () => setCard('category', c),
-      })),
-      ...(known.length ? (['sep'] as const) : []),
-      { label: 'New category…', icon: <Tag size={14} />, run: () => setEditing('category') },
-      ...(item.category
-        ? [
-            { label: `Colour of ${item.category}…`, icon: <Palette size={14} />, run: () => colourMenu(at, item.category!) },
-            { label: 'No category', icon: <X size={14} />, run: () => setCard('category', null) },
-          ]
-        : []),
-    ])
-  }
-
-  /** A category's colour, for every project in it: the palette, any colour, or back to the palette's pick. */
-  const colourMenu = (at: DOMRect, name: string) => {
-    const set = (color: string | null) => void actions.run([{ op: 'setCategory', name, color }], color ? `${name} is now ${color}` : `${name} has the palette's colour again`)
-    setMenu({ x: at.left, y: at.bottom + 4, entries: [
-      ...CATEGORY_PALETTE.map((c, i) => ({ label: COLOR_NAMES[i] ?? c, icon: <span className="category-dot" style={{ background: c }} />, run: () => set(c) })),
-      'sep',
-      {
-        label: 'Other colour…',
-        icon: <Palette size={14} />,
-        run: () => {
-          const input = colourInput.current
-          if (!input) return
-          input.value = categoryColor(profile, name)
-          input.onchange = () => set(input.value)
-          input.click()
-        },
-      },
-      ...(profile.categories?.[name] ? [{ label: "Palette's pick", icon: <X size={14} />, run: () => set(null) }] : []),
-    ] })
-  }
-
   // The profile's workflow is a template: add its steps here, or make this item's steps the template.
   const workflowEntries = (): (MenuEntry | 'sep')[] => {
     const out: (MenuEntry | 'sep')[] = [{ label: 'Add step…', icon: <Plus size={14} />, run: addStep }]
     if (profile.workflow.length) {
       out.push({ label: 'Add profile steps', icon: <RotateCcw size={14} />, run: () => void actions.run([seeded({ op: 'addWorkflow', at: addr } as Op)], 'Added the profile steps') })
+      // The template is a page: edit it like any other.
+      out.push({ label: 'Open Workflow.md', icon: <FileText size={14} />, run: () => notes.open(joinNotes(profile.root, 'Workflow.md')) })
     }
     if (steps.length) {
       out.push({
@@ -451,74 +299,41 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     })
   }
 
-  /** Add step, New chat ▾ and History: in the tab row, or by the title when there is none. */
-  const chatActions = (inHead: boolean) => (
-    <>
-      {inHead && !blank && (
-        <button className="tab-action" onClick={addStep} title="Add step" aria-label="Add step">
-          <Plus size={14} />
-        </button>
-      )}
-      <button className="tab-action" onClick={() => void newChat()} title={`Start ${item.agent ?? 'Claude'} in ${item.path ? 'the item’s folder' : 'your home folder'}`}>
-        <MessageSquarePlus size={14} />
-        New chat
+  /** Add step by the title when there is no tab row. */
+  const chatActions = (inHead: boolean) =>
+    inHead && !blank ? (
+      <button className="tab-action" onClick={addStep} title="Add step" aria-label="Add step">
+        <Plus size={14} />
       </button>
-      <button className="tab-action more" aria-label="More kinds of chat" onClick={startMenu}>
-        <ChevronDown size={13} />
-      </button>
-      <button className="tab-action" onClick={(e) => void historyMenu(e)} title="Earlier Claude sessions in this folder">
-        <History size={14} />
-        History
-      </button>
-    </>
-  )
+    ) : null
 
   return (
-    <div className="page wide project-page" onContextMenuCapture={(e) => (lastPoint.current = { x: e.clientX, y: e.clientY })}>
+    <div className="page wide item-view" onContextMenuCapture={(e) => (lastPoint.current = { x: e.clientX, y: e.clientY })}>
       <div className="page-kicker card-kicker">
         {kicker}
-        <span className="sep">·</span>
-        {editing === 'category' ? (
-          <InlineField
-            initial=""
-            label="New category"
-            onDone={(v) => {
-              setEditing(null)
-              if (v) setCard('category', v)
-            }}
-          />
-        ) : (
-          <button
-            className={cx('category-chip', !item.category && 'empty')}
-            style={item.category ? ({ '--category': categoryColor(profile, item.category) } as React.CSSProperties) : undefined}
-            onClick={categoryMenu}
-            title="Category"
-          >
-            {item.category ?? 'Category'}
-          </button>
-        )}
-        <input ref={colourInput} type="color" className="visually-hidden" tabIndex={-1} aria-hidden />
         {(hasAgents || item.agent) && (
           <button
             className={cx('agent-chip', !item.agent && 'empty')}
             onClick={defaultAgentMenu}
-            title="The agent New chat starts in this project"
+            title="The agent New chat starts from this item"
             aria-label={`Agent for New chat: ${item.agent ?? 'Claude'}`}
           >
             <Sparkles size={11} />
             {item.agent ?? 'Claude'}
           </button>
         )}
+        {item.page && (
+          <button className={cx('agent-chip skills-chip', !item.skills?.length && 'empty')} onClick={(e) => void skillsMenu(e)} title="Skills pinned on this page: chats started here are told to use them" aria-label={`Skills for chats here: ${item.skills?.length ? item.skills.join(', ') : 'none'}`}>
+            <Pin size={11} />
+            {item.skills?.length ? item.skills.join(', ') : 'Skills'}
+          </button>
+        )}
       </div>
-      <div className="project-head">
+      <div className="item-head">
         <h1 className="page-title">
           <EntryIcon type="folder" icon={item.icon} size={22} />
           {item.label}
         </h1>
-        <button className={cx('status-pill', status)} onClick={statusMenu} title="Status" aria-label={`Status: ${STATUS_LABEL[status]}`}>
-          <span className={cx('status-dot', status)} />
-          {STATUS_LABEL[status]}
-        </button>
         <button
           className={cx('icon-btn pin-btn', item.pinned && 'on')}
           onClick={() => setCard('pinned', item.pinned ? null : true)}
@@ -547,7 +362,6 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           {item.description || 'Add a description'}
         </p>
       )}
-      {item.path && <CardDates profileId={profileId} path={item.path} servers={actions.servers(item.path)} onServers={actions.openServers} git={gitMark} onGit={selectGit} />}
 
       {showRow && <div
         className="step-tabs"
@@ -558,7 +372,14 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() })
         }}
       >
-        {steps.map((step, i) => {
+        {pageTab && (
+          <button role="tab" aria-selected={onPage} className={cx('step-tab', onPage && 'active')} title={item.page} onClick={() => setTabs((t) => ({ ...t, [tabKey]: PAGE_TAB }))}>
+            <FileText size={14} />
+            Page
+          </button>
+        )}
+        {shown.map((step) => {
+          const i = steps.indexOf(step)
           const outside = opensOutside(step)
           const stepChat = step.type === 'chat' ? slotChat(step) : null
           return (
@@ -600,9 +421,6 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
             >
               <EntryIcon type={step.type} icon={step.icon} agent={step.type === 'chat' ? chatProgram(step.agent) : undefined} size={14} />
               {step.label}
-              {step.type === 'git' && gitMark && gitMark.changed + gitMark.conflicts > 0 && (
-                <span className={cx('tab-count', gitMark.conflicts > 0 && 'danger')}>{gitMark.changed + gitMark.conflicts}</span>
-              )}
               {stepChat?.bypass && <ShieldAlert size={12} className="bypass-mark" aria-label="Permissions bypassed" />}
               {step.type === 'link' && <ExternalLink size={11} className="outside-mark" />}
               {stepChat?.attention && active !== step && <span className="attention" aria-label="Needs you" />}
@@ -612,102 +430,33 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
         <button className="step-tab add" onClick={addStep} title="Add step" aria-label="Add step">
           <Plus size={14} />
         </button>
-        {adhoc.map((chat) => {
-          const on = activeChat?.id === chat.id
-          const Icon = agentIcon(chat.agent)
-          return (
-            <div
-              key={chat.id}
-              role="tab"
-              tabIndex={0}
-              aria-selected={on}
-              className={cx('step-tab chat-tab', on && 'active', chat.color && 'colored', dropChat === chat.id && 'dropping', chat.state !== 'running' && 'idle')}
-              style={chat.color ? ({ '--chat': chat.color } as React.CSSProperties) : undefined}
-              title={[chatName(chat), chat.agentProfile, chat.cwd].filter(Boolean).join(' · ')}
-              onClick={() => selectChat(chat)}
-              onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && selectChat(chat)}
-              onContextMenu={(e) => chatMenu(e, chat)}
-              {...chatDrop(chat)}
-            >
-              <Icon size={14} className="icon" />
-              {renaming === chat.id ? (
-                <InlineField
-                  initial={chat.label ?? chatName(chat)}
-                  label="Chat name"
-                  onDone={(v) => {
-                    setRenaming(null)
-                    if (v !== null) void chats.update(chat, { label: v || null })
-                  }}
-                />
-              ) : (
-                <span className="chat-name">{chatName(chat)}</span>
-              )}
-              {chat.bypass && <ShieldAlert size={12} className="bypass-mark" aria-label="Permissions bypassed" />}
-              {chat.attention && !on && <span className="attention" aria-label="Needs you" />}
-              {chat.pinned ? (
-                <Pin size={11} className="pin-mark" aria-label="Pinned" />
-              ) : (
-                <button
-                  className="tab-close"
-                  aria-label={`Close ${chatName(chat)}`}
-                  title="Close"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    chats.close(chat)
-                  }}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-          )
-        })}
-        <span className="tab-spacer" />
-        {chatActions(false)}
       </div>}
 
       {!showRow && !blank && <div className="step-gap" />}
-      {waitingForChats ? null : activeChat ? (
-        <ChatPane key={activeChat.id} chat={activeChat} />
+      {onPage ? (
+        <NoteView key={item.page} path={joinNotes(profile.root, item.page!)} title={item.label} compact heading="Page" />
       ) : !active ? (
         blank ? (
-          <div className="item-empty" onContextMenu={(e) => (e.preventDefault(), setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() }))}>
-            <p>This item is empty. Add what it needs:</p>
-            <div className="item-empty-actions">
-              <button className="btn" onClick={() => void quickAdd('files')}>
-                <FolderOpen size={14} /> File browser
-              </button>
-              <button className="btn" onClick={() => void quickAdd('note')}>
-                <FileText size={14} /> Note
-              </button>
-              <button className="btn" onClick={() => void quickAdd('git')}>
-                <GitBranch size={14} /> Git
-              </button>
-              <button className="btn" onClick={() => void quickAdd('setup')}>
-                <Blocks size={14} /> Claude setup
-              </button>
-              <button className="btn ghost" onClick={addStep}>
-                <Plus size={14} /> More…
-              </button>
+          item.page ? (
+            // A page without a Workflow: the page itself, with the ways to give it tabs beneath.
+            <div className="item-page" onContextMenu={(e) => (e.preventDefault(), setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() }))}>
+              <NoteView key={item.page} path={joinNotes(profile.root, item.page)} title={item.label} compact heading="Page" />
+              <div className="item-empty-actions">
+                <span className="hint">Add a tab:</span>
+                {quickAddButtons()}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="item-empty" onContextMenu={(e) => (e.preventDefault(), setMenu({ x: e.clientX, y: e.clientY, entries: workflowEntries() }))}>
+              <p>This item is empty. Add what it needs:</p>
+              <div className="item-empty-actions">{quickAddButtons()}</div>
+            </div>
+          )
         ) : null
-      ) : (active.type === 'setup' || active.type === 'git' || active.type === 'files') && !item.path ? (
+      ) : active.type === 'files' && !item.path ? (
         <p className="item-empty">
           {active.label} shows this item’s folder, and it has none. Give it one in Edit… (right-click it in the nav).
         </p>
-      ) : active.type === 'setup' ? (
-        <Suspense fallback={null}>
-          <ClaudeSetupView profileId={profileId} profile={profile} folder={item.path} toast={toast} />
-        </Suspense>
-      ) : active.type === 'git' ? (
-        gitMark ? (
-          <Suspense fallback={null}>
-            <GitView key={`${profileId}|${item.path}`} profileId={profileId} path={item.path!} toast={toast} onChanged={actions.gitChanged} />
-          </Suspense>
-        ) : (
-          <p className="item-empty">{item.path} is not in a git repository.</p>
-        )
       ) : active.type === 'chat' ? (
         <ChatPane
           key={stepSlot(ref, active.label)}
@@ -750,70 +499,6 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       )}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>
-  )
-}
-
-/** "Created 3 Mar 2026 · Updated 2 h ago": the folder's birth, and its last commit or newest file. */
-function CardDates({
-  profileId,
-  path,
-  servers,
-  onServers,
-  git,
-  onGit,
-}: {
-  profileId: string
-  path: string
-  servers?: { up: number; down: number }
-  onServers: () => void
-  git?: GitMark
-  onGit: () => void
-}) {
-  const [dates, setDates] = useState<{ created: number | null; updated: number | null; source: 'git' | 'files' } | null>(null)
-  useEffect(() => {
-    let live = true
-    api.projectDates(profileId, path).then(
-      (d) => live && setDates(d),
-      () => live && setDates(null),
-    )
-    return () => {
-      live = false
-    }
-  }, [profileId, path])
-  const running = servers && (servers.up || servers.down)
-  if (!running && !git && (!dates || (!dates.created && !dates.updated))) return null
-  const day = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-  return (
-    <p className="card-dates">
-      {git && (
-        <>
-          <button className={cx('link-btn card-git', git.conflicts > 0 && 'danger')} onClick={onGit} title="Open the Git tab">
-            <GitBranch size={12} /> {git.branch ?? 'detached'}
-            {git.conflicts > 0 ? ` · ${git.conflicts} in conflict` : git.changed ? ` · ${git.changed} changed` : ''}
-            {git.ahead || git.behind ? ` · ↑${git.ahead} ↓${git.behind}` : ''}
-          </button>
-          {(running || (dates && (dates.created || dates.updated))) && ' · '}
-        </>
-      )}
-      {servers && running ? (
-        <>
-          <button className={cx('link-btn card-servers', servers.down > 0 && 'down')} onClick={onServers}>
-            {servers.up ? `${servers.up} ${servers.up === 1 ? 'server' : 'servers'} running` : ''}
-            {servers.up && servers.down ? ', ' : ''}
-            {servers.down ? `${servers.down} down` : ''}
-          </button>
-          {dates && (dates.created || dates.updated) && ' · '}
-        </>
-      ) : null}
-      {dates?.created && <span title={new Date(dates.created).toLocaleString()}>Created {day(dates.created)}</span>}
-      {dates?.created && dates.updated && ' · '}
-      {dates?.updated && (
-        <span title={`${dates.source === 'git' ? 'Last commit' : 'Newest file'}: ${new Date(dates.updated).toLocaleString()}`}>
-          Updated {ago(dates.updated)}
-          {dates.source === 'git' ? ' (last commit)' : ''}
-        </span>
-      )}
-    </p>
   )
 }
 
@@ -956,7 +641,7 @@ function FileTab({ path, onOpenDefault }: { path: string; onOpenDefault: (p: str
 }
 
 /** A small inline editor: Enter (without Shift) or leaving saves, Esc cancels. */
-function InlineField({ initial, label, multiline, onDone }: { initial: string; label: string; multiline?: boolean; onDone: (value: string | null) => void }) {
+export function InlineField({ initial, label, multiline, onDone }: { initial: string; label: string; multiline?: boolean; onDone: (value: string | null) => void }) {
   const done = useRef(false)
   const finish = (v: string | null) => {
     if (done.current) return

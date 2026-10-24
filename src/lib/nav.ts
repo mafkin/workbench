@@ -62,7 +62,8 @@ export type Selection =
   | { kind: 'note'; path: string }
   | { kind: 'files'; path: string }
   | { kind: 'chat'; id: string }
-  | { kind: 'setup' }
+  /** A tool of the right rail, for the drawer being shown (part 12). */
+  | { kind: 'rail'; tool: RailTool }
   | { kind: 'servers' }
   | { kind: 'context'; name: ContextFolder }
 
@@ -70,8 +71,11 @@ export type Selection =
 export const NOTE_KEY = 'note:'
 export const FILES_KEY = 'files:'
 export const CHAT_KEY = 'chat:'
-/** The Claude setup page. */
-export const SETUP_KEY = 'setup:'
+/** A rail tool: `rail:git`. */
+export const RAIL_KEY = 'rail:'
+export const RAIL_TOOLS = ['files', 'git', 'skills', 'mcp', 'settings'] as const
+export type RailTool = (typeof RAIL_TOOLS)[number]
+export const RAIL_LABEL: Record<RailTool, string> = { files: 'Files', git: 'Git', skills: 'Skills', mcp: 'MCP servers', settings: 'Drawer settings' }
 /** The Servers page. */
 export const SERVERS_KEY = 'servers:'
 /** A context folder's page: `context:inbox`. */

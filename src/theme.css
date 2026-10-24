@@ -71,8 +71,212 @@ button {
 
 .app {
   display: grid;
-  grid-template-columns: var(--nav-w, 280px) 1fr;
+  grid-template-columns: var(--nav-w, 280px) 1fr auto auto;
   height: 100%;
+}
+
+/* ── The chats dock (part 12) ───────────────────────── */
+
+.dock {
+  display: flex;
+  flex-direction: column;
+  width: clamp(300px, 28vw, 400px);
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.dock.collapsed {
+  width: 36px;
+}
+
+.dock-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+}
+
+.dock-strip:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.dock-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.dock-count.live {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dock-strip .attention,
+.dock-tab .attention {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 8px 4px 12px;
+}
+
+.dock-head .tab-action {
+  margin-bottom: 0;
+}
+
+.dock-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dock-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 40%;
+  padding: 4px 6px 8px;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.dock-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dock-tab:hover {
+  background: var(--hover);
+}
+
+.dock-tab.active {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.dock-tab .chat-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-tab.colored {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--chat) 70%, transparent);
+}
+
+.dock-tab.colored.active {
+  box-shadow: inset 2px 0 0 var(--chat);
+}
+
+.dock-tab .tab-close {
+  opacity: 0;
+}
+
+.dock-tab:hover .tab-close,
+.dock-tab.active .tab-close {
+  opacity: 1;
+}
+
+.dock-empty {
+  margin: 10px 12px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.dock-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 8px;
+}
+
+.dock-body .chat-pane {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
+/* ── The right rail: the drawer's tools (part 12) ──── */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 52px;
+  padding: 10px 4px;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.rail-btn {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 7px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.rail-btn:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.rail-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.rail-label {
+  letter-spacing: 0.01em;
+}
+
+/* Drawer settings in the main pane: the dialog's form without its frame. */
+.drawer-inline .dialog.inline {
+  max-width: 560px;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.setup-sections.lone {
+  display: none;
 }
 
 .app.resizing {
@@ -433,6 +637,30 @@ button {
   font-size: 12px;
 }
 
+.banner.soft {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.banner .btn {
+  margin-top: 6px;
+}
+
+.item-page .item-empty-actions {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.item-page .item-empty-actions .hint {
+  color: var(--faint);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
 .banner strong {
   color: var(--warn);
   font-weight: 600;
@@ -448,50 +676,21 @@ button {
 /* ── Main pane ──────────────────────────────────────── */
 
 .main {
+  /* Pages size their columns to the pane (the dock and rail take room from it). */
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 45px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-  flex: none;
-}
-
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.crumbs button {
-  border: 0;
-  padding: 0;
-  background: none;
-  color: var(--muted);
-}
-
-.crumbs button:hover {
-  color: var(--text);
-}
-
-.crumbs .current {
-  color: var(--text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.crumbs .sep {
-  color: var(--faint);
+/* Back floats in the pane's corner: the page starts at the top, with no bar above it. */
+.back-float {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 2;
+  background: var(--bg);
 }
 
 .content {
@@ -653,6 +852,13 @@ button {
   color: var(--faint);
 }
 
+/* The notes search lives in the sidebar, under the drawer picker. */
+.nav-search {
+  width: 100%;
+  margin-top: 8px;
+  background: var(--bg);
+}
+
 .note-page {
   max-width: 860px;
 }
@@ -726,6 +932,89 @@ button {
 .note-empty {
   color: var(--faint);
   padding: 8px 0;
+}
+
+/* Frontmatter, shown as properties above the note. */
+.note-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+
+.note-props .prop {
+  display: inline-flex;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.note-props .k {
+  color: var(--muted);
+}
+
+.note-props.bad {
+  color: var(--warn);
+}
+
+.note-rename {
+  flex: 1;
+  min-width: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+/* Notes linking here. */
+.note-mentions {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.note-mentions ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.note-mentions .mention {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.note-mentions .mention:hover {
+  background: var(--accent-soft);
+}
+
+.note-mentions .mention-name {
+  font-weight: 600;
+}
+
+.note-mentions .hit-line {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.note-mentions mark {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 2px;
 }
 
 .note-surface.editing {
@@ -938,6 +1227,20 @@ button {
   border-radius: var(--radius);
 }
 
+/* A titled image: the title as a caption under it. */
+.markdown .img-figure {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.markdown .img-caption {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .markdown .img-missing {
   color: var(--warn);
   font-size: 12px;
@@ -1022,6 +1325,78 @@ button {
   font-size: 11px;
   text-align: right;
   flex: none;
+}
+
+/* Before a query: the wiki's tags and the pages its links name. */
+.search-overview {
+  margin: 0 0 16px;
+}
+
+.search-overview .section-label,
+.content .search-results + .section-label {
+  margin-bottom: 8px;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip.tag {
+  cursor: pointer;
+}
+
+.chip.tag svg {
+  color: var(--faint);
+}
+
+.missing-pages {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.missing-pages button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: left;
+}
+
+.missing-pages button:hover {
+  border-color: var(--accent-line);
+}
+
+.missing-pages .icon {
+  color: var(--muted);
+  flex: none;
+}
+
+.note-props .v.tags {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.tag-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tag-link:hover {
+  color: var(--text-strong);
+  text-decoration: underline;
 }
 
 .search-results mark {
@@ -1126,6 +1501,13 @@ button {
   grid-template-columns: minmax(0, 1fr) minmax(300px, 38%);
   gap: 16px;
   align-items: start;
+}
+
+/* In a narrow pane (the dock open), the preview goes under the tree. */
+@container (max-width: 760px) {
+  .files-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .file-tree {
@@ -1399,26 +1781,26 @@ button {
 
 /* ── Projects and workflow steps ────────────────────── */
 
-.project-head {
+.item-head {
   display: flex;
   align-items: baseline;
   gap: 14px;
   flex-wrap: wrap;
 }
 
-.project-head .page-title {
+.item-head .page-title {
   margin-bottom: 0;
 }
 
-.project-head {
+.item-head {
   align-items: center;
 }
 
-.project-head .spacer {
+.item-head .spacer {
   flex: 1;
 }
 
-.project-head .path {
+.item-head .path {
   padding: 3px 8px;
   font-size: 12px;
   color: var(--muted);
@@ -1430,35 +1812,6 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.card-kicker .sep {
-  color: var(--faint);
-}
-
-.category-chip {
-  --category: var(--muted);
-  height: 20px;
-  padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--category) 45%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--category) 14%, transparent);
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.category-chip.empty {
-  border-style: dashed;
-  border-color: var(--border-strong);
-  background: transparent;
-  color: var(--faint);
-}
-
-.category-chip:hover {
-  border-color: var(--accent-line);
 }
 
 .category-dot {
@@ -1488,24 +1841,6 @@ button {
 .status-dot.archived {
   border: 1px solid var(--faint);
   background: transparent;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.status-pill:hover {
-  border-color: var(--accent-line);
-  color: var(--text);
 }
 
 .pin-btn {
@@ -1546,7 +1881,7 @@ button {
 
 /* Nav: project marks */
 
-.project-marks {
+.item-marks {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1681,11 +2016,11 @@ button {
 }
 
 /* Without a tab row, the actions sit by the title. */
-.project-head .tab-action {
+.item-head .tab-action {
   margin-bottom: 0;
 }
 
-.project-head .tab-action + .tab-action:not(.more) {
+.item-head .tab-action + .tab-action:not(.more) {
   margin-left: -8px;
 }
 
@@ -2401,7 +2736,7 @@ button {
   flex: none;
 }
 
-.chat-mark + .project-marks {
+.chat-mark + .item-marks {
   margin-left: 6px;
 }
 
@@ -2637,14 +2972,18 @@ button {
 }
 
 .app.backdrop .nav,
-.app.backdrop .main {
+.app.backdrop .main,
+.app.backdrop .dock,
+.app.backdrop .rail {
   border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
   border-radius: 10px;
   backdrop-filter: blur(14px) saturate(1.15);
   box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
 }
 
-.app.backdrop .nav {
+.app.backdrop .nav,
+.app.backdrop .dock,
+.app.backdrop .rail {
   background: color-mix(in srgb, var(--panel) 66%, transparent);
 }
 
@@ -2898,6 +3237,95 @@ button {
   border-radius: var(--radius);
   background: var(--panel);
   color: var(--text);
+}
+
+/* Pinned skills (part 12): the profile's, the drawer's and the page's lists above the skill rows. */
+.pinned-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.pinned-strip .section-label {
+  margin: 0;
+}
+
+.pinned-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.pinned-who {
+  margin-right: 2px;
+  color: var(--muted);
+}
+
+.pinned-empty {
+  color: var(--faint);
+}
+
+.chip.pin {
+  height: 22px;
+  padding-right: 4px;
+  color: var(--text);
+}
+
+.chip.pin.missing {
+  border-style: dashed;
+  color: var(--warn);
+}
+
+.chip-x {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.chip-x:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.setup-pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+}
+
+.setup-pin .hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.setup-pin .btn.on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.skills-chip {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .setup-problems {
@@ -3214,6 +3642,12 @@ button {
 
 .scope-badge.scope-plugin {
   border-style: dashed;
+}
+
+.scope-badge.scope-wiki {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .check-dot {
@@ -3848,12 +4282,6 @@ button {
   white-space: nowrap;
 }
 
-.card-dates {
-  margin: -4px 0 0;
-  color: var(--faint);
-  font-size: 12px;
-}
-
 /* Servers: marks on project rows, the line on the card, and the Servers page. */
 
 .server-mark {
@@ -3870,7 +4298,7 @@ button {
   margin-left: 6px;
 }
 
-.server-mark + .project-marks {
+.server-mark + .item-marks {
   margin-left: 6px;
 }
 
@@ -3918,14 +4346,14 @@ button {
   color: var(--muted);
 }
 
-.servers-project {
+.servers-item {
   margin: 0 0 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
 }
 
-.servers-project h2 {
+.servers-item h2 {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -3937,12 +4365,12 @@ button {
   font-weight: 600;
 }
 
-.servers-project h2 .mono {
+.servers-item h2 .mono {
   color: var(--faint);
   font-weight: 400;
 }
 
-.servers-project ul {
+.servers-item ul {
   margin: 0;
   padding: 4px;
   list-style: none;
@@ -4626,7 +5054,7 @@ button {
   margin-left: 6px;
 }
 
-.git-mark + .project-marks {
+.git-mark + .item-marks {
   margin-left: 6px;
 }
 
@@ -5146,4 +5574,29 @@ button {
 .btn.ghost.danger:hover {
   border-color: transparent;
   color: var(--danger);
+}
+
+/* ── Setup (part 13) ─────────────────────────────────── */
+
+.setup-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.setup-form {
+  width: min(520px, 100%);
+}
+
+.setup-intro {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.setup-form .err {
+  margin: 8px 0 0;
+  color: var(--danger, #c98a7a);
 }

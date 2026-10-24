@@ -1,123 +1,38 @@
-// First-run config: a starting point built from folders that exist on this
-// machine. Everything here can be changed in the app or by editing the files.
+// A fresh Workbench folder (part 13): settings.yaml and one profile with one
+// drawer, its nav empty. Nothing here points at any folder of the user's;
+// entries are added in the app. Never over files that exist.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { ACCENTS, noteFileName } from '../shared/config-schema.ts'
 
-const HEADER = `# Edit this file by hand or in Workbench (pencil at the top of the nav panel).
-# Your comments are kept when the app saves.
-# Entry types: folder (a project), note, daily, link, launch, and group (one level of entries inside).
-# notes: is the folder for new notes, daily notes, search and [[wiki links]].
-`
+export interface FirstProfile {
+  id: string
+  name: string
+}
 
-const SETTINGS = `# Workbench settings. Each file in profiles/ is a profile; this sets their order.
-activeProfile: work
-profiles: [work, personal]
-`
-
-const WORK = `${HEADER}name: Work
-accent: "#7d93ab"
-home: ~/Documents/work
-notes: ~/Documents/work/notes
-sections:
-  - title: Projects
-    items:
-      - label: IFC Checker
-        type: folder
-        path: ~/ifc_checker_project
-      - label: IFC releases
-        type: folder
-        path: ~/ifc_checker_releases
-      - label: look-ifc deploy
-        type: folder
-        path: ~/look-ifc-deploy
-      - label: Lupapiste support agent
-        type: folder
-        path: ~/Projects/lupapiste-support-agent
-      - label: WFS testing
-        type: folder
-        path: ~/wfs_testing
-      - label: Webinar
-        type: folder
-        path: ~/webinar_work
-  - title: Docs
-    items:
-      - label: Work documents
-        type: folder
-        path: ~/Documents/work
-      - label: Specifications
-        type: folder
-        path: ~/Documents/work/specifications
-      - label: Presentations
-        type: folder
-        path: ~/Documents/work/presentations
-      - label: Deploy runbook
-        type: note
-        path: ~/deploy-tools/RUNBOOK.md
-  - title: Tools
-    items:
-      - label: Claude in IFC Checker
-        type: launch
-        command: gnome-terminal
-        args: ["--working-directory=~/ifc_checker_project", "--", "claude"]
-  - title: Notes
-    items:
-      - label: Today
-        type: daily
-`
-
-const PERSONAL = `${HEADER}name: Personal
-accent: "#8fa58a"
-home: "~"            # a bare ~ means null in YAML, so it is quoted
-notes: ~/Documents/notes
-sections:
-  - title: Games & dev
-    items:
-      - label: Tuohi
-        type: folder
-        path: ~/Projects/tuohi
-      - label: Wargame
-        type: folder
-        path: ~/wargame
-      - label: PF2e AI arbiter
-        type: folder
-        path: ~/pf2e-ai-arbiter
-      - label: VTT automaton
-        type: folder
-        path: ~/vtt-automaton
-  - title: 3D & assets
-    items:
-      - label: wip_assets
-        type: folder
-        path: ~/Projects/wip_assets
-      - label: Blender
-        type: launch
-        command: blender
-      - label: "Godot: Tuohi"
-        type: launch
-        command: godot
-        args: ["--editor", "--path", "~/Projects/tuohi"]
-  - title: Documents
-    items:
-      - label: Documents
-        type: folder
-        path: ~/Documents
-  - title: Notes
-    items:
-      - label: Today
-        type: daily
-`
-
-export async function seedConfig(dir: string): Promise<void> {
-  await fsp.mkdir(path.join(dir, 'profiles'), { recursive: true })
-  const files: [string, string][] = [
-    ['settings.yaml', SETTINGS],
-    ['profiles/work.yaml', WORK],
-    ['profiles/personal.yaml', PERSONAL],
-  ]
-  for (const [name, text] of files) {
-    // 'wx' never overwrites a file the user already has.
-    await fsp.writeFile(path.join(dir, name), text, { flag: 'wx' }).catch((err) => {
-      if (err.code !== 'EEXIST') throw err
-    })
+/** The pages of a new profile: `index.md` listing one drawer, the drawer's page, and the drawer's folder. */
+export function profilePages(name: string, accent: string): Record<string, string> {
+  const page = noteFileName(name) ?? 'Main.md'
+  return {
+    'index.md': `---\nname: ${JSON.stringify(name)}\naccent: "${accent}"\n---\n## Drawers\n\n- [[drawers/${page.replace(/\.md$/, '')}]]\n`,
+    [`drawers/${page}`]: `## ${name}\n`,
   }
+}
+
+/** The drawer folder a fresh profile gets, next to its page. */
+export const firstDrawerFolder = (name: string) => `drawers/${(noteFileName(name) ?? 'Main.md').replace(/\.md$/, '')}`
+
+async function writeNew(file: string, text: string) {
+  await fsp.mkdir(path.dirname(file), { recursive: true })
+  await fsp.writeFile(file, text, { flag: 'wx' }).catch((err) => {
+    if (err.code !== 'EEXIST') throw err
+  })
+}
+
+/** Make `dir` a Workbench folder with its first profile; files that exist are kept. */
+export async function seedWorkbench(dir: string, first: FirstProfile): Promise<void> {
+  const root = path.join(dir, first.id)
+  for (const [rel, text] of Object.entries(profilePages(first.name, ACCENTS[0]))) await writeNew(path.join(root, rel), text)
+  await fsp.mkdir(path.join(root, firstDrawerFolder(first.name)), { recursive: true })
+  await writeNew(path.join(dir, 'settings.yaml'), `# Workbench settings: the profiles (each a folder here), in the switcher's order, and the active one.\nactiveProfile: ${first.id}\nprofiles:\n  - ${first.id}\n`)
 }
