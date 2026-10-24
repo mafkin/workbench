@@ -1251,6 +1251,20 @@ button {
   border-radius: var(--radius);
 }
 
+/* A titled image: the title as a caption under it. */
+.markdown .img-figure {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.markdown .img-caption {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .markdown .img-missing {
   color: var(--warn);
   font-size: 12px;

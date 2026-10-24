@@ -35,6 +35,8 @@ test('a note entry opens formatted', async ({ page }) => {
   await expect(md.locator('a.wikilink', { hasText: 'Deploy plan' })).not.toHaveClass(/missing/)
   await expect(md.locator('a.wikilink', { hasText: 'Missing page' })).toHaveClass(/missing/)
   await expect(md.locator('img')).toHaveAttribute('src', /^blob:/)
+  // An image's title is its caption.
+  await expect(md.locator('.img-caption')).toHaveText('The parts, roughly')
   await expect(md.locator('a', { hasText: 'link' })).toHaveAttribute('target', '_blank')
   await page.screenshot({ path: 'test-results/notes-view.png' })
 })

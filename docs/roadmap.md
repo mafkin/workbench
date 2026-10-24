@@ -46,7 +46,7 @@ Additions in part 1 that the user didn't explicitly choose, but approved in the 
 | 9 | Git per project | Done; merged to `main`; see below |
 | 10 | Assets and media | Done (branch restarted from `main`); merged to `main` with the profile menu, drawers, MCP switches and items (PR #3); see below |
 | 11 | The wiki: pages as configuration | Done; see below |
-| 12 | Workspaces: drawer rail, pinned skills, chats dock | In progress (milestones 1 to 3 done); see below |
+| 12 | Workspaces: drawer rail, pinned skills, chats dock | Done; see below |
 
 The user may pick parts in a different order; ask. For each part, the "Ask" items below are the questions to put to the user before planning. Don't decide them silently.
 
@@ -492,7 +492,7 @@ The user asked how to simplify the workflow and configuration and make Workbench
   - **`templates/project.md`:** `projectPage` in `Wiki.#applyOp` starts every new item page from it when it exists (`fillTemplate` with `{{title}}` and `{{date}}`; the card's frontmatter is merged into the template's; the chosen steps go under its `## Workflow`, added at the end when missing). Without a template a page is `# Title` plus the Workflow list, as before.
   - **Not done:** tags in a note's body are plain text (the strip and the search find them, clicking one in the text does nothing); tags are flat (no `tag:` page; the search is the page); yaml rewrites a template's flow list with spaces (`[ project ]`) when it adds the card's keys; the Claude setup page stays until the user decides (see milestone 3).
 
-### Part 12: workspaces (in progress)
+### Part 12: workspaces (done)
 
 The user showed a reference: a *Chats* window with topic tabs beside a *Workspace* window whose left nav lists a game's chapters (01 Intro screen, 02 Character…), each a rich page with concept art, and a right rail with Files, Skills, MCP and Settings. The ask: a simple wiki that gives chats accurate context, skills tied to tasks, a place for references and assets; Git and Claude setup per drawer; skills pinned to parts of the wiki and to chats.
 
@@ -525,6 +525,9 @@ The user showed a reference: a *Chats* window with topic tabs beside a *Workspac
   - **Where New chat starts** (`DockContext`): the item shown (`at` its address; its folder, or for a page without one its drawer's folder, now the server's rule too), else the drawer (`POST /api/chats` with `drawer` and no `at`: host `drawer:<name>`, cwd the drawer's folder or home). History lists the sessions there.
   - **The page as context:** `ChatSpec.page`/`Chat.page` (saved in `chats.json`); `wikiContext` appends the page's text (frontmatter stripped, 16 KB cap) under "The page I am looking at".
   - The fake claude prints a second `FAKE CLAUDE cwd=… resumed=… short=[…]` line after its args (long values shortened), because the page text makes the args line scroll the banner away in a narrow terminal; the e2e specs read flags from it. Tests: `chats-http.test.ts` (page text and `page`, a drawer's chat, a page without a folder); e2e `chats.spec.ts` and `agents.spec.ts` against the dock (needs-you with the dock folded, Ctrl+J).
+
+- **Milestone 4, built (polish and docs):** an image's title shows as a caption under it in notes (`captioned` in `Markdown.tsx`, inline so it sits in a paragraph); the README's Workspaces section; CLAUDE.md and the roadmap. Recent work does not list chats (the dock and Ctrl+K do; dropped from the plan as not worth a new key kind).
+- **Known gaps:** pinning an installed skill only names it in the prompt (claude loads it anyway; there is no per-session allowlist); a wiki skill pinned on a page loads only in chats started from that page or its drawer; the rail acts on the drawer the nav shows (a project inside it keeps its own Git tab through its steps); chapters are pages, so their order is the nav's (no numbering added by the app); one dock per window, its width fixed (`clamp(300px, 28vw, 400px)`); a step's chat shows in its tab and in the dock's list both; History lists the sessions where New chat would start, not every folder's; a page's text in a chat's instructions is capped at 16 KB and taken when the chat starts.
 
 ## Reference
 

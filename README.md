@@ -173,6 +173,13 @@ You review code. Don't edit files.
 - **Shared folder:** a drawer can have a folder of its own (Drawer settings offers `<notes>/drawers/<name>` in one click) and use other drawers' folders. They're listed under a fixed **Shared** heading, open in the file browser, and claude chats started in the drawer can read them (`--add-dir`, with a line in the system prompt). A project's chats get the folders of the drawer it lives in.
 - Entries move between headings within their drawer only.
 
+### Workspaces (part 12)
+
+- **A drawer is a workspace.** Give it a folder in its settings (the sliders on the rail) and the rail shows **Files** and **Git** for it; its nav lists the pages of the work (chapters, references, projects), which land under `drawers/<Name>/` in the wiki. A page without a folder of its own starts its chats in the drawer's folder, so a chapter page is a place to work from, not just to read.
+- **Pinned skills** tie skills to places: the profile (`skills:` on `index.md`), a drawer (its page) or one page. Chats started there are told to use them; the wiki's own skills (`<wiki>/skills/<name>/SKILL.md`) load only where pinned. See Claude setup.
+- **The chats dock** keeps every chat beside the page you're reading, and a new chat starts where you are, with that page's text in its instructions. See Chats.
+- A good day looks like this: open the chapter you're on, pin the skill the task needs, **New chat**, and claude starts with the page, the drawer's folders, the context notes and the right skills.
+
 ### Themes and backgrounds
 
 - The palette button at the top of the sidebar opens **Theme and background** for the current profile. Work and Personal each have their own; the accent colour stays the profile's.
@@ -460,5 +467,5 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | 10 | Assets and media: gallery view, thumbnails (.blend included), 3D viewer, audio waveforms, image compare, Open in Blender / Godot (done) |
 | after | Drawers; MCP switches; items: blank entries built from removable steps (done) |
 | 11 | The wiki: pages as configuration (done) |
-| 12 | Workspaces: the drawer rail, pinned skills, the chats dock (in progress) |
+| 12 | Workspaces: the drawer rail, pinned skills, the chats dock (done) |
 | later | A Tauri window, if wanted |

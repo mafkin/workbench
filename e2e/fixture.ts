@@ -98,7 +98,7 @@ Ship the **notes** part, then [[Deploy plan]]. Not written yet: [[Missing page]]
 
 \`inline code\` and a [link](https://example.com).
 
-![diagram](img/diagram.svg)
+![diagram](img/diagram.svg "The parts, roughly")
 `
 
 export const DEPLOY_PLAN = `# Deploy plan

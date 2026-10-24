@@ -70,6 +70,17 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   return <code className={`language-${lang}`}>{runs ? runs.map((r, i) => (r.cls ? <span key={i} className={r.cls}>{r.text}</span> : r.text)) : code}</code>
 }
 
+/** An image's title (`![alt](x.png "A caption")`) shows under it, as a caption; inline elements, since the image sits in a paragraph. */
+function captioned(img: React.ReactNode, title?: string): React.ReactNode {
+  if (!title) return img
+  return (
+    <span className="img-figure">
+      {img}
+      <span className="img-caption">{title}</span>
+    </span>
+  )
+}
+
 function NoteImage({ src: raw, alt, title }: { src?: string | Blob; alt?: string; title?: string }) {
   const { profile } = useNotes()
   const notePath = useContext(NotePath)
@@ -96,9 +107,9 @@ function NoteImage({ src: raw, alt, title }: { src?: string | Blob; alt?: string
     }
   }, [profile, target?.path])
 
-  if (!target) return <img src={src} alt={alt} title={title} />
+  if (!target) return captioned(<img src={src} alt={alt} title={title} />, title)
   if (failed) return <span className="img-missing" title={target.path}>{alt || 'Image'}: not found or not allowed</span>
-  return url ? <img src={url} alt={alt} title={title} /> : <span className="img-loading" />
+  return url ? captioned(<img src={url} alt={alt} title={title} />, title) : <span className="img-loading" />
 }
 
 /** A note rendered: GitHub-flavoured Markdown plus [[wiki links]]. Raw HTML is not rendered. */
