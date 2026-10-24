@@ -32,7 +32,7 @@ Some words about this profile.
 
 ## Projects
 - [[Tuohi]]
-- [[projects/IFC Checker|IFC]]
+- [[pages/IFC Checker|IFC]]
 - [Downloads](~/Downloads)
 
 A note between lists.
@@ -54,15 +54,15 @@ A note between lists.
 `
 
 const pages: Record<string, PageRef> = {
-  tuohi: { rel: 'projects/Tuohi.md', name: 'Tuohi', meta: { folder: '~/Projects/tuohi', status: 'paused', pinned: true, icon: 'gamepad-2' }, steps: [{ type: 'files', label: 'All files' }], problems: [] },
-  'projects/ifc checker': { rel: 'projects/IFC Checker.md', name: 'IFC Checker', meta: {}, steps: [], problems: [] },
+  tuohi: { rel: 'pages/Tuohi.md', name: 'Tuohi', meta: { folder: '~/Projects/tuohi', status: 'paused', pinned: true, icon: 'gamepad-2' }, steps: [{ type: 'files', label: 'All files' }], problems: [] },
+  'pages/ifc checker': { rel: 'pages/IFC Checker.md', name: 'IFC Checker', meta: {}, steps: [], problems: [] },
   runbook: { rel: 'Runbook.md', name: 'Runbook', meta: {}, steps: [], problems: [] },
 }
 const ctx: LinkContext = {
   wiki: '~/notes',
   self: '~/notes/index.md',
   page: (t) => Object.values(pages).find((p) => [p.name, p.rel.replace(/\.md$/, '')].some((n) => n.toLowerCase() === t.toLowerCase())) ?? null,
-  linkTo: (rel) => rel.replace(/\.md$/, '').replace(/^projects\//, ''),
+  linkTo: (rel) => rel.replace(/\.md$/, '').replace(/^pages\//, ''),
 }
 
 describe('parsePage', () => {
@@ -74,7 +74,7 @@ describe('parsePage', () => {
     const [projects, reference] = page.sections
     expect(projects.items.map((i) => i.link)).toEqual([
       { kind: 'wiki', target: 'Tuohi', alias: undefined, heading: undefined },
-      { kind: 'wiki', target: 'projects/IFC Checker', alias: 'IFC', heading: undefined },
+      { kind: 'wiki', target: 'pages/IFC Checker', alias: 'IFC', heading: undefined },
       { kind: 'md', label: 'Downloads', dest: '~/Downloads', title: undefined },
     ])
     expect(projects.items[0].line).toBe(7)
@@ -157,8 +157,8 @@ describe('items from links', () => {
 
   it('turns the nav page into entries: pages are items with their card and steps', () => {
     const [tuohi, ifc, downloads] = items(INDEX).map((r) => r.item)
-    expect(tuohi).toEqual({ type: 'folder', label: 'Tuohi', path: '~/Projects/tuohi', status: 'paused', pinned: true, icon: 'gamepad-2', page: 'projects/Tuohi.md', steps: [{ type: 'files', label: 'All files' }] })
-    expect(ifc).toEqual({ type: 'folder', label: 'IFC', id: 'page:projects/IFC Checker.md', page: 'projects/IFC Checker.md', steps: [] })
+    expect(tuohi).toEqual({ type: 'folder', label: 'Tuohi', path: '~/Projects/tuohi', status: 'paused', pinned: true, icon: 'gamepad-2', page: 'pages/Tuohi.md', steps: [{ type: 'files', label: 'All files' }] })
+    expect(ifc).toEqual({ type: 'folder', label: 'IFC', id: 'page:pages/IFC Checker.md', page: 'pages/IFC Checker.md', steps: [] })
     expect(downloads).toEqual({ type: 'folder', label: 'Downloads', path: '~/Downloads', steps: [{ type: 'files', label: 'All files' }] })
   })
 
@@ -222,8 +222,8 @@ describe('items from links', () => {
 
 describe('links from items', () => {
   it('writes every kind back, pages by their shortest name', () => {
-    expect(linkOf({ type: 'folder', label: 'Tuohi', path: '~/t', page: 'projects/Tuohi.md', steps: [] } as never, ctx)).toBe('[[Tuohi]]')
-    expect(linkOf({ type: 'folder', label: 'IFC', page: 'projects/IFC Checker.md', steps: [] } as never, ctx)).toBe('[[IFC Checker|IFC]]')
+    expect(linkOf({ type: 'folder', label: 'Tuohi', path: '~/t', page: 'pages/Tuohi.md', steps: [] } as never, ctx)).toBe('[[Tuohi]]')
+    expect(linkOf({ type: 'folder', label: 'IFC', page: 'pages/IFC Checker.md', steps: [] } as never, ctx)).toBe('[[IFC Checker|IFC]]')
     expect(linkOf({ type: 'folder', label: 'Downloads', path: '~/Downloads', steps: [] }, ctx)).toBe('[Downloads](~/Downloads/)')
     expect(linkOf({ type: 'note', label: 'Runbook', path: '~/notes/Runbook.md' }, ctx)).toBe('[Runbook](Runbook.md)')
     expect(linkOf({ type: 'note', label: 'Runbook', path: '~/deploy/RUNBOOK.md', icon: 'book' }, ctx)).toBe('[Runbook](~/deploy/RUNBOOK.md "book")')
@@ -264,7 +264,7 @@ describe('links from items', () => {
 describe('editing lists', () => {
   it('inserts at an index, at the end, into an empty heading and into a group; prose stays', () => {
     let text = insertItem(INDEX, 0, undefined, 1, '[[New]]')
-    expect(text.split('\n').slice(6, 10)).toEqual(['## Projects', '- [[Tuohi]]', '- [[New]]', '- [[projects/IFC Checker|IFC]]'])
+    expect(text.split('\n').slice(6, 10)).toEqual(['## Projects', '- [[Tuohi]]', '- [[New]]', '- [[pages/IFC Checker|IFC]]'])
     text = insertItem(text, 0, undefined, undefined, '[Last](https://l)')
     expect(text).toContain('- [Downloads](~/Downloads)\n- [Last](https://l)\n\nA note between lists.')
     text = insertItem(text, 1, 4, 0, '[First](https://f)')
@@ -291,7 +291,7 @@ describe('editing lists', () => {
 
   it('moves items between headings, into and out of groups, keeping children', () => {
     const toRef = moveItem(INDEX, { section: 0, index: 0 }, { section: 1, index: 0 })
-    expect(toRef).toContain('## Projects\n- [[projects/IFC Checker|IFC]]')
+    expect(toRef).toContain('## Projects\n- [[pages/IFC Checker|IFC]]')
     expect(toRef).toContain('## Reference\n- [[Tuohi]]\n- [[Runbook]]')
     const later = moveItem(INDEX, { section: 0, index: 0 }, { section: 0, index: 3 })
     expect(later).toContain('- [Downloads](~/Downloads)\n- [[Tuohi]]\n\nA note')

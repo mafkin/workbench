@@ -55,7 +55,7 @@ describe('reading a wiki', () => {
       type: 'folder',
       label: 'Alpha',
       path: '~/alpha',
-      page: 'projects/Alpha.md',
+      page: 'pages/Alpha.md',
       steps: [
         { type: 'files', label: 'All files' },
         { type: 'folder', label: 'sources', path: 'src' },
@@ -63,7 +63,7 @@ describe('reading a wiki', () => {
         { type: 'launch', label: 'build', command: 'make', args: ['all'] },
       ],
     })
-    expect(beta).toEqual({ type: 'folder', label: 'Beta', path: '~/beta', status: 'paused', page: 'projects/Beta.md', steps: [] })
+    expect(beta).toEqual({ type: 'folder', label: 'Beta', path: '~/beta', status: 'paused', page: 'pages/Beta.md', steps: [] })
     expect(gamma).toEqual({ type: 'note', label: 'Gamma', path: '~/gamma.md' })
     expect(p.sections[1].items[0]).toEqual({ type: 'launch', label: 'Echo tool', command: 'echo', args: ['hello'] })
     const [today, ideas, runbook] = p.sections[2].items
@@ -98,7 +98,7 @@ describe('reading a wiki', () => {
     await writeWiki(NOTES(), {
       'index.md': '---\nname: Work\n---\n## X\n- [[Nope]]\n- [[Bad]]\n- [Files](files:)\n- Loose\n\n- [[Alpha]]\n',
       'Bad.md': '---\nstatus: [\n---\n# Bad\n',
-      'projects/Alpha.md': '---\nfolder: ~/alpha\n---\n## Workflow\n- [Today](daily:)\n',
+      'pages/Alpha.md': '---\nfolder: ~/alpha\n---\n## Workflow\n- [Today](daily:)\n',
     })
     await wiki.init({ watch: false })
     const items = work().sections[0].items
@@ -112,6 +112,20 @@ describe('reading a wiki', () => {
     expect(problems.some((p) => p.includes('Bad.md:'))).toBe(true)
     expect(problems.some((p) => p.includes('files:'))).toBe(true)
     expect(problems.some((p) => p.includes('daily'))).toBe(true)
+  })
+
+  it('an older wiki keeps its pages in projects/: a name finds them there after pages/, and new pages go to pages/', async () => {
+    await writeWiki(NOTES(), {
+      'index.md': '---\nname: Work\n---\n## X\n- [[Omega]]\n- [[Beta]]\n',
+      'projects/Omega.md': '---\nfolder: ~/omega\n---\n# Omega\n',
+      'projects/Beta.md': '---\nfolder: ~/old-beta\n---\n# Beta\n',
+      'pages/Beta.md': '---\nfolder: ~/beta\n---\n# Beta\n',
+    })
+    await wiki.init({ watch: false })
+    expect(work().sections[0].items[0]).toMatchObject({ label: 'Omega', path: '~/omega', page: 'projects/Omega.md' })
+    expect(work().sections[0].items[1]).toMatchObject({ label: 'Beta', path: '~/beta', page: 'pages/Beta.md' })
+    await run([{ op: 'addItem', to: { section: 0 }, item: { type: 'item', label: 'Gamma', path: '~/gamma' } }])
+    expect(await read('pages/Gamma.md')).toContain('folder: ~/gamma')
   })
 
   it('a broken index.md keeps the last good profile and refuses edits', async () => {
@@ -135,7 +149,7 @@ describe('nav ops write the nav page, touching only its lines', () => {
     expect(await read('index.md')).toContain('Words about this profile.\n\n## Projects\n<!-- first entry comment -->\n- [[Alpha]]')
   })
 
-  it('adds links of every kind, and items as pages in projects/', async () => {
+  it('adds links of every kind, and items as pages in pages/', async () => {
     await run([
       { op: 'addItem', to: { section: 1 }, item: { type: 'link', label: 'Docs', url: 'https://example.com', icon: 'book' } },
       { op: 'addItem', to: { section: 1 }, item: { type: 'chat', label: 'Shell', agent: 'shell', path: '~/alpha' } },
@@ -149,26 +163,26 @@ describe('nav ops write the nav page, touching only its lines', () => {
       '## Tools\n- Deploy\n  - [Term](<run:cd ~/x && gnome-terminal -- claude>)\n- [Echo tool](<run:echo hello>)\n- [Docs](https://example.com "book")\n- [Shell](<chat:shell ~/alpha>)\n',
     )
     expect(await read('index.md')).toContain('- [Gamma](~/gamma.md)\n- [[Delta]]\n- [[Loose idea]]\n- [Downloads](~/Downloads/)\n')
-    expect(await read('projects/Delta.md')).toBe('---\nfolder: ~/delta\n---\n# Delta\n')
-    expect(await read('projects/Loose idea.md')).toBe('# Loose idea\n')
+    expect(await read('pages/Delta.md')).toBe('---\nfolder: ~/delta\n---\n# Delta\n')
+    expect(await read('pages/Loose idea.md')).toBe('# Loose idea\n')
     const items = work().sections[0].items
-    expect(items[3]).toEqual({ type: 'folder', label: 'Delta', path: '~/delta', page: 'projects/Delta.md', steps: [] })
-    expect(items[4]).toEqual({ type: 'folder', label: 'Loose idea', id: 'page:projects/Loose idea.md', page: 'projects/Loose idea.md', steps: [] })
+    expect(items[3]).toEqual({ type: 'folder', label: 'Delta', path: '~/delta', page: 'pages/Delta.md', steps: [] })
+    expect(items[4]).toEqual({ type: 'folder', label: 'Loose idea', id: 'page:pages/Loose idea.md', page: 'pages/Loose idea.md', steps: [] })
     expect(items[5]).toEqual({ type: 'folder', label: 'Downloads', path: '~/Downloads', steps: [{ type: 'files', label: 'All files' }] })
     expect(work().sections[1].items[0]).toMatchObject({ type: 'group', label: 'Deploy', items: [{ type: 'launch', label: 'Term', cwd: '~/x' }] })
   })
 
-  it('a new item’s page comes from templates/project.md when there is one, its steps under the template’s Workflow', async () => {
+  it('a new item’s page comes from templates/item.md when there is one, its steps under the template’s Workflow', async () => {
     await fsp.mkdir(path.join(NOTES(), 'templates'), { recursive: true })
-    await fsp.writeFile(path.join(NOTES(), 'templates/project.md'), '---\ntags: [project]\n---\n# {{title}}\n\nStarted {{date}}.\n\n## Log\n')
+    await fsp.writeFile(path.join(NOTES(), 'templates/item.md'), '---\ntags: [item]\n---\n# {{title}}\n\nStarted {{date}}.\n\n## Log\n')
     await run([
       { op: 'addItem', to: { section: 0 }, item: { type: 'item', label: 'Delta', path: '~/delta', steps: [{ type: 'files', label: 'All files' }, { type: 'git', label: 'Git' }] } },
       { op: 'addItem', to: { section: 0 }, item: { type: 'item', label: 'Loose idea' } },
     ])
     const today = new Date().toISOString().slice(0, 10)
-    expect(await read('projects/Delta.md')).toBe(`---\ntags: [ project ]\nfolder: ~/delta\n---\n# Delta\n\nStarted ${today}.\n\n## Log\n\n## Workflow\n\n- [All files](files:)\n- [Git](git:)\n`)
-    expect(await read('projects/Loose idea.md')).toBe(`---\ntags: [ project ]\n---\n# Loose idea\n\nStarted ${today}.\n\n## Log\n`)
-    expect(work().sections[0].items[3]).toMatchObject({ label: 'Delta', page: 'projects/Delta.md', steps: [{ type: 'files' }, { type: 'git' }] })
+    expect(await read('pages/Delta.md')).toBe(`---\ntags: [ item ]\nfolder: ~/delta\n---\n# Delta\n\nStarted ${today}.\n\n## Log\n\n## Workflow\n\n- [All files](files:)\n- [Git](git:)\n`)
+    expect(await read('pages/Loose idea.md')).toBe(`---\ntags: [ item ]\n---\n# Loose idea\n\nStarted ${today}.\n\n## Log\n`)
+    expect(work().sections[0].items[3]).toMatchObject({ label: 'Delta', page: 'pages/Delta.md', steps: [{ type: 'files' }, { type: 'git' }] })
     // Workflow.md is a template too, but it is copied in by Add profile steps, not here.
     expect(work().sections[0].items[4]).toMatchObject({ label: 'Loose idea', steps: [] })
   })
@@ -176,8 +190,8 @@ describe('nav ops write the nav page, touching only its lines', () => {
   it('edits a page item (alias, folder, icon), a link, and a group; a page stays a page', async () => {
     await run([{ op: 'updateItem', at: { section: 0, index: 0 }, item: { type: 'item', label: 'Alpha project', path: '~/alpha2', icon: 'rocket' } }])
     expect(await read('index.md')).toContain('- [[Alpha|Alpha project]]\n')
-    expect(await read('projects/Alpha.md')).toContain('---\nfolder: ~/alpha2\nicon: rocket\n---\n# Alpha')
-    expect(work().sections[0].items[0]).toMatchObject({ label: 'Alpha project', path: '~/alpha2', icon: 'rocket', page: 'projects/Alpha.md' })
+    expect(await read('pages/Alpha.md')).toContain('---\nfolder: ~/alpha2\nicon: rocket\n---\n# Alpha')
+    expect(work().sections[0].items[0]).toMatchObject({ label: 'Alpha project', path: '~/alpha2', icon: 'rocket', page: 'pages/Alpha.md' })
     await run([{ op: 'updateItem', at: { section: 0, index: 2 }, item: { type: 'link', label: 'Gamma site', url: 'https://g.example' } }])
     expect(await read('index.md')).toContain('- [Gamma site](https://g.example)\n')
     expect(await status(run([{ op: 'updateItem', at: { section: 0, index: 0 }, item: { type: 'note', label: 'x', path: '~/x.md' } }]))).toBe(400)
@@ -188,7 +202,7 @@ describe('nav ops write the nav page, touching only its lines', () => {
     expect(work().sections[2].items.map((i) => i.label)).toEqual(['Today', 'Alpha', 'Ideas', 'Runbook'])
     await run([{ op: 'deleteItem', at: { section: 2, index: 1 } }])
     expect(work().sections[2].items.map((i) => i.label)).toEqual(['Today', 'Ideas', 'Runbook'])
-    expect(await exists('projects/Alpha.md')).toBe(true)
+    expect(await exists('pages/Alpha.md')).toBe(true)
     expect(await read('index.md')).toContain('<!-- first entry comment -->\n- [[Beta]]')
   })
 
@@ -204,10 +218,10 @@ describe('nav ops write the nav page, touching only its lines', () => {
   it('undo puts the files back, removing a page an op made', async () => {
     const before = await read('index.md')
     await run([{ op: 'addItem', to: { section: 0 }, item: { type: 'item', label: 'Delta', path: '~/delta' } }])
-    expect(await exists('projects/Delta.md')).toBe(true)
+    expect(await exists('pages/Delta.md')).toBe(true)
     await wiki.undo('work', wiki.profile('work').rev)
     expect(await read('index.md')).toBe(before)
-    expect(await exists('projects/Delta.md')).toBe(false)
+    expect(await exists('pages/Delta.md')).toBe(false)
     expect(await status(wiki.undo('work', wiki.profile('work').rev))).toBe(409)
   })
 })
@@ -222,20 +236,20 @@ describe('cards and steps live on the page', () => {
       { op: 'setCard', at, field: 'category', value: 'work' },
       { op: 'setCard', at, field: 'agent', value: 'Reviewer' },
     ])
-    expect(await read('projects/Alpha.md')).toContain('---\nfolder: ~/alpha\nstatus: paused\npinned: true\ndescription: The first project\ncategory: work\nagent: Reviewer\n---\n')
+    expect(await read('pages/Alpha.md')).toContain('---\nfolder: ~/alpha\nstatus: paused\npinned: true\ndescription: The first project\ncategory: work\nagent: Reviewer\n---\n')
     expect(work().sections[0].items[0]).toMatchObject({ status: 'paused', pinned: true, description: 'The first project', category: 'work', agent: 'Reviewer' })
     await run([
       { op: 'setCard', at, field: 'status', value: 'active' },
       { op: 'setCard', at, field: 'pinned', value: false },
       { op: 'setCard', at, field: 'description', value: '' },
     ])
-    expect(await read('projects/Alpha.md')).toContain('---\nfolder: ~/alpha\ncategory: work\nagent: Reviewer\n---\n')
+    expect(await read('pages/Alpha.md')).toContain('---\nfolder: ~/alpha\ncategory: work\nagent: Reviewer\n---\n')
   })
 
   it('step ops edit the Workflow heading, making it when missing', async () => {
     const at = { section: 0, index: 1 }
     await run([{ op: 'addStep', at, step: { type: 'git', label: 'Git' } }])
-    expect(await read('projects/Beta.md')).toBe('---\nfolder: ~/beta\nstatus: paused\n---\n# Beta\n\n## Workflow\n\n- [Git](git:)\n')
+    expect(await read('pages/Beta.md')).toBe('---\nfolder: ~/beta\nstatus: paused\n---\n# Beta\n\n## Workflow\n\n- [Git](git:)\n')
     await run([
       { op: 'addStep', at, step: { type: 'folder', label: 'assets', path: 'assets' }, index: 0 },
       { op: 'addStep', at, step: { type: 'chat', label: 'agent', agent: 'claude' } },
@@ -244,14 +258,14 @@ describe('cards and steps live on the page', () => {
     await run([{ op: 'moveStep', at, from: 2, to: 0 }])
     expect(work().sections[0].items[1]).toMatchObject({ steps: [{ type: 'chat', label: 'shell' }, { type: 'folder', label: 'assets' }, { type: 'git' }] })
     await run([{ op: 'deleteStep', at, index: 1 }])
-    expect(await read('projects/Beta.md')).toContain('## Workflow\n\n- [shell](<chat:shell src/>)\n- [Git](git:)\n')
+    expect(await read('pages/Beta.md')).toContain('## Workflow\n\n- [shell](<chat:shell src/>)\n- [Git](git:)\n')
   })
 
-  it('a folder link becomes a page in projects/ the moment it needs a card or a step', async () => {
+  it('a folder link becomes a page in pages/ the moment it needs a card or a step', async () => {
     await run([{ op: 'addItem', to: { section: 0 }, item: { type: 'folder', label: 'Downloads', path: '~/Downloads' } }])
     await run([{ op: 'addStep', at: { section: 0, index: 3 }, step: { type: 'git', label: 'Git' } }])
     expect(await read('index.md')).toContain('- [[Downloads]]\n')
-    expect(await read('projects/Downloads.md')).toBe('---\nfolder: ~/Downloads\n---\n# Downloads\n\n## Workflow\n\n- [All files](files:)\n- [Git](git:)\n')
+    expect(await read('pages/Downloads.md')).toBe('---\nfolder: ~/Downloads\n---\n# Downloads\n\n## Workflow\n\n- [All files](files:)\n- [Git](git:)\n')
     expect(await status(run([{ op: 'setCard', at: { section: 0, index: 2 }, field: 'pinned', value: true }]))).toBe(400)
   })
 
@@ -259,7 +273,7 @@ describe('cards and steps live on the page', () => {
     await run([{ op: 'addWorkflow', at: { section: 0, index: 0 } }])
     expect(work().sections[0].items[0]).toMatchObject({ steps: [{ label: 'All files' }, { label: 'sources' }, { label: 'readme' }, { label: 'build' }] })
     await run([{ op: 'addWorkflow', at: { section: 0, index: 1 } }])
-    expect(await read('projects/Beta.md')).toContain('## Workflow\n\n- [sources](src/)\n- [readme](README.md)\n- [build](<run:make all>)\n')
+    expect(await read('pages/Beta.md')).toContain('## Workflow\n\n- [sources](src/)\n- [readme](README.md)\n- [build](<run:make all>)\n')
     await run([{ op: 'addStep', at: { section: 0, index: 1 }, step: { type: 'git', label: 'Git' } }, { op: 'setWorkflow', at: { section: 0, index: 1 } }])
     expect(await read('Workflow.md')).toBe('# Workflow\n\nThe steps an item gets with Add profile steps.\n\n- [sources](src/)\n- [readme](README.md)\n- [build](<run:make all>)\n- [Git](git:)\n')
     expect(work().workflow.map((s) => s.label)).toEqual(['sources', 'readme', 'build', 'Git'])
@@ -273,7 +287,7 @@ describe('pinned skills live in frontmatter', () => {
       { op: 'setSkills', at: { section: 0, index: 0 }, names: ['concept-art'] },
     ])
     expect(await read('index.md')).toContain('---\nname: Work\naccent: "#7d93ab"\nskills:\n  - review\n  - deploy\n---\n')
-    expect(await read('projects/Alpha.md')).toContain('---\nfolder: ~/alpha\nskills:\n  - concept-art\n---\n')
+    expect(await read('pages/Alpha.md')).toContain('---\nfolder: ~/alpha\nskills:\n  - concept-art\n---\n')
     expect(work().skills).toEqual(['review', 'deploy'])
     expect(work().sections[0].items[0]).toMatchObject({ label: 'Alpha', skills: ['concept-art'] })
     // Without drawers the one drawer is the profile: the same key.
@@ -285,7 +299,7 @@ describe('pinned skills live in frontmatter', () => {
     expect(work().drawers?.map((d) => d.skills)).toEqual([undefined, ['godot-scenes']])
     await run([{ op: 'setSkills', names: [] }, { op: 'setSkills', at: { section: 0, index: 0 }, names: [] }])
     expect(await read('index.md')).not.toContain('skills')
-    expect(await read('projects/Alpha.md')).toBe('---\nfolder: ~/alpha\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [sources](src/)\n- [readme](README.md)\n- [build](<run:make all>)\n')
+    expect(await read('pages/Alpha.md')).toBe('---\nfolder: ~/alpha\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [sources](src/)\n- [readme](README.md)\n- [build](<run:make all>)\n')
     expect(await status(run([{ op: 'setSkills', drawer: 5, names: ['x'] }]))).toBe(400)
   })
 })
@@ -326,8 +340,8 @@ describe('the profile’s own fields', () => {
     expect(await exists('agents/Reviewer.md')).toBe(false)
     expect(await read('agents/Critic.md')).toContain('model: sonnet')
     expect(await read('index.md')).toContain('- [Review](chat:Critic)\n')
-    expect(await read('projects/Alpha.md')).toContain('agent: Critic\n')
-    expect(await read('projects/Beta.md')).toContain('- [review](chat:Critic)\n')
+    expect(await read('pages/Alpha.md')).toContain('agent: Critic\n')
+    expect(await read('pages/Beta.md')).toContain('- [review](chat:Critic)\n')
     await run([
       { op: 'deleteItem', at: { section: 1, index: 1 } },
       { op: 'setCard', at: { section: 0, index: 0 }, field: 'agent', value: null },
@@ -350,7 +364,7 @@ describe('drawers are pages in drawers/', () => {
 
     await run([{ op: 'setShared', at: { section: 0, index: 1 }, drawer: 1, on: true }])
     expect(await read('drawers/Game dev.md')).toBe('# Game dev\n\n## Projects\n\n- [[Beta]]\n')
-    expect(work().drawers?.[1].sections[0].items[0]).toMatchObject({ label: 'Beta', page: 'projects/Beta.md' })
+    expect(work().drawers?.[1].sections[0].items[0]).toMatchObject({ label: 'Beta', page: 'pages/Beta.md' })
     await run([{ op: 'addSection', drawer: 1, title: 'Tools' }, { op: 'addItem', to: { drawer: 1, section: 1 }, item: { type: 'link', label: 'Godot docs', url: 'https://docs.godotengine.org' } }])
     expect(work().drawers?.[1].sections[1].items[0].label).toBe('Godot docs')
     await run([{ op: 'setShared', at: { section: 0, index: 1 }, drawer: 1, on: false }])
@@ -457,11 +471,11 @@ describe('profiles and settings', () => {
       expect(await w.migrate()).toEqual({ moved: ['work'] })
       expect(w.legacy).toBe(false)
       expect(await fsp.readFile(path.join(lhome, 'notes/index.md'), 'utf8')).toBe('---\nname: Work\naccent: "#7d93ab"\n---\n## Projects\n\n- [[Alpha]]\n- [Today](daily:)\n')
-      expect(await fsp.readFile(path.join(lhome, 'notes/projects/Alpha.md'), 'utf8')).toBe('---\nfolder: ~/alpha\nstatus: paused\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [readme](README.md)\n')
+      expect(await fsp.readFile(path.join(lhome, 'notes/pages/Alpha.md'), 'utf8')).toBe('---\nfolder: ~/alpha\nstatus: paused\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [readme](README.md)\n')
       expect(await fsp.readFile(path.join(lhome, 'notes/agents/Reviewer.md'), 'utf8')).toBe('---\nmodel: opus\n---\n')
       expect(await fsp.readFile(path.join(legacy, 'cfg/settings.yaml'), 'utf8')).toContain('profiles:\n  work: ~/notes\n')
       await fsp.access(path.join(legacy, 'cfg/profiles/work.yaml.bak'))
-      expect(w.profile('work').profile?.sections[0].items[0]).toMatchObject({ label: 'Alpha', path: '~/alpha', status: 'paused', page: 'projects/Alpha.md' })
+      expect(w.profile('work').profile?.sections[0].items[0]).toMatchObject({ label: 'Alpha', path: '~/alpha', status: 'paused', page: 'pages/Alpha.md' })
       expect(w.profile('work').profile?.workflow.map((s) => s.label)).toEqual(['readme'])
       expect(w.profile('work').profile?.agents?.Reviewer.model).toBe('opus')
     } finally {

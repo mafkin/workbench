@@ -11,7 +11,7 @@ const tab = (page: Page, name: string) => tabs(page).getByRole('tab', { name, ex
 // The item's own page is the first tab; Git and Claude setup are the rail's, not tabs.
 const tabNames = async (page: Page) => (await tabs(page).locator('.step-tab:not(.add)').allInnerTexts()).map((t) => t.split('\n')[0].trim())
 const row = (page: Page, name: string) => page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name, exact: true })
-const alphaPage = () => fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')
+const alphaPage = () => fsp.readFile(wikiPage('pages/Alpha.md'), 'utf8')
 
 async function stepMenu(page: Page, name: string, item: string) {
   await tabs(page).locator('.step-tab', { hasText: name }).click({ button: 'right' })
@@ -121,7 +121,7 @@ test('steps can be edited, reordered and removed, built-in ones too; Add profile
 
 test('git: and setup: lines in a page (from before the rail) get no tab, and the other tabs still work by their own index', async ({ page }) => {
   const text = await alphaPage()
-  await fsp.writeFile(wikiPage('projects/Alpha.md'), text.replace('- [All files](files:)\n', '- [All files](files:)\n- [Git](git:)\n- [Claude setup](setup:)\n'))
+  await fsp.writeFile(wikiPage('pages/Alpha.md'), text.replace('- [All files](files:)\n', '- [All files](files:)\n- [Git](git:)\n- [Claude setup](setup:)\n'))
   await entry(page, 'Alpha').click()
   await expect.poll(() => tabNames(page)).toEqual(['Page', 'All files', 'sources', 'readme', 'build'])
   // Removing a tab after the hidden lines removes the right line.

@@ -7,12 +7,12 @@ import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
 // For a step, paths are inside the item's folder (or home, for an item without one).
 const STEP_HINTS: Partial<Record<AnyType, string>> = {
   files: 'The item’s folder in the file browser.',
-  folder: 'A folder in the project, like assets. It opens in the browser.',
-  note: 'A note in the project, like docs/design.md. It opens in place, with Edit.',
-  report: 'An HTML file in the project, like reports/index.html. Shown in the tab, with the files next to it.',
-  file: 'One file in the project, like renders/latest.png. Shown large in the tab.',
-  chat: 'Claude (or your shell) in a tab, in the project folder or a folder inside it. Keeps running when you close the window.',
-  launch: 'Runs in the project folder; arguments can be paths inside it.',
+  folder: 'A folder in the item’s folder, like assets. It opens in the browser.',
+  note: 'A note in the item’s folder, like docs/design.md. It opens in place, with Edit.',
+  report: 'An HTML file in the item’s folder, like reports/index.html. Shown in the tab, with the files next to it.',
+  file: 'One file in the item’s folder, like renders/latest.png. Shown large in the tab.',
+  chat: 'Claude (or your shell) in a tab, in the item’s folder or a folder inside it. Keeps running when you close the window.',
+  launch: 'Runs in the item’s folder; arguments can be paths inside it.',
   link: 'A web address. The tab opens it in your browser.',
 }
 
@@ -280,7 +280,7 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
               <label className="field">
                 <span>Folder (optional)</span>
                 <input className="mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder={step ? 'docs' : '~'} name="path" />
-                {fieldError('path') ?? pathHint() ?? <span className="hint">{step ? 'Inside the project; empty is the project folder.' : 'Empty is your home folder.'}</span>}
+                {fieldError('path') ?? pathHint() ?? <span className="hint">{step ? 'Inside the item’s folder; empty is the folder itself.' : 'Empty is your home folder.'}</span>}
               </label>
               <label className="field">
                 <span>Arguments (optional)</span>

@@ -133,7 +133,7 @@ describe('context folders', { timeout: 15_000 }, () => {
     expect(prompt).toContain('Where things go')
     // The wiki comes with the context, and the project's page is named.
     expect(prompt).toContain(`${notes} holds my notes and the pages`)
-    expect(prompt).toContain(`This project's page is ${path.join(notes, 'projects/Alpha.md')}`)
+    expect(prompt).toContain(`This project's page is ${path.join(notes, 'pages/Alpha.md')}`)
     expect(args.slice(args.indexOf('--add-dir') + 1)).toEqual([...['context', 'knowledge', 'processes', 'inbox'].map((f) => path.join(notes, f)), notes])
     const shell = (await call<Chat>('POST', '/api/chats', { profile: 'work', rev, at: { section: 1, index: 0 }, agent: 'shell' })).body
     expect(shell.context).toBe(false)

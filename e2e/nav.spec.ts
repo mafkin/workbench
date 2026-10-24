@@ -78,7 +78,7 @@ test('adding an entry through the dialog', async ({ page }) => {
   await expect(dialog).toHaveCount(0)
   await expect(entry(page, 'Docs site')).toBeVisible()
   expect(await indexMd()).toContain('- [[Docs site]]\n')
-  expect(await fsp.readFile(wikiPage('projects/Docs site.md'), 'utf8')).toBe('# Docs site\n')
+  expect(await fsp.readFile(wikiPage('pages/Docs site.md'), 'utf8')).toBe('# Docs site\n')
 })
 
 test('a hand edit to index.md shows up live', async ({ page }) => {

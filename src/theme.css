@@ -1781,26 +1781,26 @@ button {
 
 /* ── Projects and workflow steps ────────────────────── */
 
-.project-head {
+.item-head {
   display: flex;
   align-items: baseline;
   gap: 14px;
   flex-wrap: wrap;
 }
 
-.project-head .page-title {
+.item-head .page-title {
   margin-bottom: 0;
 }
 
-.project-head {
+.item-head {
   align-items: center;
 }
 
-.project-head .spacer {
+.item-head .spacer {
   flex: 1;
 }
 
-.project-head .path {
+.item-head .path {
   padding: 3px 8px;
   font-size: 12px;
   color: var(--muted);
@@ -1881,7 +1881,7 @@ button {
 
 /* Nav: project marks */
 
-.project-marks {
+.item-marks {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2016,11 +2016,11 @@ button {
 }
 
 /* Without a tab row, the actions sit by the title. */
-.project-head .tab-action {
+.item-head .tab-action {
   margin-bottom: 0;
 }
 
-.project-head .tab-action + .tab-action:not(.more) {
+.item-head .tab-action + .tab-action:not(.more) {
   margin-left: -8px;
 }
 
@@ -2736,7 +2736,7 @@ button {
   flex: none;
 }
 
-.chat-mark + .project-marks {
+.chat-mark + .item-marks {
   margin-left: 6px;
 }
 
@@ -4298,7 +4298,7 @@ button {
   margin-left: 6px;
 }
 
-.server-mark + .project-marks {
+.server-mark + .item-marks {
   margin-left: 6px;
 }
 
@@ -4346,14 +4346,14 @@ button {
   color: var(--muted);
 }
 
-.servers-project {
+.servers-item {
   margin: 0 0 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
 }
 
-.servers-project h2 {
+.servers-item h2 {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -4365,12 +4365,12 @@ button {
   font-weight: 600;
 }
 
-.servers-project h2 .mono {
+.servers-item h2 .mono {
   color: var(--faint);
   font-weight: 400;
 }
 
-.servers-project ul {
+.servers-item ul {
   margin: 0;
   padding: 4px;
   list-style: none;
@@ -5054,7 +5054,7 @@ button {
   margin-left: 6px;
 }
 
-.git-mark + .project-marks {
+.git-mark + .item-marks {
   margin-left: 6px;
 }
 

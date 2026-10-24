@@ -131,12 +131,12 @@ export function ProfileDialog({ active, profiles, addFirst, run, onSwitch, onCha
           <label className="field">
             <span>Home folder</span>
             <input className="mono" name="home" value={home} onChange={(e) => setHome(e.target.value)} placeholder="~/work" disabled={!p} />
-            <span className="hint">The file browser may open it and everything inside. Empty: only the notes folder and projects.</span>
+            <span className="hint">The file browser may open it and everything inside. Empty: only the notes folder and the items’ folders.</span>
           </label>
           <div className="field">
             <span>Wiki folder</span>
             <span className="mono wiki-folder">{p?.notes ?? '—'}</span>
-            <span className="hint">The profile’s pages (index.md, projects, drawers, agents), notes, daily notes and context live here. To move it, move the folder and change its line in settings.yaml.</span>
+            <span className="hint">The profile’s pages (index.md, pages, drawers, agents), notes, daily notes and context live here. To move it, move the folder and change its line in settings.yaml.</span>
           </div>
           <div className="form-actions">
             <button type="submit" className="btn primary" disabled={!p}>

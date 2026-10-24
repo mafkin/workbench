@@ -82,12 +82,12 @@ export default function ServersView({ profileId, onScan, toast }: Props) {
 
   return (
     <div className="page servers-page">
-      <div className="page-kicker">Projects</div>
+      <div className="page-kicker">This profile</div>
       <h1 className="page-title">
         <Server size={22} className="icon" /> Servers
       </h1>
       <p className="page-sub">
-        What runs in this profile's projects: your programs listening on a port, found by the folder they run in, and the servers a project names in{' '}
+        What runs in this profile's folders: your programs listening on a port, found by the folder they run in, and the servers an item names in{' '}
         <span className="mono">servers:</span>. Checked every 3 s.
       </p>
       <div className="servers-bar">
@@ -98,9 +98,9 @@ export default function ServersView({ profileId, onScan, toast }: Props) {
         </button>
       </div>
 
-      {scan && busy.length === 0 && <p className="servers-none">Nothing is running in this profile's projects.</p>}
+      {scan && busy.length === 0 && <p className="servers-none">Nothing is running in this profile's folders.</p>}
       {busy.map((p) => (
-        <section key={p.path} className="servers-project" aria-label={p.label}>
+        <section key={p.path} className="servers-item" aria-label={p.label}>
           <h2>
             {p.label} <span className="mono">{p.path}</span>
           </h2>

@@ -58,7 +58,7 @@ Inside a wiki:
 | --- | --- |
 | `index.md` | The profile in its frontmatter (`name`, `accent`, `theme`, `background`, `home`, `categories`, `openWith`, `mcpOff`). Its body is the nav: `##` headings with link lists, one nested list level for groups. With drawers, the body is a `## Drawers` list of drawer pages instead. |
 | `drawers/<Name>.md` | A drawer: frontmatter `logo`, `folder`, `uses`; the body is its nav, as in `index.md`. |
-| `projects/<Name>.md`, or any page linked as `[[Name]]` from the nav | An item. The frontmatter is its card: `folder`, `status` (paused, done, archived), `category`, `pinned`, `agent`, `icon`, `description`, `servers`, and `id` for an item without a folder. `## Workflow` lists its tabs. The rest of the page is yours: the page itself shows when it has no tabs. |
+| `pages/<Name>.md` (`drawers/<Drawer>/<Name>.md` in a drawer with a page; `projects/<Name>.md` in wikis made before the rename, still read), or any page linked as `[[Name]]` from the nav | An item. "Projects" is only a heading in the nav, not a kind of thing. The frontmatter is its card: `folder`, `status` (paused, done, archived), `category`, `pinned`, `agent`, `icon`, `description`, `servers`, and `id` for an item without a folder. `## Workflow` lists its tabs. The rest of the page is yours: the page itself shows when it has no tabs. |
 | `Workflow.md` | The profile steps: the list **Add profile steps** copies into a page and **Save as profile steps** writes here. |
 | `agents/<Name>.md` | An agent profile: frontmatter `model`, `effort`, `permission`, `prompt`, `folders`, `allowedTools`, `disallowedTools`, `mcp` (or `agent` for a Claude Code agent); the body is the instructions. |
 | `templates/page.md`, `templates/daily.md` | Templates for new notes and daily notes; `{{title}}` and `{{date}}` are filled in. |
@@ -160,7 +160,7 @@ You review code. Don't edit files.
 - **Right-click** any heading or entry for the same actions.
 - **Launchers** and **links** start or open from the small button at the end of their row (▶ or ↗), without a shell; their names are just text. Folders and notes open in the main pane when you click them.
 - **Alt+←** or the small arrow in the page's top-left corner goes back to the previous page. The **WORKBENCH** label in the sidebar is Home.
-- **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
+- **Home** shows what you opened last (items and their tabs, notes, folders) and today's note. It doesn't repeat the nav.
 
 ### Drawers
 
@@ -196,7 +196,7 @@ You review code. Don't edit files.
   - Entries made before items (folders, notes, launchers, links, chats, daily) keep working as they are. A `type: folder` entry is an item too.
 - The top of an item's page is its card: the heading it sits under, the agent and skills chips for its chats, the title with a **pin** and the folder, and a **description** you click to edit. Nothing else: no status, category, dates or git line (they went in part 12's cleanup).
 - **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, **Mark** it paused or done, or archive it; that is where status lives. `category:` and `categories:` are still read from the files but no longer shown.
-- Below the card are its tabs. The first is **Page**: the item's own page (`projects/<Name>.md`), with its properties, its text (a log, links, anything) and the pages that mention it, editable in place. An item with one tab shows that tab on the whole page and no row, so the Page tab appears from two on.
+- Below the card are its tabs. The first is **Page**: the item's own page (`pages/<Name>.md`), with its properties, its text (a log, links, anything) and the pages that mention it, editable in place. An item with one tab shows that tab on the whole page and no row, so the Page tab appears from two on.
 - The steps:
   - **File browser** (`files`) shows the item's folder. `git:` and `setup:` lines from before part 12 are kept in the page but get no tab: Git and Claude setup are on the rail.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
@@ -206,7 +206,7 @@ You review code. Don't edit files.
   - A **launcher** step starts its program in the item's folder (or home), and a **link** step opens its address in your browser.
 - Steps are yours to name: **+** adds one (relative paths are inside the item's folder, else home). Right-click a tab to edit or remove it, and drag tabs to reorder them.
 - The profile's `Workflow.md` is a template. From a tab's right-click menu, **Add profile steps** adds those the item doesn't have yet, **Save as profile steps** makes this item's steps the template, and **Open Workflow.md** opens the template as a note.
-- A `<notes>/templates/project.md`, when you make one, is the start of every new item's page (`{{title}}` and `{{date}}` filled in; its frontmatter is kept under the card's fields, and the steps you picked go under its `## Workflow`, added at the end when the template has none).
+- A `<notes>/templates/item.md` (or `project.md`, its old name), when you make one, is the start of every new item's page (`{{title}}` and `{{date}}` filled in; its frontmatter is kept under the card's fields, and the steps you picked go under its `## Workflow`, added at the end when the template has none).
 - An older project without `steps:` shows All files, Git (in a repository), Claude setup and the workflow. Its first step change writes those tabs as its own `steps:`.
 - Note steps also count as notes, so they show up in search and wiki links.
 
@@ -437,7 +437,6 @@ Server code is TypeScript that Node runs directly, so there is no build step for
 | `server/servers.ts`, `server/procfs.ts` | servers running in projects: listening sockets and their processes from `/proc`, declared servers, health checks, Stop |
 | `server/thumbs.ts`, `server/open-with.ts` | gallery thumbnails (the cache, .blend previews, a Godot project's icon); the program a file opens in |
 | `server/git.ts`, `shared/git.ts` | git per project: status, diffs and hunks, stage, discard with Undo, commit, Draft, branches, stash, fetch, pull, push, conflicts, history, the nav's marks |
-| `server/project-dates.ts` | a project's created and updated dates |
 | `server/backgrounds.ts` | background pictures: copies in the config folder, listed, served and deleted by name |
 | `server/chats.ts`, `server/session-hook.mjs`, `server/claude-sessions.ts`, `server/agents.ts` | chats in pseudo-terminals (node-pty, a headless xterm per chat), the saved chat list, following `/clear`; reading claude's transcripts for History; agent profiles as claude flags |
 | `server/context.ts` | context folders: status, setup, what a chat is told, handoffs and files into the inbox |

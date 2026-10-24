@@ -47,7 +47,7 @@ test('the rail pins a skill to the drawer; the card pins one to the page; a chat
   await expect(menu.getByRole('menuitemcheckbox', { name: '/review' })).toHaveAttribute('aria-checked', 'false')
   await menu.getByRole('menuitemcheckbox', { name: '/concept-art' }).click()
   await expect(chip(page)).toHaveText('concept-art')
-  await expect.poll(() => fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')).toContain('skills:\n  - concept-art\n')
+  await expect.poll(() => fsp.readFile(wikiPage('pages/Alpha.md'), 'utf8')).toContain('skills:\n  - concept-art\n')
   await page.screenshot({ path: 'test-results/skills-chip.png' })
 
   // A chat from the page is told both, and loads the wiki skill as a plugin.
@@ -59,5 +59,5 @@ test('the rail pins a skill to the drawer; the card pins one to the page; a chat
   await chip(page).click()
   await page.getByRole('menu').getByRole('menuitemcheckbox', { name: '/concept-art' }).click()
   await expect(chip(page)).toHaveText('Skills')
-  await expect.poll(() => fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')).not.toContain('skills:')
+  await expect.poll(() => fsp.readFile(wikiPage('pages/Alpha.md'), 'utf8')).not.toContain('skills:')
 })

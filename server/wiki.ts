@@ -373,7 +373,7 @@ export class Wiki extends EventEmitter {
       if (!t) return null
       if (t.includes('/')) return pages.get(t) ?? null
       const list = byName.get(t) ?? []
-      // A name matches the page in projects/ first, then the root, then the shortest path.
+      // A name matches the page in pages/ first (projects/ in older wikis), then the root, then the shortest path.
       return [...list].sort((a, b) => rank(a.rel) - rank(b.rel) || a.rel.length - b.rel.length)[0] ?? null
     }
     const linkTo = (rel: string) => {
@@ -574,7 +574,7 @@ export class Wiki extends EventEmitter {
   // Watching
 
   #watch(e: Entry) {
-    const dirs = new Set([e.root, ...['drawers', 'projects', 'agents'].map((d) => path.join(e.root, d)), ...[...e.files.keys()].map((f) => path.dirname(f))])
+    const dirs = new Set([e.root, ...['drawers', 'pages', 'projects', 'agents'].map((d) => path.join(e.root, d)), ...[...e.files.keys()].map((f) => path.dirname(f))])
     for (const d of dirs) this.#folders.watch(d)
   }
 
@@ -713,11 +713,11 @@ export class Wiki extends EventEmitter {
       for (let n = 2; view.pages.has(lower(noExt(rel))) || draft.has(path.join(root, rel)); n++) rel = `${dir}/${file.replace(/\.md$/, ` ${n}.md`)}`
       return rel
     }
-    /** Where a drawer's new pages go: `drawers/<Name>/` once the drawer has a page (part 12), else `projects/`. */
+    /** Where a drawer's new pages go: `drawers/<Name>/` once the drawer has a page (part 12), else `pages/` (older wikis keep theirs in `projects/`). */
     const pageDir = (drawer: number | undefined): string => {
-      if (!profile.drawers?.length) return 'projects'
+      if (!profile.drawers?.length) return 'pages'
       const file = view.navFiles[drawer ?? 0]
-      return file ? `drawers/${nameOf(path.relative(root, file))}` : 'projects'
+      return file ? `drawers/${nameOf(path.relative(root, file))}` : 'pages'
     }
     /** A link to a page made in this batch: its name when no other page has it, else its path. */
     const newLink = (rel: string, label: string) => {
@@ -728,12 +728,12 @@ export class Wiki extends EventEmitter {
       return name === label ? `[[${to}]]` : `[[${to}|${label}]]`
     }
     /**
-     * A new item's page: `templates/project.md` with `{{title}}` and `{{date}}`
+     * A new item's page: `templates/item.md` (or `templates/project.md`, its old name) with `{{title}}` and `{{date}}`
      * filled (its frontmatter is kept under the card's), else a title line;
      * the steps go under `## Workflow`, made at the end when the template has none.
      */
-    const projectPage = (label: string, steps: string[], meta: Record<string, unknown>): string => {
-      const template = draft.get(path.join(root, 'templates/project.md'))
+    const itemPage = (label: string, steps: string[], meta: Record<string, unknown>): string => {
+      const template = draft.get(path.join(root, 'templates/item.md')) ?? draft.get(path.join(root, 'templates/project.md'))
       let body: string
       if (template === null) body = `# ${label}\n${steps.length ? `\n## Workflow\n\n${steps.join('\n')}\n` : ''}`
       else {
@@ -751,7 +751,7 @@ export class Wiki extends EventEmitter {
       }
       return md.setMetas(body, meta)
     }
-    /** The item at `at` as a page: made in projects/ from a folder link when it has none. */
+    /** The item at `at` as a page: made in pages/ from a folder link when it has none. */
     const pageOf = (at: ItemAddr): { item: Folder & { page: string }; abs: string } => {
       const item = getItem(profile, at)
       if (!item) throw new OpError('No such entry')
@@ -759,7 +759,7 @@ export class Wiki extends EventEmitter {
       if (item.page) return { item: item as Folder & { page: string }, abs: path.join(root, item.page) }
       const rel = freeRel(pageDir(at.drawer), item.label)
       const steps = (item.steps ?? []).map((s) => `- ${md.linkOf(s, linkCtx, true)}`)
-      draft.create(path.join(root, rel), projectPage(item.label, steps, { folder: item.path, icon: item.icon }))
+      draft.create(path.join(root, rel), itemPage(item.label, steps, { folder: item.path, icon: item.icon }))
       setNav(at.drawer, (t) => md.replaceLink(t, at.section, at.group, at.index, newLink(rel, item.label)))
       return { item: { ...item, page: rel }, abs: path.join(root, rel) }
     }
@@ -816,7 +816,7 @@ export class Wiki extends EventEmitter {
           const input = op.item as { label: string; path?: string; icon?: string; steps?: ItemInput[] }
           const rel = freeRel(pageDir(op.to.drawer), input.label)
           const steps = (input.steps ?? []).map((s) => `- ${stepLink(s)}`)
-          draft.create(path.join(root, rel), projectPage(input.label, steps, { folder: input.path, icon: input.icon }))
+          draft.create(path.join(root, rel), itemPage(input.label, steps, { folder: input.path, icon: input.icon }))
           link = newLink(rel, input.label)
         } else link = md.linkOf(parseNav(op.item), linkCtx)
         setNav(op.to.drawer, (t) => md.insertItem(t, op.to.section, op.to.group, op.index, link))
@@ -1141,8 +1141,8 @@ function agentUsers(profile: ProfileT, name: string): string[] {
   return out
 }
 
-/** Pages in projects/ first, then the wiki's root, then anything else. */
-const rank = (rel: string) => (lower(rel).startsWith('projects/') ? 0 : rel.includes('/') ? 2 : 1)
+/** Pages in pages/ first, then projects/ (where older wikis keep them), then the wiki's root, then anything else. */
+const rank = (rel: string) => (lower(rel).startsWith('pages/') ? 0 : lower(rel).startsWith('projects/') ? 1 : rel.includes('/') ? 3 : 2)
 
 const lineLabel = (it: md.PageItem) => (it.link.kind === 'wiki' ? (it.link.alias ?? it.link.target) : it.link.label)
 

@@ -29,13 +29,13 @@ async function addItem(page: Page, label: string) {
   await entry(page, label).click()
 }
 
-test('a new item is a page in projects/; its first step fills the page, the second brings the tab row', async ({ page }) => {
+test('a new item is a page in pages/; its first step fills the page, the second brings the tab row', async ({ page }) => {
   await addItem(page, 'Board')
   // Without tabs, the page itself shows, with the ways to add one.
   await expect(page.locator('.item-page .markdown h1')).toHaveText('Board')
   await expect(tabs(page)).toHaveCount(0)
   expect(await indexMd()).toContain('- [[Board]]\n')
-  expect(await wikiText('projects/Board.md')).toBe('# Board\n')
+  expect(await wikiText('pages/Board.md')).toBe('# Board\n')
   await page.screenshot({ path: 'test-results/item-blank.png' })
 
   // A note: no folder needed, and it fills the page.
@@ -50,7 +50,7 @@ test('a new item is a page in projects/; its first step fills the page, the seco
   await page.screenshot({ path: 'test-results/item-one-step.png' })
 
   // The file browser shows the item's folder: the item has none, so the dialog asks for it.
-  await page.locator('.project-head').getByRole('button', { name: 'Add step' }).click()
+  await page.locator('.item-head').getByRole('button', { name: 'Add step' }).click()
   const files = page.getByRole('form', { name: 'Add step' })
   await files.getByRole('radio', { name: 'File browser' }).click()
   await expect(files.locator('input[name=label]')).toHaveValue('All files')
@@ -60,7 +60,7 @@ test('a new item is a page in projects/; its first step fills the page, the seco
   await files.getByRole('button', { name: 'Add' }).click()
   await expect(files).toHaveCount(0)
   await expect.poll(() => tabNames(page)).toEqual(['Page', 'ideas', 'All files'])
-  expect(await wikiText('projects/Board.md')).toBe('---\nfolder: ~/alpha\n---\n# Board\n\n## Workflow\n\n- [ideas](~/notes/Ideas.md)\n- [All files](files:)\n')
+  expect(await wikiText('pages/Board.md')).toBe('---\nfolder: ~/alpha\n---\n# Board\n\n## Workflow\n\n- [ideas](~/notes/Ideas.md)\n- [All files](files:)\n')
   await tabs(page).getByRole('tab', { name: 'All files' }).click()
   await expect(page.getByRole('tree', { name: 'Files' }).getByRole('treeitem', { name: 'README.md' })).toBeVisible()
   await page.screenshot({ path: 'test-results/item-two-steps.png' })
@@ -75,7 +75,7 @@ test('removing a step removes only the tab: the file stays, Undo brings it back,
   await dialog.getByRole('button', { name: 'Add' }).click()
   await page.getByRole('button', { name: 'New chat' }).waitFor()
 
-  await page.locator('.project-head').getByRole('button', { name: 'Add step' }).click()
+  await page.locator('.item-head').getByRole('button', { name: 'Add step' }).click()
   const link = page.getByRole('form', { name: 'Add step' })
   await link.getByRole('radio', { name: 'Link' }).click()
   await link.locator('input[name=label]').fill('board')
@@ -108,12 +108,12 @@ test('an item with a folder adds the file browser in one click; a folder step ne
   await dialog.getByRole('button', { name: 'Add' }).click()
   await page.getByRole('button', { name: 'Edit navigation' }).click()
   await entry(page, 'Alpha again').click()
-  expect(await wikiText('projects/Alpha again.md')).toBe('---\nfolder: ~/alpha\n---\n# Alpha again\n')
+  expect(await wikiText('pages/Alpha again.md')).toBe('---\nfolder: ~/alpha\n---\n# Alpha again\n')
 
   await page.locator('.item-page').getByRole('button', { name: 'File browser' }).click()
   await expect(page.getByRole('tree', { name: 'Files' })).toBeVisible()
   await expect(tabs(page)).toHaveCount(0)
-  await page.locator('.project-head').getByRole('button', { name: 'Add step' }).click()
+  await page.locator('.item-head').getByRole('button', { name: 'Add step' }).click()
   const step = page.getByRole('form', { name: 'Add step' })
   await step.getByRole('radio', { name: 'Folder' }).click()
   await expect(step.locator('input[name=itemFolder]')).toHaveCount(0)

@@ -275,7 +275,7 @@ export function NavPanel(props: Props) {
           <button className="icon-btn" onClick={onLook} title="Theme and background" aria-label="Theme and background">
             <Palette size={13} />
           </button>
-          <button className={cx('icon-btn', props.serversActive && 'on')} onClick={props.onServers} title="Servers running in your projects" aria-label="Servers" aria-pressed={props.serversActive}>
+          <button className={cx('icon-btn', props.serversActive && 'on')} onClick={props.onServers} title="Servers running in your folders" aria-label="Servers" aria-pressed={props.serversActive}>
             <Server size={13} />
           </button>
           <button
@@ -863,7 +863,7 @@ function ItemRow({ addr, item }: { addr: ItemAddr; item: NavItem }) {
       {!ctx.editing && shown.type === 'folder' && !!shown.page && <ServerMark item={shown} />}
       {!ctx.editing && shown.type === 'folder' && !!shown.page && <GitMarkView item={shown} />}
       {!ctx.editing && shown.type === 'folder' && !!shown.page && (
-        <span className="project-marks">
+        <span className="item-marks">
           {shown.pinned && <Pin size={11} className="pin-mark" aria-label="Pinned" />}
           <span className={cx('status-dot', shown.status ?? 'active')} title={shown.status ?? 'active'} />
         </span>

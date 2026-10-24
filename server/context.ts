@@ -294,7 +294,7 @@ export async function wikiContext(profile: Profile, home: string, page?: string)
   const parts = [
     `# My wiki (Workbench, profile ${profile.name})`,
     [
-      `${root} holds my notes and the pages that configure Workbench: index.md (the nav), projects/*.md (one per project: its frontmatter is the card, its ## Workflow the tabs), Workflow.md and agents/*.md.`,
+      `${root} holds my notes and the pages that configure Workbench: index.md (the nav), pages/*.md and drawers/*/*.md (one per item: its frontmatter is the card, its ## Workflow the tabs), Workflow.md and agents/*.md.`,
       'Markdown there is mine; [[Name]] links name pages. Read them when relevant.',
     ].join(' '),
   ]

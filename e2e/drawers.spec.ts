@@ -102,7 +102,7 @@ test('Show in drawers links the same page from another drawer; deleting it in on
   await expect(nav(page).locator('.section', { hasText: 'Projects' })).toBeVisible()
   await shared.click()
   await expect(page.locator('.page-title')).toContainText('Alpha')
-  await expect(page.locator('.project-page')).toBeVisible()
+  await expect(page.locator('.item-view')).toBeVisible()
   // Opening it keeps the drawer it was opened from.
   await expect(picker(page)).toHaveAccessibleName('Drawer: Research')
   await expect(shared).toHaveClass(/selected/)
@@ -122,7 +122,7 @@ test('Show in drawers links the same page from another drawer; deleting it in on
   await page.getByRole('menuitem', { name: 'Delete' }).click()
   await expect.poll(() => wikiText('drawers/Work.md')).not.toContain('Alpha')
   // The page itself is never deleted with its link.
-  expect(await wikiText('projects/Alpha.md')).toContain('folder: ~/alpha')
+  expect(await wikiText('pages/Alpha.md')).toContain('folder: ~/alpha')
 })
 
 test('Drawer settings: a logo, the shared folder and the drawers used; the Shared heading opens them', async ({ page }) => {

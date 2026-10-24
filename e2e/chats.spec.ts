@@ -206,5 +206,5 @@ test('the dialog adds a chat step with an agent', async ({ page }) => {
   await dialog.locator('input[name=label]').fill('term')
   await dialog.getByRole('button', { name: 'Add' }).click()
   await expect(tab(page, 'term')).toBeVisible()
-  expect(await fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')).toContain('- [term](chat:shell)\n')
+  expect(await fsp.readFile(wikiPage('pages/Alpha.md'), 'utf8')).toContain('- [term](chat:shell)\n')
 })

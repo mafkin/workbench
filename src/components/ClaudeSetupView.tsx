@@ -20,10 +20,10 @@ import type { ToastInput } from './Toast.tsx'
 type SectionId = 'skills' | 'mcp' | 'agents' | 'commands' | 'hooks' | 'plugins'
 
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; empty: string }[] = [
-  { id: 'skills', label: 'Skills', icon: Sparkles, empty: 'No skills. Yours go in ~/.claude/skills/<name>/SKILL.md, a project’s in .claude/skills/.' },
-  { id: 'mcp', label: 'MCP servers', icon: Plug, empty: 'No MCP servers. Add one with claude mcp add, or in a project’s .mcp.json.' },
-  { id: 'agents', label: 'Agents', icon: Bot, empty: 'No agents. Yours go in ~/.claude/agents/, a project’s in .claude/agents/.' },
-  { id: 'commands', label: 'Commands', icon: SquareSlash, empty: 'No commands. Yours go in ~/.claude/commands/, a project’s in .claude/commands/.' },
+  { id: 'skills', label: 'Skills', icon: Sparkles, empty: 'No skills. Yours go in ~/.claude/skills/<name>/SKILL.md, a folder’s in its .claude/skills/.' },
+  { id: 'mcp', label: 'MCP servers', icon: Plug, empty: 'No MCP servers. Add one with claude mcp add, or in a folder’s .mcp.json.' },
+  { id: 'agents', label: 'Agents', icon: Bot, empty: 'No agents. Yours go in ~/.claude/agents/, a folder’s in its .claude/agents/.' },
+  { id: 'commands', label: 'Commands', icon: SquareSlash, empty: 'No commands. Yours go in ~/.claude/commands/, a folder’s in its .claude/commands/.' },
   { id: 'hooks', label: 'Hooks', icon: Webhook, empty: 'No hooks. They go under "hooks" in a settings.json.' },
   { id: 'plugins', label: 'Plugins', icon: Puzzle, empty: 'No plugins. Add them in claude with /plugin.' },
 ]
@@ -320,7 +320,7 @@ export default function ClaudeSetupView({ profileId, profile, folder: fixed, dra
             <p className="setup-switch-hint">
               {folder
                 ? 'Switches work like /mcp in this folder.'
-                : `Switches set the ${drawerName} drawer’s defaults: off now in each of its projects, and in other folders before their first chat.`}{' '}
+                : `Switches set the ${drawerName} drawer’s defaults: off now in each of its items’ folders, and in other folders before their first chat.`}{' '}
               Running chats keep their servers until they restart.
             </p>
           )}

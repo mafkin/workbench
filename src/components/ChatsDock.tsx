@@ -13,7 +13,7 @@ import { agentEntries } from './AgentMenu.tsx'
 import { ChatPane } from './ChatPane.tsx'
 import { ContextMenu } from './ContextMenu.tsx'
 import { agentIcon } from './EntryIcon.tsx'
-import { InlineField } from './ProjectView.tsx'
+import { InlineField } from './ItemView.tsx'
 
 /** Where New chat starts: the item shown (its page and folder), else the drawer's own folder. */
 export type DockContext = { kind: 'item'; addr: ItemAddr; label: string; base: string; agent?: string } | { kind: 'drawer'; drawer: number; label: string; base: string }

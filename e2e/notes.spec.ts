@@ -140,7 +140,7 @@ test('search finds notes by their text', async ({ page }) => {
   await expect(page.getByLabel('Search notes')).toBeFocused()
   await expect(title(page)).toHaveText('Recent notes')
   // Ideas, Deploy plan, the daily template, the Runbook entry, Alpha's README (a note step), and the wiki's own
-  // pages: index.md, Workflow.md, projects/Alpha.md and projects/Beta.md.
+  // pages: index.md, Workflow.md, pages/Alpha.md and pages/Beta.md.
   await expect(page.locator('.search-results li')).toHaveCount(9)
   await page.keyboard.type('rollback')
   const hits = page.locator('.search-results li')

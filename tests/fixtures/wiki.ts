@@ -25,7 +25,7 @@ Words about this profile.
 - [[Ideas]]
 - [Runbook](~/repo/RUNBOOK.md)
 `,
-  'projects/Alpha.md': `---
+  'pages/Alpha.md': `---
 folder: ~/alpha
 ---
 # Alpha
@@ -37,7 +37,7 @@ folder: ~/alpha
 - [readme](README.md)
 - [build](<run:make all>)
 `,
-  'projects/Beta.md': `---
+  'pages/Beta.md': `---
 folder: ~/beta
 status: paused
 ---
@@ -55,7 +55,7 @@ accent: "#8fa58a"
 ## Games
 - [[Tuohi]]
 `,
-  'projects/Tuohi.md': '---\nfolder: ~/tuohi\n---\n# Tuohi\n\n## Workflow\n\n- [All files](files:)\n',
+  'pages/Tuohi.md': '---\nfolder: ~/tuohi\n---\n# Tuohi\n\n## Workflow\n\n- [All files](files:)\n',
 }
 
 export async function writeWiki(root: string, files: Record<string, string>) {

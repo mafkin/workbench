@@ -48,7 +48,7 @@ export function QuickSwitcher({ items, onClose }: { items: SwitchItem[]; onClose
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKey}
-            placeholder="Go to a project, step, note or chat, or do something…"
+            placeholder="Go to an entry, tab, note or chat, or do something…"
             aria-label="Quick switcher"
             role="combobox"
             aria-expanded="true"

@@ -46,7 +46,7 @@ import { NavPanel } from './components/NavPanel.tsx'
 import { Rail } from './components/Rail.tsx'
 import { ChatsDock, type DockContext } from './components/ChatsDock.tsx'
 import { NewNoteDialog } from './components/NewNoteDialog.tsx'
-import type { ProjectActions } from './components/ProjectView.tsx'
+import type { ItemActions } from './components/ItemView.tsx'
 import type { GitMark } from '../shared/git.ts'
 import { Toasts, useToasts } from './components/Toast.tsx'
 import * as api from './lib/api.ts'
@@ -705,7 +705,7 @@ export function App() {
     return marks
   }, [chatsApi?.list])
 
-  const projectActions = useMemo<ProjectActions>(
+  const projectActions = useMemo<ItemActions>(
     () => ({
       run,
       openDialog: setDialog,
@@ -1060,7 +1060,7 @@ export function App() {
         if (item.type !== 'folder') return
         for (const [i, step] of tabSteps(stepsOf(p, item)).entries()) {
           const outside = step.type === 'launch' || step.type === 'link'
-          const detail = outside ? (step.type === 'launch' ? 'Start in the project' : 'Open link') : where(addr)
+          const detail = outside ? (step.type === 'launch' ? 'Start in its folder' : 'Open link') : where(addr)
           items.push({
             id: `step:${entryId(item)}|${step.label}`,
             kind: 'step',
@@ -1080,7 +1080,7 @@ export function App() {
     for (const c of chatsApi?.list ?? []) items.push({ id: `chat:${c.id}`, kind: 'chat', label: chatName(c), detail: `${c.cwd} · ${c.state}`, run: () => chatsApi?.open(c) })
     items.push(
       { id: 'page:home', kind: 'page', label: 'Home', detail: 'Recent work and today', run: goHome },
-      { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your projects', run: () => navigate(SERVERS_KEY) },
+      { id: 'page:servers', kind: 'page', label: 'Servers', detail: 'What runs in your folders', run: () => navigate(SERVERS_KEY) },
     )
     // New note goes under the shown drawer's heading with the notes (the daily entry's), else its last one.
     const here = sectionsOf(p, drawer)

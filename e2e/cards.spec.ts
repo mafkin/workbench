@@ -5,7 +5,7 @@ import { page as wikiPage, resetFixture, SPAWN_LOG, WORK, writeWork } from './fi
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
 const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workflow' })
-const alphaPage = () => fsp.readFile(wikiPage('projects/Alpha.md'), 'utf8')
+const alphaPage = () => fsp.readFile(wikiPage('pages/Alpha.md'), 'utf8')
 
 /** Write the work profile with extra lines under Alpha (and Beta); the app picks up the hand edit. */
 async function withProjects(alpha: string, beta = '') {
@@ -24,7 +24,7 @@ test.beforeEach(async ({ page }) => {
 test('the project header is the card: description and pin write the page’s frontmatter; status is set from the nav', async ({ page }) => {
   await entry(page, 'Alpha').click()
   // Status, category and dates left the page (part 12): the header is the title, pin, path and description.
-  await expect(page.locator('.project-head')).toHaveText(/^Alpha~\/alpha$/)
+  await expect(page.locator('.item-head')).toHaveText(/^Alpha~\/alpha$/)
   await expect(page.getByRole('button', { name: /^Status/ })).toHaveCount(0)
   await expect(page.locator('.category-chip')).toHaveCount(0)
 

@@ -35,7 +35,7 @@ import { agentIcon, EntryIcon, TYPE_LABEL } from './EntryIcon.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
 import { NotesFolderHint } from './NotesFolderHint.tsx'
 import { NoteView } from './NoteView.tsx'
-import { ProjectView, type ProjectActions } from './ProjectView.tsx'
+import { ItemView, type ItemActions } from './ItemView.tsx'
 import { SearchView } from './SearchView.tsx'
 import type { ToastInput } from './Toast.tsx'
 
@@ -66,7 +66,7 @@ interface Props {
   activate: (addr: ItemAddr, item: NavItem) => void
   openExternally: (addr: ItemAddr, item: NavItem) => void
   startEditing: () => void
-  actions: ProjectActions
+  actions: ItemActions
   /** Recently opened, newest first, for Home. */
   recent: Recent[]
   openRecent: (r: Recent) => void
@@ -198,7 +198,7 @@ function Home({
       <OtherChats profile={profile} />
       <h2 className="section-label">Recent</h2>
       {rows.length === 0 ? (
-        <p className="none">Nothing opened yet. Pick a project on the left.</p>
+        <p className="none">Nothing opened yet. Pick something on the left.</p>
       ) : (
         <ul className="recent-list">
           {rows.map(({ r, icon, label, where }) => (
@@ -454,7 +454,7 @@ function EntryView({ addr, item, kicker, pane }: { addr: ItemAddr; item: NavItem
 
   if (item.type === 'folder') {
     return (
-      <ProjectView
+      <ItemView
         key={projectRef(item)}
         addr={addr}
         item={item}

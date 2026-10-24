@@ -1,6 +1,6 @@
 // A YAML profile as pages (part 11): `index.md` with the profile and the nav
 // (or the drawer list), `drawers/*.md`, one page per project under
-// `projects/`, `Workflow.md` and `agents/*.md`. Pure: it returns the files to
+// `pages/`, `Workflow.md` and `agents/*.md`. Pure: it returns the files to
 // write; the store writes them, never over a page that exists. The seed uses
 // it too, so a first run starts with pages.
 import { Document } from 'yaml'
@@ -77,7 +77,7 @@ export function migrateParsed(profile: Profile, opts: MigrateOptions): Migrated 
     }
   }
   const drawers = drawersOf(profile)
-  for (const d of drawers) for (const s of d.sections) walk(s.items, (it) => it.type === 'folder' && pageOf.set(it, free('projects', it.label)))
+  for (const d of drawers) for (const s of d.sections) walk(s.items, (it) => it.type === 'folder' && pageOf.set(it, free('pages', it.label)))
   for (const rel of pageOf.values()) count(rel)
   for (const d of drawers) if (hasDrawers(profile)) count(`drawers/${noteFileName(d.name)}`)
   for (const name of Object.keys(profile.agents ?? {})) count(`agents/${noteFileName(name)}`)

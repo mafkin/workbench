@@ -47,7 +47,7 @@ import { NoteView } from './NoteView.tsx'
 import type { ToastInput } from './Toast.tsx'
 
 /** What a project page needs from the app. */
-export interface ProjectActions {
+export interface ItemActions {
   run: (ops: Op[], undoLabel?: string) => Promise<boolean>
   openDialog: (d: DialogState) => void
   /** Start a launcher step, or open a link step in the browser. */
@@ -69,7 +69,7 @@ interface Props {
   profile: Profile
   profileId: string
   home: string
-  actions: ProjectActions
+  actions: ItemActions
   openFolder: (path: string) => void
   toast: (t: ToastInput) => void
 }
@@ -80,7 +80,7 @@ const describe = (s: StepItem) =>
     : s.type === 'link'
       ? s.url
       : s.type === 'chat'
-        ? `${s.agent === 'shell' ? 'Shell' : 'Claude'} in ${s.path ?? 'the project folder'}`
+        ? `${s.agent === 'shell' ? 'Shell' : 'Claude'} in ${s.path ?? 'the item’s folder'}`
         : s.type === 'files'
           ? 'The item’s folder'
           : s.type === 'git'
@@ -94,7 +94,7 @@ const PAGE_TAB = 'page:'
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-export function ProjectView({ addr, item, kicker, profile, profileId, home, actions, openFolder, toast }: Props) {
+export function ItemView({ addr, item, kicker, profile, profileId, home, actions, openFolder, toast }: Props) {
   const notes = useNotes()
   // Every step by its index in the page (ops address them so); the tabs leave out Git and Claude setup.
   const steps = stepsOf(profile, item)
@@ -174,7 +174,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
       e,
       agentEntries(profile.agents, {
         current: item.agent,
-        mark: 'this project',
+        mark: 'this item',
         run: (a) => setCard('agent', a === 'claude' ? null : a, `New chat in ${item.label} starts ${a === 'claude' ? 'Claude' : a}`),
         edit: () => chats.editAgents(base),
       }),
@@ -308,14 +308,14 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
     ) : null
 
   return (
-    <div className="page wide project-page" onContextMenuCapture={(e) => (lastPoint.current = { x: e.clientX, y: e.clientY })}>
+    <div className="page wide item-view" onContextMenuCapture={(e) => (lastPoint.current = { x: e.clientX, y: e.clientY })}>
       <div className="page-kicker card-kicker">
         {kicker}
         {(hasAgents || item.agent) && (
           <button
             className={cx('agent-chip', !item.agent && 'empty')}
             onClick={defaultAgentMenu}
-            title="The agent New chat starts in this project"
+            title="The agent New chat starts from this item"
             aria-label={`Agent for New chat: ${item.agent ?? 'Claude'}`}
           >
             <Sparkles size={11} />
@@ -329,7 +329,7 @@ export function ProjectView({ addr, item, kicker, profile, profileId, home, acti
           </button>
         )}
       </div>
-      <div className="project-head">
+      <div className="item-head">
         <h1 className="page-title">
           <EntryIcon type="folder" icon={item.icon} size={22} />
           {item.label}
