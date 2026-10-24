@@ -34,9 +34,9 @@ const labels = (profile: Profile, index: number) => stepsOf(profile, profile.sec
 describe('steps in the schema', () => {
   const profile = Profile.parse(parseDocument(SOURCE).toJS())
 
-  it('an older project without steps: shows All files, Git in a repository, Claude setup and the workflow', () => {
-    expect(labels(profile, 0)).toEqual(['All files', 'Claude setup', 'assets', 'modeling'])
-    expect(stepsOf(profile, profile.sections[0].items[0], true).map((s) => s.type)).toEqual(['files', 'git', 'setup', 'folder', 'launch'])
+  it('an older project without steps: shows All files and the workflow (Git and Claude setup are the rail’s)', () => {
+    expect(labels(profile, 0)).toEqual(['All files', 'assets', 'modeling'])
+    expect(stepsOf(profile, profile.sections[0].items[0]).map((s) => s.type)).toEqual(['files', 'folder', 'launch'])
     expect(labels(profile, 1)).toEqual(['rules'])
     expect(labels(profile, 2)).toEqual([])
   })
@@ -200,18 +200,18 @@ sections:
     return server.app.inject({ method: 'POST', url: '/api/open', headers, payload: { profile: 'work', rev, at: { section: 0, index }, step } })
   }
 
-  // Proj has no steps: of its own: All files and Claude setup (no repository) come before the workflow.
+  // Proj has no steps: of its own: All files comes before the workflow.
   it('opens a link step in the browser, by address', async () => {
-    expect((await open(5)).statusCode).toBe(200)
+    expect((await open(4)).statusCode).toBe(200)
     expect(spawned).toEqual([{ command: 'xdg-open', args: ['https://example.com/board'], cwd: undefined }])
   })
 
   it('does not open report or file steps outside the app', async () => {
-    expect((await open(6)).statusCode).toBe(422)
+    expect((await open(5)).statusCode).toBe(422)
   })
 
   it('starts a launcher step in the project folder, by address', async () => {
-    expect((await open(4)).statusCode).toBe(200)
+    expect((await open(3)).statusCode).toBe(200)
     expect(spawned).toEqual([{ command: 'blender', args: ['models/main.blend'], cwd: path.join(home, 'proj') }])
   })
 

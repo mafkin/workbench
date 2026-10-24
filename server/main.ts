@@ -38,7 +38,6 @@ import {
   projectRef,
   type NavItem,
   type Profile,
-  type StepItem,
   drawersOf,
 } from '../shared/config-schema.ts'
 
@@ -65,7 +64,6 @@ import { maskText } from './mask.ts'
 import { checkServer } from './mcp-check.ts'
 import { McpDefaults, setFoldersOff } from './mcp-switch.ts'
 import { pinnedSkills, pluginDirsIn, resolveSkills, SkillBundles, skillsPrompt } from './skills.ts'
-import { projectDates } from './project-dates.ts'
 import { Servers } from './servers.ts'
 import { Notes, type NoteEvent } from './notes.ts'
 import { absPath, browseRoots, realish, within } from './paths.ts'
@@ -280,7 +278,7 @@ export async function buildServer(opts: ServerOptions) {
       for (const op of ops) {
         if (!('at' in op) || !op.at || !STEP_OPS.has(op.op) || 'seed' in op) continue
         const item = getItem(before, op.at)
-        if (item?.type === 'folder' && !item.steps) Object.assign(op, { seed: await stepsFor(req.params.id, before, item) })
+        if (item?.type === 'folder' && !item.steps) Object.assign(op, { seed: stepsOf(before, item) })
       }
     }
     // A chat step's chat is found by its label: a rename moves the chat with it.
@@ -290,7 +288,7 @@ export async function buildServer(opts: ServerOptions) {
             if (op.op !== 'updateStep') return null
             const project = getItem(before, op.at)
             if (project?.type !== 'folder') return null
-            const old = (await stepsFor(req.params.id, before, project))[op.index]
+            const old = stepsOf(before, project)[op.index]
             const ref = projectRef(project)
             return old?.type === 'chat' && old.label !== op.step.label ? { from: stepSlot(ref, old.label), to: stepSlot(ref, String(op.step.label)) } : null
           }),
@@ -341,7 +339,7 @@ export async function buildServer(opts: ServerOptions) {
       await openItem(item, home, opts.spawn)
       return { ok: true }
     }
-    const s = item.type === 'folder' ? (await stepsFor(id, p.profile, item))[step] : undefined
+    const s = item.type === 'folder' ? stepsOf(p.profile, item)[step] : undefined
     if (!s || item.type !== 'folder') throw new StoreError('No such step', 404)
     const entry = stepEntry(itemBase(p.profile, item), s)
     if (entry.type !== 'launch' && entry.type !== 'link') throw new StoreError('This step opens in its tab', 422)
@@ -599,13 +597,6 @@ export async function buildServer(opts: ServerOptions) {
   const projectDrawer = (profile: Profile, projectPath: string) =>
     walkItems(profile).find((e) => e.item.type === 'folder' && e.item.path === projectPath)?.addr.drawer ?? 0
 
-  /** An item's steps; an older project's include Git only when its folder is in a repository, as its page shows them. */
-  async function stepsFor(profileId: string, profile: Profile, item: NavItem): Promise<StepItem[]> {
-    if (item.type !== 'folder' || item.steps) return stepsOf(profile, item)
-    const repo = item.path ? !!(await git.repo(profileId, item.path).catch(() => null)) : false
-    return stepsOf(profile, item, repo)
-  }
-
   app.post('/api/chats', async (req) => {
     const body = parse(ChatStart, req.body)
     const p = store.profile(body.profile)
@@ -630,7 +621,7 @@ export async function buildServer(opts: ServerOptions) {
       const cwd = await chatFolder(p.profile, item.path ?? '~', false)
       spec = { profile: body.profile, host: slot, slot, cwd, ...(await agentFor(body.profile, p.profile, drawer, item.agent, cwd, item.args)) }
     } else if (item.type === 'folder' && body.step !== undefined) {
-      const step = (await stepsFor(body.profile, p.profile, item))[body.step]
+      const step = stepsOf(p.profile, item)[body.step]
       if (step?.type !== 'chat') throw new StoreError('No such chat step', 404)
       const base = itemBase(p.profile, item)
       const entry = stepEntry(base, step) as typeof step
@@ -820,14 +811,6 @@ export async function buildServer(opts: ServerOptions) {
       ` remove the conflict markers, and say what you chose. Don't stage, commit or abort; I'll mark the files resolved myself.`
     const spec: ChatSpec = { profile: b.profile, host: projectHost(r.project.path), slot: null, cwd: r.dir, ...(await agentFor(b.profile, p.profile, projectDrawer(p.profile, r.project.path), r.project.agent, r.dir, [], r.project)) }
     return chats.start({ ...spec, prompt, label: 'Conflicts' })
-  })
-
-  // A project card's dates: when its folder was made and last worked on.
-  app.get('/api/projects/dates', async (req) => {
-    const { profile: id, path: raw } = parse(PathQuery, req.query)
-    const p = store.profile(id)
-    if (!p.profile) throw new StoreError('The profile file is broken', 423)
-    return projectDates(await chatFolder(p.profile, raw, true))
   })
 
   // Claude setup: what claude loads, for everywhere or for a folder of the

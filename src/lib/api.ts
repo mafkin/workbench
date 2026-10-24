@@ -102,9 +102,6 @@ export const openFile = (profile: string, path: string) => api('/api/files/open'
 /** The program a file opens in (the profile's openWith:, or Blender and Godot when installed); null for the default app. */
 export const openWithLabel = (profile: string, path: string) => api<{ label: string | null }>(`/api/files/open-with?${query({ profile, path })}`)
 export const openWith = (profile: string, path: string) => api<{ label: string }>('/api/files/open-with', { body: { profile, path } })
-/** When a project's folder was made and last worked on (git, else its files). */
-export const projectDates = (profile: string, path: string) =>
-  api<{ created: number | null; updated: number | null; source: 'git' | 'files' }>(`/api/projects/dates?${query({ profile, path })}`)
 /** A folder's size, added up on request. */
 export const folderSize = (profile: string, path: string) => api<FolderSize>(`/api/files/size?${query({ profile, path })}`)
 /** Names containing `q` below a folder, closed folders included. */

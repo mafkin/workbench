@@ -20,7 +20,6 @@ test('the rail: Settings gives the drawer a folder, which brings Files and Git; 
   await expect(rail(page).getByRole('button')).toHaveText(['Skills', 'MCP', 'Settings'])
   await tool(page, 'Drawer settings').click()
   await expect(title(page)).toHaveText('Drawer settings')
-  await expect(page.locator('.crumbs')).toContainText('Work/Drawer settings')
   await expect(tool(page, 'Drawer settings')).toHaveAttribute('aria-pressed', 'true')
   const form = page.getByRole('form', { name: 'Drawer settings' })
   await form.locator('input[name=drawerFolder]').fill('~/alpha')

@@ -9,7 +9,6 @@ import {
   CARD_FIELDS,
   drawersOf,
   entryAt,
-  expandHome,
   hasDrawers,
   legacySteps,
   noteFileName,
@@ -31,8 +30,6 @@ export interface Migrated {
 export interface MigrateOptions {
   id: string
   home: string
-  /** Whether a folder is inside a git repository (an old project without `steps:` then gets a Git tab); none = no. */
-  repo?: (folder: string) => boolean
   /** The wiki folder to use instead of the profile's `notes:` (or `<home>/notes`). */
   wiki?: string
 }
@@ -98,7 +95,7 @@ export function migrateParsed(profile: Profile, opts: MigrateOptions): Migrated 
     if (meta.status === 'active') meta.status = undefined
     if (meta.pinned === false) meta.pinned = undefined
     meta.servers = item.servers
-    const steps = item.steps ?? legacySteps(profile, !!item.path && !!opts.repo?.(expandHome(item.path, opts.home)))
+    const steps = item.steps ?? legacySteps(profile)
     const body = `# ${item.label}\n${item.description ? `\n${item.description}\n` : ''}${steps.length ? `\n## Workflow\n\n${steps.map((s) => `- ${md.linkOf(s, ctx, true)}`).join('\n')}\n` : ''}`
     files[rel] = metaBlock(meta) + body
   }

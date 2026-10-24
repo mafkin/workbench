@@ -120,7 +120,7 @@ interface Props {
   folder?: string
   /** The drawer whose MCP defaults the switches show and set (the rail); the project's own drawer when left out. */
   drawer?: number
-  /** Only these kinds (the rail's Skills or MCP view); one kind hides the kind tabs. */
+  /** Only these kinds (the rail's MCP view is `mcp`; its Skills view everything else); one kind hides the kind tabs. */
   kinds?: SectionId[]
   /** The profile's rev, for switching a drawer's defaults. */
   rev?: string

@@ -281,7 +281,7 @@ export class Wiki extends EventEmitter {
         const clash = (w: string) => taken.some((t) => t === w || t.startsWith(`${w}${path.sep}`) || w.startsWith(`${t}${path.sep}`))
         let wiki = defaultWiki(e.profile)
         if (!e.profile.notes && clash(absPath(wiki, this.home))) wiki = `~/notes-${id}`
-        const out = migrateProfile(text, { id, home: this.home, wiki, repo: (folder) => inRepo(folder) })
+        const out = migrateProfile(text, { id, home: this.home, wiki })
         const root = absPath(out.wiki, this.home)
         if (taken.includes(root)) throw new StoreError(`${id} and another profile would share ${out.wiki}`, 409)
         for (const [rel, content] of Object.entries(out.files)) {
@@ -1170,17 +1170,6 @@ function parseStep(input: ItemInput): StepItem {
 }
 
 const exists = (p: string) => fsp.access(p).then(() => true, () => false)
-
-/** Whether a folder is inside a git repository (a `.git` here or above). */
-function inRepo(folder: string): boolean {
-  let dir = folder
-  for (;;) {
-    if (fs.existsSync(path.join(dir, '.git'))) return true
-    const parent = path.dirname(dir)
-    if (parent === dir) return false
-    dir = parent
-  }
-}
 
 const readDisk: Reader = (abs) =>
   fsp.readFile(abs, 'utf8').catch((err: NodeJS.ErrnoException) => {

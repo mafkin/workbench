@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, CLAUDE_SECRETS, HOME, resetFixture, WORK_FILE, writeClaudeSetup } from './fixture.ts'
+import { ALPHA, CLAUDE_SECRETS, HOME, resetFixture, WORK_DRAWER, WORK_FILE, writeClaudeSetup, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -11,17 +11,18 @@ const rows = (page: Page) => page.getByRole('listbox').getByRole('option')
 const option = (page: Page, name: string) => rows(page).filter({ has: page.locator('.setup-row-title', { hasText: new RegExp(`^${name}$`) }) })
 const details = (page: Page) => page.getByLabel('Details')
 
-/** The rail's Skills or MCP view: what claude loads everywhere, for the Work drawer (which has no folder). */
+const rail = (page: Page) => page.getByRole('complementary', { name: 'Drawer tools' })
+
+/** The rail's Skills or MCP view: what claude loads for the Work drawer (everywhere until it has a folder). */
 async function openRail(page: Page, tool: 'Skills' | 'MCP') {
-  await page.getByRole('complementary', { name: 'Drawer tools' }).getByRole('button', { name: tool, exact: true }).click()
+  await rail(page).getByRole('button', { name: tool, exact: true }).click()
   await expect(page.locator('.page-title')).toHaveText(tool === 'MCP' ? 'MCP servers' : 'Skills')
 }
 
-/** Alpha's Claude setup tab: every kind, for its folder. */
-async function openAlphaSetup(page: Page) {
-  await entry(page, 'Alpha').click()
-  await page.getByRole('tablist', { name: 'Workflow' }).getByRole('tab', { name: 'Claude setup' }).click()
-  await expect(page.locator('.crumbs')).toContainText('Alpha/Claude setup')
+/** Give the Work drawer Alpha's folder: the rail then shows what claude loads in ~/alpha. */
+async function alphaDrawer(page: Page) {
+  await writeWork(WORK_DRAWER)
+  await expect(rail(page).getByRole('button', { name: 'Files', exact: true })).toBeVisible()
 }
 
 test.beforeEach(async ({ page }) => {
@@ -33,7 +34,6 @@ test.beforeEach(async ({ page }) => {
 
 test('the rail opens Skills for the drawer; a skill shows its file and body', async ({ page }) => {
   await openRail(page, 'Skills')
-  await expect(page.locator('.crumbs')).toContainText('Work/Skills')
   await expect(page.locator('.setup-for')).toContainText('everywhere')
   await expect(rows(page)).toHaveCount(4)
   await option(page, '/review').click()
@@ -76,9 +76,9 @@ test('Check starts an MCP server and lists its tools; secrets never reach the pa
   await expect(option(page, 'search').locator('.check-dot.bad')).toBeVisible({ timeout: 10_000 })
   await expect(option(page, 'broken').locator('.check-dot.bad')).toBeVisible()
 
-  // Everything the views show, and every response they got.
+  // Everything the views show (the drawer folder's items too), and every response they got.
+  await alphaDrawer(page)
   await openRail(page, 'Skills')
-  await openAlphaSetup(page)
   for (const kindName of ['Skills', 'Agents', 'Commands', 'Hooks', 'Plugins']) await kind(page, kindName).click()
   const html = await page.content()
   for (const s of CLAUDE_SECRETS) {
@@ -88,13 +88,13 @@ test('Check starts an MCP server and lists its tools; secrets never reach the pa
   expect(responses.length).toBeGreaterThan(3)
 })
 
-test("a project's Claude setup tab adds its own and local items; an unapproved server asks first", async ({ page }) => {
-  await openAlphaSetup(page)
+test("the rail shows the drawer folder's own and local items; an unapproved server asks first", async ({ page }) => {
+  await alphaDrawer(page)
+  await openRail(page, 'Skills')
   await expect(page.locator('.setup-for')).toContainText('~/alpha')
-  await kind(page, 'Skills').click()
   await expect(option(page, '/alpha-notes').locator('.scope-badge')).toHaveText('Project')
 
-  await kind(page, 'MCP servers').click()
+  await openRail(page, 'MCP')
   await expect(option(page, 'scratch').locator('.scope-badge')).toHaveText('Local')
   await expect(option(page, 'alpha-db')).toContainText('not approved')
   await option(page, 'alpha-db').click()
@@ -106,19 +106,22 @@ test("a project's Claude setup tab adds its own and local items; an unapproved s
   await expect(details(page).getByRole('status')).toContainText('fake-mcp')
   await expect(details(page).locator('.tool-list')).toContainText(`Runs in ${ALPHA}`)
 
+  // The other kinds sit behind the Skills view's tabs.
+  await openRail(page, 'Skills')
   await kind(page, 'Hooks').click()
   await expect(option(page, 'Stop').locator('.scope-badge')).toHaveText('Project')
   await option(page, 'PreToolUse · Bash').click()
   await expect(details(page).locator('.setup-log')).toHaveText('guard.sh --token ••••••')
-  await page.screenshot({ path: 'test-results/setup-project-tab.png' })
+  await page.screenshot({ path: 'test-results/setup-rail-hooks.png' })
 
-  // The tab is remembered for the project.
+  // The rail view is remembered.
   await page.reload()
   await expect(page.locator('.setup-for')).toContainText('~/alpha')
 })
 
 test('a plugin’s details jump to what it brings', async ({ page }) => {
-  await openAlphaSetup(page)
+  await alphaDrawer(page)
+  await openRail(page, 'Skills')
   await kind(page, 'Plugins').click()
   await option(page, 'toolkit').click()
   await expect(details(page)).toContainText('Handy tools for every project')
@@ -139,10 +142,9 @@ const offInAlpha = () => {
   return json.projects?.[ALPHA]?.disabledMcpServers ?? []
 }
 
-test('a switch turns an MCP server off in the project, like /mcp; off servers fold away; Undo', async ({ page }) => {
-  await entry(page, 'Alpha').click()
-  await page.getByRole('tablist', { name: 'Workflow' }).getByRole('tab', { name: 'Claude setup' }).click()
-  await kind(page, 'MCP servers').click()
+test('a switch turns an MCP server off in the drawer folder, like /mcp; off servers fold away; Undo', async ({ page }) => {
+  await alphaDrawer(page)
+  await openRail(page, 'MCP')
   await expect(page.locator('.setup-switch-hint')).toContainText('like /mcp')
   await option(page, 'tools').getByRole('switch').click()
   await expect(page.locator('.toast')).toContainText('tools off here')

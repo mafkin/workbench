@@ -55,7 +55,7 @@ test('Set up context from the nav; its notes open in tabs', async ({ page }) => 
   await page.screenshot({ path: 'test-results/context-notes.png' })
 
   await row(page, 'Knowledge').click()
-  await expect(page.locator('.crumbs')).toContainText('Context/Knowledge')
+  await expect(page.locator('.page-title')).toHaveText('Knowledge')
   await expect(page.getByRole('tree', { name: 'Files' })).toBeVisible()
 })
 
@@ -82,7 +82,7 @@ test('Send to inbox copies a file; the badge counts it and the inbox lists it', 
   await expect(row(page, 'Inbox').locator('.inbox-count')).toHaveText('1')
   await page.screenshot({ path: 'test-results/context-inbox-badge.png' })
   await page.locator('.toast').getByRole('button', { name: 'Open inbox' }).click()
-  await expect(page.locator('.crumbs')).toContainText('Context/Inbox')
+  await expect(page.locator('.page-title')).toHaveText('Inbox')
   await expect(fileRow(page, 'README.md')).toBeVisible()
 })
 

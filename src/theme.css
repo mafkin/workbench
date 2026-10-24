@@ -684,44 +684,13 @@ button {
   overflow: hidden;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 45px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-  flex: none;
-}
-
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.crumbs button {
-  border: 0;
-  padding: 0;
-  background: none;
-  color: var(--muted);
-}
-
-.crumbs button:hover {
-  color: var(--text);
-}
-
-.crumbs .current {
-  color: var(--text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.crumbs .sep {
-  color: var(--faint);
+/* Back floats in the pane's corner: the page starts at the top, with no bar above it. */
+.back-float {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 2;
+  background: var(--bg);
 }
 
 .content {
@@ -881,6 +850,13 @@ button {
 
 .search-box input::placeholder {
   color: var(--faint);
+}
+
+/* The notes search lives in the sidebar, under the drawer picker. */
+.nav-search {
+  width: 100%;
+  margin-top: 8px;
+  background: var(--bg);
 }
 
 .note-page {
@@ -1838,35 +1814,6 @@ button {
   gap: 8px;
 }
 
-.card-kicker .sep {
-  color: var(--faint);
-}
-
-.category-chip {
-  --category: var(--muted);
-  height: 20px;
-  padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--category) 45%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--category) 14%, transparent);
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.category-chip.empty {
-  border-style: dashed;
-  border-color: var(--border-strong);
-  background: transparent;
-  color: var(--faint);
-}
-
-.category-chip:hover {
-  border-color: var(--accent-line);
-}
-
 .category-dot {
   width: 9px;
   height: 9px;
@@ -1894,24 +1841,6 @@ button {
 .status-dot.archived {
   border: 1px solid var(--faint);
   background: transparent;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.status-pill:hover {
-  border-color: var(--accent-line);
-  color: var(--text);
 }
 
 .pin-btn {
@@ -4351,12 +4280,6 @@ button {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
-}
-
-.card-dates {
-  margin: -4px 0 0;
-  color: var(--faint);
-  font-size: 12px;
 }
 
 /* Servers: marks on project rows, the line on the card, and the Servers page. */

@@ -7,8 +7,6 @@ import { EntryIcon, isIconName, TYPE_ICON, TYPE_LABEL } from './EntryIcon.tsx'
 // For a step, paths are inside the item's folder (or home, for an item without one).
 const STEP_HINTS: Partial<Record<AnyType, string>> = {
   files: 'The item’s folder in the file browser.',
-  git: 'Changes, commits, branches and history of the item’s repository.',
-  setup: 'What claude loads in the item’s folder: skills, MCP servers and more.',
   folder: 'A folder in the project, like assets. It opens in the browser.',
   note: 'A note in the project, like docs/design.md. It opens in place, with Edit.',
   report: 'An HTML file in the project, like reports/index.html. Shown in the tab, with the files next to it.',
@@ -52,7 +50,8 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
   const initial = dialog.mode === 'edit' ? dialog.item : step?.item
   const adding = dialog.mode === 'add' || (step !== null && step.index === undefined)
   // Entries have no kind to pick: a new one is a blank item (or a group, from Add group…), and an old one keeps its type.
-  const types: readonly AnyType[] = step ? STEP_TYPES : []
+  // Git and Claude setup are the drawer's tools (the rail), not tabs you add.
+  const types: readonly AnyType[] = step ? STEP_TYPES.filter((t) => t !== 'git' && t !== 'setup') : []
   const noun = step ? 'step' : initial?.type === 'group' || (dialog.mode === 'add' && dialog.presetType === 'group') ? 'group' : initial && initial.type !== 'folder' ? 'entry' : 'item'
   const preset = dialog.mode === 'add' ? dialog.presetType : step?.presetType
 
@@ -245,7 +244,7 @@ export function ItemDialog({ dialog, agents, onClose, onSubmit }: Props) {
                 }
                 name="path"
               />
-              {fieldError('path') ?? pathHint() ?? (!step && type === 'folder' ? <span className="hint">Without one, the item holds notes, links, launchers and chats; a file browser, Git or Claude setup step asks for it.</span> : null)}
+              {fieldError('path') ?? pathHint() ?? (!step && type === 'folder' ? <span className="hint">Without one, the item holds notes, links, launchers and chats; a file browser step asks for it.</span> : null)}
             </label>
           )}
 

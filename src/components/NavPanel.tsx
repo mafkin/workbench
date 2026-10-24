@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
+import { BookOpen, FolderInput, Server, Settings2, UserRound, ChevronDown, ExternalLink, FilePlus, FolderPlus, GripVertical, IdCard, Inbox, Palette, Pencil, Pin, Play, Plus, Search, Sparkles, Trash2, Workflow, type LucideIcon } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { chatProgram, CONTEXT_LABEL, drawerIndex, drawersOf, entrySlot, findShared, itemKey, projectHost, projectRef, type ContextFolder, type Drawer, type ItemAddr, type ListAddr, type NavItem, type Op, type Profile, type ProfileState, type Section,
   profileFile,
@@ -55,6 +55,11 @@ interface Props extends NavActions {
   onSwitch: (id: string) => void
   onResizeStart: (e: React.PointerEvent) => void
   onHome: () => void
+  /** The notes search: typing opens the search view in the main pane; Enter opens its first hit. */
+  search: { open: boolean; query: string }
+  setSearch: (s: { open: boolean; query: string }) => void
+  searchRef: React.RefObject<HTMLInputElement | null>
+  firstHit: React.RefObject<string | null>
   /** Open the theme and background panel. */
   onLook: () => void
   onProfileSettings: () => void
@@ -162,7 +167,8 @@ function dropTarget(over: DropData, sections: Section[], drawer: number): { to: 
 }
 
 export function NavPanel(props: Props) {
-  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook } = props
+  const { active, profiles, editing, setEditing, connection, onSwitch, onResizeStart, onHome, onLook, search, setSearch, searchRef, firstHit } = props
+  const notesApi = useNotes()
   const profile = active.profile
   const drawers = profile ? drawersOf(profile) : []
   const drawer = Math.min(props.drawer, Math.max(0, drawers.length - 1))
@@ -259,7 +265,7 @@ export function NavPanel(props: Props) {
       <div className="nav-top">
         <div className="brand">
           <span className="brand-mark" />
-          <button className="btn ghost" style={{ height: 22, padding: '0 4px', fontWeight: 600 }} onClick={onHome}>
+          <button className="btn ghost" style={{ height: 22, padding: '0 4px', fontWeight: 600 }} onClick={onHome} title="Home: recent work and today" aria-label="Home">
             WORKBENCH
           </button>
           <span className="spacer" />
@@ -290,6 +296,28 @@ export function NavPanel(props: Props) {
             <ChevronDown size={13} className="chev" />
           </button>
         )}
+        <label className="search-box nav-search">
+          <Search size={13} />
+          <input
+            ref={searchRef}
+            value={search.query}
+            placeholder="Search notes"
+            aria-label="Search notes"
+            onFocus={() => !search.open && setSearch({ ...search, open: true })}
+            onChange={(e) => setSearch({ open: true, query: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setSearch({ ...search, open: false })
+                e.currentTarget.blur()
+              } else if (e.key === 'Enter' && firstHit.current) {
+                notesApi.open(firstHit.current)
+                e.currentTarget.blur()
+              }
+            }}
+          />
+          {!search.open && <span className="kbd">Ctrl+Shift+F</span>}
+        </label>
       </div>
 
       {active.error && (

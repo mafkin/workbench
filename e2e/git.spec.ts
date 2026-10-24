@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ALPHA, closeChats, DIR, HOME, resetFixture } from './fixture.ts'
+import { ALPHA, closeChats, DIR, HOME, resetFixture, WORK_DRAWER, writeWork } from './fixture.ts'
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Navigation' })
 const entry = (page: Page, label: string) => nav(page).locator('.item', { hasText: label })
@@ -23,15 +23,17 @@ const lines = (edit: (l: string[]) => void) => {
   return `${l.join('\n')}\n`
 }
 
+// Git is the drawer's tool on the rail; the fixture's drawer has Alpha's folder.
+const railGit = (page: Page) => page.getByRole('complementary', { name: 'Drawer tools' }).getByRole('button', { name: 'Git', exact: true })
 const openGit = async (page: Page) => {
-  await entry(page, 'Alpha').click()
-  await page.getByRole('tab', { name: /^Git/ }).click()
+  await railGit(page).click()
   await expect(page.locator('.git-branch')).toContainText('main')
 }
 
 test.beforeEach(async ({ page }) => {
   await closeChats()
   await resetFixture()
+  await writeWork(WORK_DRAWER)
   fs.rmSync(REMOTE, { recursive: true, force: true })
   fs.rmSync(OTHER, { recursive: true, force: true })
   fs.writeFileSync(path.join(HOME, '.gitconfig'), '[user]\n\tname = Tester\n\temail = tester@example.com\n[init]\n\tdefaultBranch = main\n')
@@ -136,17 +138,17 @@ test('a pull that conflicts: the banner, Ask claude, and Abort', async ({ page }
 
   await banner.getByRole('button', { name: 'Ask claude about notes.txt' }).click()
   await expect(page.locator('.chat-terminal .xterm-rows')).toContainText('prompt=This repository has merge conflicts')
-  await page.getByRole('tab', { name: /^Git/ }).click()
+  await railGit(page).click()
   await page.getByRole('alert', { name: 'Conflicts' }).getByRole('button', { name: 'Abort merge' }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Abort merge' }).click()
   await expect(page.getByRole('alert', { name: 'Conflicts' })).toHaveCount(0)
   expect(fs.readFileSync(path.join(ALPHA, 'notes.txt'), 'utf8')).toContain('ours')
 })
 
-test('Ctrl+K opens a project’s Git tab', async ({ page }) => {
+test('Ctrl+K opens the drawer’s Git', async ({ page }) => {
   await page.keyboard.press('Control+k')
-  await page.keyboard.type('alpha git')
-  await page.getByRole('option', { name: /Alpha › Git/ }).first().click()
-  await expect(page.getByRole('tab', { name: /^Git/ })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.type('git')
+  await page.getByRole('option', { name: /^Git/ }).first().click()
+  await expect(railGit(page)).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('.git-branch')).toContainText('main')
 })

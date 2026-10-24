@@ -102,7 +102,7 @@ test('Show in drawers links the same page from another drawer; deleting it in on
   await expect(nav(page).locator('.section', { hasText: 'Projects' })).toBeVisible()
   await shared.click()
   await expect(page.locator('.page-title')).toContainText('Alpha')
-  await expect(page.getByRole('tablist', { name: 'Workflow' })).toBeVisible()
+  await expect(page.locator('.project-page')).toBeVisible()
   // Opening it keeps the drawer it was opened from.
   await expect(picker(page)).toHaveAccessibleName('Drawer: Research')
   await expect(shared).toHaveClass(/selected/)
@@ -144,7 +144,6 @@ test('Drawer settings: a logo, the shared folder and the drawers used; the Share
   const sharedHeading = nav(page).getByRole('group', { name: 'Shared' })
   await expect(sharedHeading.locator('.item')).toHaveText(['Workthis drawer', 'Research'])
   await sharedHeading.locator('.item', { hasText: 'Research' }).click()
-  await expect(page.locator('.crumbs')).toContainText('research')
   await expect(page.getByRole('tree', { name: 'Files' })).toBeVisible()
   await expect(sharedHeading.locator('.item', { hasText: 'Research' })).toHaveClass(/selected/)
 })

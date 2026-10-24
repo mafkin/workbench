@@ -1,6 +1,5 @@
 // Shared by the e2e server and tests: a throwaway config and its contents.
 import { execFileSync } from 'node:child_process'
-import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { migrateProfile } from '../server/migrate.ts'
@@ -71,6 +70,9 @@ sections:
         type: note
         path: ~/repo/RUNBOOK.md
 `
+
+/** The work profile as one drawer whose folder is Alpha's: the rail's Files, Git, Skills and MCP act on ~/alpha. */
+export const WORK_DRAWER = WORK.replace(/^sections:\n([\s\S]*)$/m, (_, body: string) => `drawers:\n  - name: Work\n    folder: ~/alpha\n    sections:\n${body.replace(/^(?=.)/gm, '    ')}`)
 
 // Personal has no notes folder, to show the hint.
 export const PERSONAL = `name: Personal
@@ -180,12 +182,12 @@ export async function resetFixture() {
     await fsp.writeFile(path.join(HOME, rel), text)
   }
   // The YAML above is the fixture's spec; the app reads it as wikis (~/notes and ~/pnotes).
-  await migrateFixture(DIR, HOME, { defaultWiki: () => '~/pnotes', repo: (folder) => fs.existsSync(path.join(folder, '.git')) })
+  await migrateFixture(DIR, HOME, { defaultWiki: () => '~/pnotes' })
 }
 
 /** A hand edit of the work profile: the YAML is the fixture's language, written into the wiki as pages (the app picks them up). */
 export async function writeWork(yaml: string, id = 'work') {
-  const { wiki, files } = migrateProfile(yaml, { id, home: HOME, wiki: id === 'work' ? '~/notes' : '~/pnotes', repo: (folder) => fs.existsSync(path.join(folder, '.git')) })
+  const { wiki, files } = migrateProfile(yaml, { id, home: HOME, wiki: id === 'work' ? '~/notes' : '~/pnotes' })
   const root = path.join(HOME, wiki.slice(2))
   // index.md last: once it changes, the pages it links must already be there.
   const { 'index.md': index, ...rest } = files

@@ -150,8 +150,8 @@ export const CARD_FIELDS = ['description', 'status', 'category', 'pinned', 'agen
  * an optional folder, its card (description, status, category, pinned), the
  * agent profile New chat starts there (`agent`, default plain claude) and its
  * steps, the tabs of its page. Without `steps:` (an older project) it shows
- * All files, Git (in a repository), Claude setup and the profile's `workflow:`;
- * an empty `steps:` means a blank item. One without a folder has an `id`.
+ * All files and the profile's `workflow:`; an empty `steps:` means a blank
+ * item. One without a folder has an `id`.
  */
 /** A server a project names, for a health check and to show "down" when it is not running. */
 export const ServerDecl = z
@@ -620,20 +620,25 @@ export function joinNotes(root: string, rel: string): string {
 // Workflow steps
 
 /**
- * An item's steps: its own, or for an older project without `steps:`, the tabs
- * it always had: All files, Git (when its folder is in a repository), Claude
- * setup, then the profile's workflow.
+ * An item's steps: its own, or for an older project without `steps:`, All
+ * files and the profile's workflow. Git and Claude setup are the drawer's
+ * tools (the rail) since part 12: `git:` and `setup:` lines in a page still
+ * parse, but the page shows no tab for them.
  */
-export function stepsOf(profile: Profile, item: NavItem, repo = false): StepItem[] {
+export function stepsOf(profile: Profile, item: NavItem): StepItem[] {
   if (item.type !== 'folder') return []
-  return item.steps ?? legacySteps(profile, repo)
+  return item.steps ?? legacySteps(profile)
 }
 
-export function legacySteps(profile: Profile, repo: boolean): StepItem[] {
-  const builtIn: StepItem[] = [{ label: 'All files', type: 'files' }, ...(repo ? [{ label: 'Git', type: 'git' as const }] : []), { label: 'Claude setup', type: 'setup' }]
+export function legacySteps(profile: Profile): StepItem[] {
+  const builtIn: StepItem[] = [{ label: 'All files', type: 'files' }]
   // A workflow saved from an item may hold built-in steps too; these come first, as the folder allows.
   return [...builtIn, ...profile.workflow.filter((s) => !(FOLDER_STEPS as readonly string[]).includes(s.type))]
 }
+
+/** The steps a page shows as tabs: Git and Claude setup moved to the drawer's rail. */
+export const RAIL_STEPS: readonly StepItem['type'][] = ['git', 'setup']
+export const tabSteps = (steps: StepItem[]) => steps.filter((s) => !RAIL_STEPS.includes(s.type))
 
 type ItemLike = { label: string; path?: string; id?: string }
 

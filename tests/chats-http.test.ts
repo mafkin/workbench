@@ -77,15 +77,15 @@ describe('chat routes', { timeout: 15_000 }, () => {
     const adhoc = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 } })
     expect(adhoc.status).toBe(200)
     expect(adhoc.body).toMatchObject({ host: 'project:~/alpha', slot: null, agent: 'claude', cwd: '~/alpha', state: 'running' })
-    // Alpha has no steps: of its own: All files and Claude setup come before the workflow.
+    // Alpha has no steps: of its own: All files comes before the workflow.
 
-    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     expect(step.body).toMatchObject({ host: 'project:~/alpha', slot: 'step:~/alpha|agent', cwd: '~/alpha' })
-    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     expect(again.body.id).toBe(step.body.id)
     await until(() => server.chats.text(step.body.id).includes('args=["--model","opus"'), 'the step args')
 
-    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 3 })
+    const shell = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
     expect(shell.body).toMatchObject({ agent: 'shell', cwd: '~/alpha/src', session: null })
 
     const entry = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 1 } })
@@ -195,14 +195,14 @@ describe('chat routes', { timeout: 15_000 }, () => {
   })
 
   test('renaming a chat step in the app keeps its chat', async () => {
-    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const step = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     const renamed = await call('POST', '/api/profiles/work/ops', {
       rev: rev(),
-      ops: [{ op: 'updateStep', at: { section: 0, index: 0 }, index: 2, step: { label: 'claude', type: 'chat', args: ['--model', 'opus'] } }],
+      ops: [{ op: 'updateStep', at: { section: 0, index: 0 }, index: 1, step: { label: 'claude', type: 'chat', args: ['--model', 'opus'] } }],
     })
     expect(renamed.status).toBe(200)
     expect(server.chats.get(step.body.id)?.slot).toBe('step:~/alpha|claude')
-    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 2 })
+    const again = await call<Chat>('POST', '/api/chats', { profile: 'work', rev: rev(), at: { section: 0, index: 0 }, step: 1 })
     expect(again.body.id).toBe(step.body.id)
   })
 

@@ -80,7 +80,7 @@ export async function writeSettings(dir: string, profiles: Record<string, string
  * notes folder gets `defaultWiki(id)` (else `<home>/notes`). Profiles already
  * in settings as wikis are kept.
  */
-export async function migrateFixture(cfg: string, home: string, opts: { repo?: (folder: string) => boolean; defaultWiki?: (id: string) => string } = {}) {
+export async function migrateFixture(cfg: string, home: string, opts: { defaultWiki?: (id: string) => string } = {}) {
   const dir = path.join(cfg, 'profiles')
   const ids = (await fsp.readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith('.yaml')).map((f) => f.slice(0, -5))
   const settings = (parseYaml((await fsp.readFile(path.join(cfg, 'settings.yaml'), 'utf8').catch(() => '')) || '{}') ?? {}) as { activeProfile?: string; profiles?: string[] | Record<string, string> }
@@ -90,7 +90,7 @@ export async function migrateFixture(cfg: string, home: string, opts: { repo?: (
   for (const id of order) {
     const text = await fsp.readFile(path.join(dir, `${id}.yaml`), 'utf8')
     const wiki = /^notes:/m.test(text) ? undefined : opts.defaultWiki?.(id)
-    const out = migrateProfile(text, { id, home, repo: opts.repo, wiki })
+    const out = migrateProfile(text, { id, home, wiki })
     profiles[id] = out.wiki
     const root = out.wiki.startsWith('~') ? path.join(home, out.wiki.slice(1)) : out.wiki
     await writeWiki(root, out.files)

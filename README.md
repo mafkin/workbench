@@ -159,7 +159,7 @@ You review code. Don't edit files.
   - Deletes can be undone from the toast that appears.
 - **Right-click** any heading or entry for the same actions.
 - **Launchers** and **links** start or open from the small button at the end of their row (▶ or ↗), without a shell; their names are just text. Folders and notes open in the main pane when you click them.
-- **Alt+←** or the back arrow in the top bar goes back to the previous page.
+- **Alt+←** or the small arrow in the page's top-left corner goes back to the previous page. The **WORKBENCH** label in the sidebar is Home.
 - **Home** shows what you opened last (projects and their steps, notes, folders) and today's note. It doesn't repeat the nav.
 
 ### Drawers
@@ -189,22 +189,16 @@ You review code. Don't edit files.
 
 ### Items: cards and steps
 
-- **Add entry…** makes an **item**: a name, and optionally a folder. It starts blank, with buttons for **File browser**, **Note**, **Git**, **Claude setup** and **More…** (every kind of step). You add what it needs, and each step is a tab.
+- **Add entry…** makes an **item**: a name, and optionally a folder. It starts blank, with buttons for **File browser**, **Note** and **More…** (every kind of step). You add what it needs, and each step is a tab.
   - An item with one step shows it on the whole page, without a tab row; **+** by the title adds the next one. From two tabs on (steps or chats) the tab row is back.
-  - File browser, Git and Claude setup show the item's folder. An item without one asks for it the first time you add one of these, and keeps it.
+  - The file browser shows the item's folder. An item without one asks for it the first time you add it, and keeps it. Git and Claude setup are the drawer's tools on the rail, not tabs.
   - **Remove tab** (right-click a tab, or Delete on it) takes away only the tab. Its folder or file stays on disk, and the toast has Undo. With no steps left the item is blank again.
   - Entries made before items (folders, notes, launchers, links, chats, daily) keep working as they are. A `type: folder` entry is an item too.
-- The top of an item's page is its card:
-  - a **category** chip (pick one or make a new one),
-  - a **status** (active, paused, done, archived),
-  - a **pin**,
-  - a **description** you click to edit.
-- **Under the description:** when the folder was created and last updated (the last commit in a git repository, else the newest file), and how many servers are running there.
-- **Categories** get colours from the category menu (**Colour of …**: a palette or any colour), saved in `categories:`.
-- **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, mark it or archive it.
+- The top of an item's page is its card: the heading it sits under, the agent and skills chips for its chats, the title with a **pin** and the folder, and a **description** you click to edit. Nothing else: no status, category, dates or git line (they went in part 12's cleanup).
+- **In the nav,** each project shows its status as a dot, pinned projects come first in their heading, and archived ones hide until you click **N archived · Show**. While you edit the nav, the real order shows. Right-click a project to pin it, **Mark** it paused or done, or archive it; that is where status lives. `category:` and `categories:` are still read from the files but no longer shown.
 - Below the card are its tabs. The first is **Page**: the item's own page (`projects/<Name>.md`), with its properties, its text (a log, links, anything) and the pages that mention it, editable in place. An item with one tab shows that tab on the whole page and no row, so the Page tab appears from two on.
 - The steps:
-  - **File browser** (`files`), **Git** (`git`) and **Claude setup** (`setup`) show the item's folder, its repository and what claude loads there.
+  - **File browser** (`files`) shows the item's folder. `git:` and `setup:` lines from before part 12 are kept in the page but get no tab: Git and Claude setup are on the rail.
   - A **folder** step shows that folder in the browser, with **Create folder** if it doesn't exist yet.
   - A **note** step shows the note in place, with Edit and autosave.
   - A **report** step shows an HTML page (a test or analysis report) with its own styles and scripts. It runs in a sandbox, cut off from Workbench.
@@ -239,7 +233,7 @@ You review code. Don't edit files.
 - An agent profile is a way to start claude: model and effort, permission mode, instructions added to its system prompt, a first prompt, extra folders, allowed and blocked tools, and an MCP config file. Prepare them in **New chat ▾ › Agent profiles…**; they're saved under `agents:` in the profile's YAML (comments kept), and you can write them by hand too.
 - A profile can name one of your **Claude Code agents** (`~/.claude/agents` or the project's `.claude/agents`), such as an orchestrator. Then its model and effort are left to that agent.
 - Pick one when you start a chat: **New chat ▾** lists Claude, your agent profiles and Shell; **Chat here as…** in the file browser and **New chat as…** in the nav menu do the same for a folder or a project.
-- **New chat** itself starts the project's default: click the agent chip next to the category in the project header to set it (`agent:` on the folder entry). Chat steps and chat entries name theirs in `agent:` (`claude`, `shell` or a profile's name).
+- **New chat** itself starts the project's default: click the agent chip in the project header to set it (`agent:` on the folder entry). Chat steps and chat entries name theirs in `agent:` (`claude`, `shell` or a profile's name).
 - The chat's bar shows the profile it started with (`Reviewer · opus · plan`). **Bypass permissions** shows a warning in the editor and a shield on its chats' tabs and bar.
 - A chat keeps the settings it started with: **Resume** uses them, **New session** uses the profile as it is now (and sends its first prompt again), and Summarize and continue keeps the flags but not the first prompt.
 - Renaming a profile updates everything that names it. A profile still in use can't be deleted; the message says where it's used.
@@ -276,7 +270,7 @@ You review code. Don't edit files.
   - or the **plugin** that brings it.
 - Two places show it:
   - **The rail** on the right edge (part 12) has **Skills** and **MCP** for the drawer you're in: what claude loads in the drawer's folder (everywhere, when the drawer has no folder). The rail also has **Files** and **Git** for that folder and the drawer's **Settings**.
-  - **The tab:** an item's **Claude setup** step (an older project has one after All files) shows every kind, for its folder: skills, MCP servers, agents, commands, hooks and plugins.
+  - **The rail's Skills view** also holds agents, commands, hooks and plugins behind its kind tabs, for the drawer's folder.
 - **Overridden** items are dimmed and say what claude uses instead: a skill of the same name in a nearer scope, or a local MCP server over a project or user one. A skill also wins over a command of the same name.
 - **MCP servers** show their state:
   - **On**,
@@ -332,7 +326,7 @@ An item's **Git** step shows its folder's repository, with its count of changed 
   - **Abort merge** goes back to how things were.
 - **Stashes:** **Stash…** in Changes. Each stash has **Pop**, and right-click for Apply and Drop.
 - **History:** the branch's last 200 commits, with **Load more**. Click a commit for its message, files and diffs; right-click it to copy its hash.
-- **In the nav,** a project shows a small dot for uncommitted changes, ↑ for commits to push and ↓ for commits to pull, in red when there are conflicts. The card shows the branch and the same counts; click it to open the Git tab. **Ctrl+K** has "<project> › Git".
+- **In the nav,** a project shows a small dot for uncommitted changes, ↑ for commits to push and ↓ for commits to pull, in red when there are conflicts. **Git** on the rail opens the drawer folder's repository; **Ctrl+K** has it too.
 
 ### Notes
 
@@ -341,7 +335,7 @@ An item's **Git** step shows its folder's repository, with its count of changed 
 - A note changed on disk (another editor, `git pull`) reloads while it's open. If you have unsaved edits at that moment, autosave pauses and a banner offers **Reload from disk** or **Keep mine**.
 - **New note…** in the right-click menu of a heading or group creates `<notes>/<Title>.md` and its entry in one step.
 - `[[Name]]` links to the note with that file name in the notes folder (`[[folder/Name]]`, `[[Name|shown text]]` and `[[Name#Heading]]`, which scrolls to the heading, work too). A link to a note that doesn't exist yet looks faint; clicking it offers to create the note. Relative links like `[x](other.md)` open in the app too.
-- **Search** (the box in the top bar, **Ctrl+Shift+F**) finds notes containing every word you type, across the notes folder and your note entries. With no words it lists notes by date. **Enter** opens the first result.
+- **Search** (the box in the sidebar under the drawer picker, **Ctrl+Shift+F**) finds notes containing every word you type, across the notes folder and your note entries. With no words it lists notes by date. **Enter** opens the first result.
 - A **daily** entry opens today's note, `<notes>/daily/YYYY-MM-DD.md`, creating it from `<notes>/templates/daily.md` the first time (`{{date}}` and `{{title}}` are filled in). The arrows step to other days. Left open past midnight, it moves to the new day.
 - **Task boxes** (`- [ ]`) tick in the formatted view too; the change saves like an edit.
 - **Code blocks** are coloured for JavaScript and TypeScript (with JSX), JSON, CSS, HTML and Markdown; other languages stay plain.

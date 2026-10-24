@@ -41,7 +41,7 @@ test('Ctrl+K goes to entries, steps and notes, and runs actions', async ({ page 
   await expect(page.getByRole('tablist', { name: 'Workflow' }).getByRole('tab', { name: 'readme' })).toHaveAttribute('aria-selected', 'true')
 
   await quick(page, 'deploy plan', /Deploy plan/)
-  await expect(page.locator('.crumbs')).toContainText('Deploy plan')
+  await expect(page.locator('.page-title')).toHaveText('Deploy plan')
 
   await quick(page, 'theme', /Theme and background/)
   await expect(page.getByRole('dialog', { name: 'Theme and background' })).toBeVisible()
@@ -93,16 +93,15 @@ test('Profile settings rename the profile and add and remove profiles', async ({
 
 test('the selection and Recent work follow an entry moved by hand', async ({ page }) => {
   await entry(page, 'Ideas').click()
-  await expect(page.locator('.crumbs')).toContainText('Ideas')
+  await expect(page.locator('.markdown h1')).toHaveText('Ideas')
   // Move Ideas to the top of Projects in the file itself.
   const moved = WORK.replace('      - label: Ideas\n        type: note\n        path: ~/notes/Ideas.md\n', '').replace('    items:\n      # first entry comment\n', '    items:\n      - { label: Ideas, type: note, path: ~/notes/Ideas.md }\n      # first entry comment\n')
   expect(moved).not.toBe(WORK)
   await writeWork(moved)
   await expect(nav(page).locator('.section', { hasText: 'Projects' }).locator('.item').first()).toContainText('Ideas')
   await expect(entry(page, 'Ideas')).toHaveClass(/selected/)
-  await expect(page.locator('.crumbs')).toContainText('Projects')
   await page.reload()
   await expect(entry(page, 'Ideas')).toHaveClass(/selected/)
-  await page.locator('.crumbs').getByRole('button').first().click()
+  await page.getByRole('button', { name: 'Home', exact: true }).click()
   await expect(page.locator('.home-page')).toContainText('Ideas')
 })

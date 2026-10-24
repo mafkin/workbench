@@ -36,9 +36,10 @@ test('servers: a project’s running server shows in the nav, the card and the p
   await expect(entry(page, 'Alpha').locator('.server-mark')).toHaveAttribute('aria-label', '1 server running')
   await expect(entry(page, 'Beta').locator('.server-mark.down')).toHaveAttribute('aria-label', '1 down')
 
+  // The Servers page opens from the nav header (the card's line went with part 12's cleanup).
   await entry(page, 'Alpha').click()
-  await page.getByRole('button', { name: '1 server running' }).click()
-  await expect(page.locator('.crumbs')).toContainText('Servers')
+  await page.getByRole('button', { name: 'Servers', exact: true }).click()
+  await expect(page.locator('.page-title')).toHaveText('Servers')
   const alpha = page.getByRole('region', { name: 'Alpha' })
   await expect(alpha.locator('.server-row')).toContainText(`:${port}`)
   await expect(alpha.locator('.server-row')).toContainText('node')

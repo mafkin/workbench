@@ -457,7 +457,7 @@ describe('profiles and settings', () => {
       expect(await w.migrate()).toEqual({ moved: ['work'] })
       expect(w.legacy).toBe(false)
       expect(await fsp.readFile(path.join(lhome, 'notes/index.md'), 'utf8')).toBe('---\nname: Work\naccent: "#7d93ab"\n---\n## Projects\n\n- [[Alpha]]\n- [Today](daily:)\n')
-      expect(await fsp.readFile(path.join(lhome, 'notes/projects/Alpha.md'), 'utf8')).toBe('---\nfolder: ~/alpha\nstatus: paused\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [Claude setup](setup:)\n- [readme](README.md)\n')
+      expect(await fsp.readFile(path.join(lhome, 'notes/projects/Alpha.md'), 'utf8')).toBe('---\nfolder: ~/alpha\nstatus: paused\n---\n# Alpha\n\n## Workflow\n\n- [All files](files:)\n- [readme](README.md)\n')
       expect(await fsp.readFile(path.join(lhome, 'notes/agents/Reviewer.md'), 'utf8')).toBe('---\nmodel: opus\n---\n')
       expect(await fsp.readFile(path.join(legacy, 'cfg/settings.yaml'), 'utf8')).toContain('profiles:\n  work: ~/notes\n')
       await fsp.access(path.join(legacy, 'cfg/profiles/work.yaml.bak'))

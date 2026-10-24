@@ -14,11 +14,6 @@ async function withProjects(alpha: string, beta = '') {
   return text
 }
 
-async function pick(page: Page, button: string, item: string) {
-  await page.getByRole('button', { name: button }).click()
-  await page.getByRole('menuitem', { name: item, exact: true }).click()
-}
-
 test.beforeEach(async ({ page }) => {
   await resetFixture()
   await page.goto('/')
@@ -26,17 +21,12 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.dot.live')).toBeVisible()
 })
 
-test('the project header is the card: status, category, description and pin write the page’s frontmatter', async ({ page }) => {
+test('the project header is the card: description and pin write the page’s frontmatter; status is set from the nav', async ({ page }) => {
   await entry(page, 'Alpha').click()
-  await pick(page, 'Status: Active', 'Paused')
-  await expect(page.getByRole('button', { name: 'Status: Paused' })).toBeVisible()
-  await expect(entry(page, 'Alpha').locator('.status-dot')).toHaveClass(/paused/)
-
-  await page.getByRole('button', { name: 'Category' }).click()
-  await page.getByRole('menuitem', { name: 'New category…' }).click()
-  await page.getByLabel('New category').fill('client')
-  await page.keyboard.press('Enter')
-  await expect(page.locator('.category-chip')).toHaveText('client')
+  // Status, category and dates left the page (part 12): the header is the title, pin, path and description.
+  await expect(page.locator('.project-head')).toHaveText(/^Alpha~\/alpha$/)
+  await expect(page.getByRole('button', { name: /^Status/ })).toHaveCount(0)
+  await expect(page.locator('.category-chip')).toHaveCount(0)
 
   await page.getByText('Add a description').click()
   await page.getByLabel('Description').fill('The alpha project')
@@ -48,10 +38,12 @@ test('the project header is the card: status, category, description and pin writ
   await page.screenshot({ path: 'test-results/cards-header.png' })
 
   await expect.poll(alphaPage).toContain('pinned: true')
-  expect(await alphaPage()).toMatch(/^---\nfolder: ~\/alpha\nstatus: paused\ncategory: client\ndescription: The alpha project\npinned: true\n---\n# Alpha\n/)
+  expect(await alphaPage()).toMatch(/^---\nfolder: ~\/alpha\ndescription: The alpha project\npinned: true\n---\n# Alpha\n/)
 
-  await pick(page, 'Status: Paused', 'Active')
-  await expect.poll(alphaPage).not.toContain('status:')
+  await entry(page, 'Alpha').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Mark paused' }).click()
+  await expect(entry(page, 'Alpha').locator('.status-dot')).toHaveClass(/paused/)
+  await expect.poll(alphaPage).toContain('status: paused')
 })
 
 test('the nav puts pinned projects first and hides archived ones until asked', async ({ page }) => {
@@ -120,5 +112,5 @@ test('a new entry is an item with no kind to pick; the step dialog offers every 
 
   await entry(page, 'Alpha').click()
   await tabs(page).getByRole('button', { name: 'Add step' }).click()
-  await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['File browser', 'Folder', 'Note', 'Git', 'Claude setup', 'Report', 'File', 'Chat', 'Launcher', 'Link'])
+  await expect(page.getByRole('form', { name: 'Add step' }).getByRole('radio')).toHaveText(['File browser', 'Folder', 'Note', 'Report', 'File', 'Chat', 'Launcher', 'Link'])
 })

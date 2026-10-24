@@ -21,6 +21,7 @@ import {
   sectionsOf,
   sharedRefs,
   stepsOf,
+  tabSteps,
   themeOf,
   walkItems,
   type AppState,
@@ -127,6 +128,8 @@ export function App() {
   const [fresh, setFresh] = useState<string | null>(null)
   const [recent, setRecent] = useLocal<Record<string, Recent[]>>('recent', {})
   const searchRef = useRef<HTMLInputElement>(null)
+  // The first hit of the search shown, which Enter in the search box opens.
+  const firstHit = useRef<string | null>(null)
   const toasts = useToasts()
 
   useEffect(() => followState(setState, setConnection), [])
@@ -718,12 +721,9 @@ export function App() {
         const item = activeRef.current?.profile ? getItem(activeRef.current.profile, addr) : undefined
         if (item) remember(itemKey(addr), item.label, label, entryId(item))
       },
-      servers: (path) => serverMarks.get(path),
-      openServers: () => navigate(SERVERS_KEY),
-      git: (path) => gitMarks.get(path),
       gitChanged: () => gitLoad.current(),
     }),
-    [run, fail, toasts.push, remember, serverMarks, gitMarks, navigate],
+    [run, fail, toasts.push, remember],
   )
 
   const itemMenu = useCallback(
@@ -1058,16 +1058,9 @@ export function App() {
         const verb = item.type === 'launch' ? 'Start ' : item.type === 'link' ? 'Open ' : ''
         items.push({ id: `entry:${entryId(item)}`, kind: 'entry', label: `${verb}${item.label}`, detail: where(addr), run: () => activate(addr, item) })
         if (item.type !== 'folder') return
-        const mark = item.path ? gitMarks.get(item.path) : undefined
-        for (const [i, step] of stepsOf(p, item, !!mark).entries()) {
+        for (const [i, step] of tabSteps(stepsOf(p, item)).entries()) {
           const outside = step.type === 'launch' || step.type === 'link'
-          const detail = outside
-            ? step.type === 'launch'
-              ? 'Start in the project'
-              : 'Open link'
-            : step.type === 'git' && mark
-              ? [mark.branch ?? 'detached', mark.changed && `${mark.changed} changed`].filter(Boolean).join(' · ')
-              : where(addr)
+          const detail = outside ? (step.type === 'launch' ? 'Start in the project' : 'Open link') : where(addr)
           items.push({
             id: `step:${entryId(item)}|${step.label}`,
             kind: 'step',
@@ -1157,6 +1150,10 @@ export function App() {
                 onSwitch={switchProfile}
                 onResizeStart={onResizeStart}
                 onHome={goHome}
+                search={search}
+                setSearch={setSearch}
+                searchRef={searchRef}
+                firstHit={firstHit}
                 onLook={() => setLookOpen(true)}
               onServers={() => navigate(SERVERS_KEY)}
               serversActive={selection?.kind === 'servers'}
@@ -1178,7 +1175,7 @@ export function App() {
                 selected={selection}
                 search={search}
                 setSearch={setSearch}
-                searchRef={searchRef}
+                firstHit={firstHit}
                 canGoBack={search.open || history.length > 0}
                 onBack={back}
                 openFolder={openFolder}
