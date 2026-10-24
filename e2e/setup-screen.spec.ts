@@ -24,7 +24,8 @@ test('the setup screen makes the folder with a first profile and one drawer, rem
   const nav = page.getByRole('navigation', { name: 'Navigation' })
   await expect(nav.getByRole('button', { name: 'Drawer: Studio' })).toBeVisible()
   await expect(nav.getByRole('group', { name: 'Studio' })).toBeVisible()
-  await expect(nav.locator('.item')).toHaveCount(0)
+  // No entries (the Context block's own button is an .item too).
+  await expect(nav.locator('.item:not(.context-setup)')).toHaveCount(0)
   await expect(page.getByRole('complementary', { name: 'Drawer tools' }).getByRole('button')).toHaveText(['Files', 'Git', 'Skills', 'MCP', 'Settings'])
   await page.screenshot({ path: 'test-results/setup-done.png' })
 
